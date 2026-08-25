@@ -1,0 +1,180 @@
+package web
+
+import (
+	"crypto/sha256"
+	"encoding/json"
+	"fish-controller/internal/hub"
+	"fish-controller/internal/identity"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/gorilla/websocket"
+)
+
+func TestOtaEndpointServesFirmwareAndSendsVerifiedMetadata(t *testing.T) {
+	firmware := []byte{0xE9, 0x01, 0x02, 0x03}
+	path := t.TempDir() + "/firmware.bin"
+	if err := os.WriteFile(path, firmware, 0600); err != nil {
+		t.Fatal(err)
+	}
+	h := hub.New()
+	connection := &captureConn{}
+	h.Register(hub.Device{ID: "fish-1"}, connection)
+	handler := NewHandlerWithFirmware(h, testKey(), path)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/firmware/current.bin", nil))
+	if w.Code != 200 || string(w.Body.Bytes()) != string(firmware) {
+		t.Fatalf("固件下载异常: %d", w.Code)
+	}
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/ota", strings.NewReader(`{"deviceId":"fish-1"}`)))
+	if w.Code != 200 || len(connection.sent) != 1 {
+		t.Fatalf("OTA 命令异常: %d %s", w.Code, w.Body.String())
+	}
+	message := connection.sent[0].(map[string]any)
+	payload := message["payload"].(map[string]any)
+	expected := fmt.Sprintf("%x", sha256.Sum256(firmware))
+	if message["command"] != "ota.start" || payload["sha256"] != expected || payload["size"] != len(firmware) {
+		t.Fatalf("OTA 元数据错误: %#v", message)
+	}
+}
+
+type captureConn struct{ sent []any }
+
+func (c *captureConn) WriteJSON(v any) error { c.sent = append(c.sent, v); return nil }
+func (c *captureConn) Close() error          { return nil }
+
+func testKey() []byte { return make([]byte, 32) }
+
+func TestHealthAndDashboard(t *testing.T) {
+	handler := NewHandler(hub.New(), testKey())
+	for _, tc := range []struct{ path, contains string }{{"/healthz", "ok"}, {"/", "机器鱼控制台"}} {
+		r := httptest.NewRequest("GET", tc.path, nil)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		if w.Code != 200 || !strings.Contains(w.Body.String(), tc.contains) {
+			t.Fatalf("%s 返回异常: %d %s", tc.path, w.Code, w.Body.String())
+		}
+	}
+}
+
+func TestVisionRoutesUseConfiguredProxy(t *testing.T) {
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/status" {
+			t.Fatalf("视觉路径 = %q", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"state":"running"}`))
+	}))
+	defer api.Close()
+	stream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("video"))
+	}))
+	defer stream.Close()
+
+	handler := NewHandlerWithVision(hub.New(), testKey(), api.URL, stream.URL)
+	r := httptest.NewRequest(http.MethodGet, "/api/vision/status", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+	if w.Code != http.StatusOK || w.Body.String() != `{"state":"running"}` {
+		t.Fatalf("视觉代理返回异常: %d %q", w.Code, w.Body.String())
+	}
+}
+
+func TestVisionDeviceCommandRoutesToOnlyConnectedFish(t *testing.T) {
+	h := hub.New()
+	connection := &captureConn{}
+	h.Register(hub.Device{ID: "fish-1"}, connection)
+	handler := NewHandler(h, testKey())
+	body := `{"operation":"update","sessionId":"session-1","sequence":7,"crossTrackError":0.2,"headingErrorDeg":-12,"distanceToTarget":0.8,"speed":0.1,"curvature":0.3,"brake":false}`
+	r := httptest.NewRequest(http.MethodPost, "/api/vision/device-command", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("状态=%d body=%s", w.Code, w.Body.String())
+	}
+	if len(connection.sent) != 1 {
+		t.Fatalf("发送数量=%d", len(connection.sent))
+	}
+	message := connection.sent[0].(map[string]any)
+	if message["command"] != "vision.update" {
+		t.Fatalf("命令=%v", message["command"])
+	}
+	payload := message["payload"].(map[string]any)
+	if payload["sequence"] != uint32(7) || payload["headingErrorDeg"] != -12.0 {
+		t.Fatalf("载荷=%+v", payload)
+	}
+}
+
+func TestDynamicChallengeRegistersDevice(t *testing.T) {
+	key := make([]byte, 32)
+	h := hub.New()
+	testServer := httptest.NewServer(NewHandler(h, key))
+	defer testServer.Close()
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(testServer.URL, "http")+"/ws/device", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetReadDeadline(time.Now().Add(time.Second))
+	var challenge struct {
+		Type, Nonce     string
+		ProtocolVersion int
+	}
+	if err := conn.ReadJSON(&challenge); err != nil {
+		t.Fatalf("读取挑战失败: %v", err)
+	}
+	proof, err := identity.Proof(key, "fish-websocket-v1", challenge.Nonce, "AC:27:6E:7C:37:18")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = conn.WriteJSON(map[string]any{"type": "register", "protocolVersion": 1, "deviceId": "AC:27:6E:7C:37:18", "proof": proof, "name": "测试鱼", "ip": "192.168.137.117", "firmwareVersion": "1.1.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result map[string]any
+	if err := conn.ReadJSON(&result); err != nil || result["success"] != true {
+		t.Fatalf("注册失败: %#v %v", result, err)
+	}
+	if devices := h.List(); len(devices) != 1 || !devices[0].Online {
+		t.Fatalf("设备未进入在线列表: %+v", devices)
+	}
+}
+
+func TestDashboardServesReactApplication(t *testing.T) {
+	handler := NewHandler(hub.New(), testKey())
+	r := httptest.NewRequest("GET", "/", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+	body := w.Body.String()
+	if !strings.Contains(body, `id="root"`) || !strings.Contains(body, `<script type="module"`) {
+		t.Fatalf("首页没有提供 React 应用入口: %s", body)
+	}
+}
+
+func TestMotionCommandIncludesBiasAndRequestID(t *testing.T) {
+	h := hub.New()
+	c := &captureConn{}
+	h.Register(hub.Device{ID: "fish-1"}, c)
+	handler := NewHandler(h, testKey())
+	body := `{"deviceId":"fish-1","mode":"left","frequency":2.5,"amplitude":28,"bias":-8}`
+	r := httptest.NewRequest("POST", "/api/command", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+	if w.Code != 200 || len(c.sent) != 1 {
+		t.Fatalf("命令发送失败: %d %s", w.Code, w.Body.String())
+	}
+	message := c.sent[0].(map[string]any)
+	payload := message["payload"].(map[string]any)
+	if payload["bias"] != -8.0 || message["requestId"] == "" {
+		t.Fatalf("命令缺少偏置或请求 ID: %#v", message)
+	}
+	var response map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil || response["requestId"] == "" || response["sent"] != true {
+		t.Fatalf("响应缺少发送结果: %s", w.Body.String())
+	}
+}

@@ -60,4 +60,3 @@ ESP32 联网后每 3 秒向所在子网广播带 HMAC 证明的 `device.announce
 5. 必要时降低 `vision/config.py` 中的 `MJPEG_STREAM_WIDTH`、`MJPEG_STREAM_HEIGHT`、`MJPEG_MAX_FPS` 或 JPEG 质量。
 
 当前默认视频为 960×540、最高 30 FPS、JPEG 质量 50。MJPEG 简单且延迟可控，但每一帧都是完整 JPEG；通过无线网络或 FRP 时，带宽和抖动通常比局域网更明显。正式远程使用前应实测带宽与端到端延迟，不能只以本机画面流畅度作为结论。
-
