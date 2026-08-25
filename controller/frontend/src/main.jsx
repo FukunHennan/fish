@@ -2,6 +2,7 @@ import { StrictMode, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 import "./maintenance.css";
+import "./rename.css";
 import VisionPanel from "./VisionPanel.jsx";
 
 const MODE_LABELS = {
@@ -9,6 +10,7 @@ const MODE_LABELS = {
   0: "停止", 1: "待机", 2: "前进", 3: "左转", 4: "右转",
 };
 const ACTIONS = [["left", "左转"], ["forward", "前进"], ["right", "右转"], ["idle", "IDLE"]];
+const ALIAS_STORAGE_KEY = "fish-controller-device-aliases-v1";
 
 function clamp(value, min, max, fallback) {
   const number = Number(value);
@@ -28,10 +30,18 @@ function formatTime(value) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString("zh-CN", { hour12: false });
 }
+function loadAliases() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(ALIAS_STORAGE_KEY) || "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch { return {}; }
+}
+function normalizeDeviceName(value) { return String(value || "").trim().toLocaleLowerCase(); }
 
 function App() {
   const [page, setPage] = useState("control");
   const [devices, setDevices] = useState([]);
+  const [aliases, setAliases] = useState(loadAliases);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [otaSelectedIds, setOtaSelectedIds] = useState(() => new Set());
   const [query, setQuery] = useState("");
@@ -47,6 +57,9 @@ function App() {
   const [firmwareFile, setFirmwareFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [otaFeedback, setOtaFeedback] = useState("请选择电脑上的 firmware.bin，并选择升级目标");
+  const [renameDevice, setRenameDevice] = useState(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [renameError, setRenameError] = useState("");
 
   const onlineDevices = useMemo(() => devices.filter((device) => device.online), [devices]);
   const selectedDevices = useMemo(() => devices.filter((device) => selectedIds.has(device.deviceId)), [devices, selectedIds]);
@@ -66,7 +79,8 @@ function App() {
         if (!response.ok) throw new Error("控制器接口不可用");
         const data = await response.json();
         if (!active) return;
-        const next = Array.isArray(data) ? data : [];
+        const raw = Array.isArray(data) ? data : [];
+        const next = raw.map((device) => ({ ...device, name: aliases[device.deviceId] || device.name }));
         setDevices(next);
         setError("");
         const valid = new Set(next.map((device) => device.deviceId));
@@ -79,7 +93,7 @@ function App() {
     load();
     const timer = window.setInterval(load, 1000);
     return () => { active = false; window.clearInterval(timer); };
-  }, []);
+  }, [aliases]);
 
   useEffect(() => {
     let active = true;
@@ -116,6 +130,32 @@ function App() {
     const matches = onlineDevices.filter((device) => (device.group || device.groupName || device.tags?.group) === groupName);
     if (!matches.length) { setFeedback(`当前没有在线的 ${groupName} 组设备`); return; }
     setSelectedIds(new Set(matches.map((device) => device.deviceId)));
+  }
+
+  function openRename(device) {
+    setRenameDevice(device);
+    setRenameDraft(deviceLabel(device));
+    setRenameError("");
+  }
+  function closeRename() {
+    setRenameDevice(null);
+    setRenameDraft("");
+    setRenameError("");
+  }
+  function saveRename() {
+    if (!renameDevice) return;
+    const nextName = renameDraft.trim();
+    if (!nextName) { setRenameError("设备名称不能为空"); return; }
+    if (nextName.length > 24) { setRenameError("设备名称最多 24 个字符"); return; }
+    const normalized = normalizeDeviceName(nextName);
+    const duplicate = devices.some((device) => device.deviceId !== renameDevice.deviceId && normalizeDeviceName(deviceLabel(device)) === normalized);
+    if (duplicate) { setRenameError("该名称已被其他设备使用，请换一个名称"); return; }
+    const nextAliases = { ...aliases, [renameDevice.deviceId]: nextName };
+    localStorage.setItem(ALIAS_STORAGE_KEY, JSON.stringify(nextAliases));
+    setAliases(nextAliases);
+    setDevices((current) => current.map((device) => device.deviceId === renameDevice.deviceId ? { ...device, name: nextName } : device));
+    setFeedback(`${deviceLabel(renameDevice)} 已重命名为 ${nextName}`);
+    closeRename();
   }
 
   async function sendCommand(device, mode, override = null) {
@@ -310,10 +350,25 @@ function App() {
                 <dt>最后在线</dt><dd>{formatTime(device.lastSeen)}</dd>
                 <dt>停止原因</dt><dd>{device.stopReason || "无"}</dd>
               </dl>
+              <div className="device-card-actions"><button type="button" onClick={() => openRename(device)}>✎ 重命名设备</button></div>
             </article>)}</div>
           </aside>
         </div>
       )}
+
+      {renameDevice && <div className="rename-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeRename(); }}>
+        <section className="rename-dialog" role="dialog" aria-modal="true" aria-labelledby="rename-title">
+          <div className="rename-dialog-head"><div><span className="eyebrow">RENAME DEVICE</span><h2 id="rename-title">重命名设备</h2></div><button className="rename-close" onClick={closeRename} aria-label="关闭">×</button></div>
+          <div className="rename-dialog-body">
+            <label className="rename-field"><span>设备名称</span><input autoFocus maxLength="24" value={renameDraft} onChange={(event) => { setRenameDraft(event.target.value); setRenameError(""); }} onKeyDown={(event) => { if (event.key === "Enter") saveRename(); }} /></label>
+            {renameError && <p className="rename-error">{renameError}</p>}
+            <div className="rename-readonly"><span>MAC 地址 · 不可修改</span><b>{renameDevice.mac || renameDevice.deviceId || "—"}</b></div>
+            <div className="rename-readonly"><span>Device ID · 不可修改</span><b>{renameDevice.deviceId || "—"}</b></div>
+            <p className="rename-note">名称必须全局唯一；比较时忽略大小写，例如 Fish01、fish01、FISH01 会被视为同名。</p>
+          </div>
+          <div className="rename-dialog-actions"><button onClick={closeRename}>取消</button><button className="save" onClick={saveRename}>保存名称</button></div>
+        </section>
+      </div>}
 
       <footer className="app-footer"><span>{page === "control" ? "页面 1 / 控制台：视觉与运动控制" : "页面 2 / OTA·设置：固件维护与设备信息"}</span><span>{page === "control" ? `控制目标 ${selectedOnline.length} 台` : `OTA 目标 ${otaSelectedDevices.length} 台`}</span></footer>
     </main>
