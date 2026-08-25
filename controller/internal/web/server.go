@@ -10,6 +10,7 @@ import (
 	"fish-controller/internal/identity"
 	"fish-controller/internal/visionproxy"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"net/http"
@@ -25,10 +26,14 @@ import (
 //go:embed dist
 var frontendFiles embed.FS
 
+const maxFirmwareSize int64 = 8 << 20
+
 type server struct {
 	hub          *hub.Hub
 	key          []byte
 	firmwarePath string
+	firmwareName string
+	firmwareMu   sync.RWMutex
 }
 
 type deviceConn struct {
@@ -61,7 +66,10 @@ func defaultFirmwarePath() string {
 	if path := os.Getenv("FISH_FIRMWARE_BIN"); path != "" {
 		return path
 	}
-	for _, path := range []string{filepath.Join("..", "firmware", ".pio", "build", "seeed_xiao_esp32c3", "firmware.bin"), filepath.Join("firmware", ".pio", "build", "seeed_xiao_esp32c3", "firmware.bin")} {
+	for _, path := range []string{
+		filepath.Join("..", "firmware", ".pio", "build", "seeed_xiao_esp32c3", "firmware.bin"),
+		filepath.Join("firmware", ".pio", "build", "seeed_xiao_esp32c3", "firmware.bin"),
+	} {
 		if _, err := os.Stat(path); err == nil {
 			return path
 		}
@@ -69,8 +77,19 @@ func defaultFirmwarePath() string {
 	return ""
 }
 
+func uploadedFirmwarePath() string {
+	base, err := os.UserConfigDir()
+	if err != nil || base == "" {
+		base = os.TempDir()
+	}
+	return filepath.Join(base, "fish-controller", "firmware", "current.bin")
+}
+
 func newHandler(h *hub.Hub, key []byte, apiAddress, streamAddress, firmwarePath string) http.Handler {
 	s := &server{hub: h, key: append([]byte(nil), key...), firmwarePath: firmwarePath}
+	if firmwarePath != "" {
+		s.firmwareName = filepath.Base(firmwarePath)
+	}
 	m := http.NewServeMux()
 	visionHandler, err := visionproxy.New(apiAddress, streamAddress)
 	if err != nil {
@@ -86,6 +105,7 @@ func newHandler(h *hub.Hub, key []byte, apiAddress, streamAddress, firmwarePath 
 	m.HandleFunc("/api/devices", s.devices)
 	m.HandleFunc("/api/command", s.command)
 	m.HandleFunc("/api/ota", s.ota)
+	m.HandleFunc("/api/firmware", s.firmwareAPI)
 	m.HandleFunc("/api/firmware/current.bin", s.firmware)
 	m.HandleFunc("/api/vision/device-command", s.visionDeviceCommand)
 	m.Handle("/api/vision/", visionHandler)
@@ -93,18 +113,123 @@ func newHandler(h *hub.Hub, key []byte, apiAddress, streamAddress, firmwarePath 
 	return m
 }
 
+func (s *server) firmwareSnapshot() (string, string) {
+	s.firmwareMu.RLock()
+	defer s.firmwareMu.RUnlock()
+	return s.firmwarePath, s.firmwareName
+}
+
+func readFirmware(path string) ([]byte, error) {
+	if path == "" {
+		return nil, os.ErrNotExist
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if len(data) < 4 || data[0] != 0xE9 {
+		return nil, fmt.Errorf("invalid ESP32 image")
+	}
+	return data, nil
+}
+
+func firmwareInfo(path, name string) (map[string]any, error) {
+	data, err := readFirmware(path)
+	if err != nil {
+		return nil, err
+	}
+	hash := fmt.Sprintf("%x", sha256.Sum256(data))
+	return map[string]any{
+		"available": true,
+		"name":      name,
+		"size":      len(data),
+		"sha256":    hash,
+	}, nil
+}
+
+func (s *server) firmwareAPI(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		path, name := s.firmwareSnapshot()
+		w.Header().Set("Content-Type", "application/json")
+		info, err := firmwareInfo(path, name)
+		if err != nil {
+			_ = json.NewEncoder(w).Encode(map[string]any{"available": false})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(info)
+	case http.MethodPost:
+		s.uploadFirmware(w, r)
+	default:
+		http.Error(w, "仅支持 GET 或 POST", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *server) uploadFirmware(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxFirmwareSize+(1<<20))
+	if err := r.ParseMultipartForm(maxFirmwareSize); err != nil {
+		http.Error(w, "固件文件过大或上传格式错误", http.StatusBadRequest)
+		return
+	}
+	file, header, err := r.FormFile("firmware")
+	if err != nil {
+		http.Error(w, "请选择 firmware.bin", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+	if strings.ToLower(filepath.Ext(header.Filename)) != ".bin" {
+		http.Error(w, "只允许上传 .bin 固件", http.StatusBadRequest)
+		return
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maxFirmwareSize+1))
+	if err != nil || int64(len(data)) > maxFirmwareSize {
+		http.Error(w, "固件读取失败或文件过大", http.StatusBadRequest)
+		return
+	}
+	if len(data) < 4 || data[0] != 0xE9 {
+		http.Error(w, "不是有效的 ESP32 firmware.bin", http.StatusBadRequest)
+		return
+	}
+
+	destination := uploadedFirmwarePath()
+	if err := os.MkdirAll(filepath.Dir(destination), 0700); err != nil {
+		http.Error(w, "无法创建固件目录", http.StatusInternalServerError)
+		return
+	}
+	temporary := destination + ".upload"
+	if err := os.WriteFile(temporary, data, 0600); err != nil {
+		http.Error(w, "无法保存固件", http.StatusInternalServerError)
+		return
+	}
+	if err := os.Rename(temporary, destination); err != nil {
+		_ = os.Remove(temporary)
+		http.Error(w, "无法替换当前固件", http.StatusInternalServerError)
+		return
+	}
+
+	s.firmwareMu.Lock()
+	s.firmwarePath = destination
+	s.firmwareName = filepath.Base(header.Filename)
+	s.firmwareMu.Unlock()
+
+	info, _ := firmwareInfo(destination, filepath.Base(header.Filename))
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(info)
+}
+
 func (s *server) firmware(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "仅支持 GET", http.StatusMethodNotAllowed)
 		return
 	}
-	if s.firmwarePath == "" {
-		http.Error(w, "固件尚未构建", http.StatusNotFound)
+	path, _ := s.firmwareSnapshot()
+	if _, err := readFirmware(path); err != nil {
+		http.Error(w, "固件尚未上传或构建", http.StatusNotFound)
 		return
 	}
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Cache-Control", "no-store")
-	http.ServeFile(w, r, s.firmwarePath)
+	http.ServeFile(w, r, path)
 }
 
 func (s *server) ota(w http.ResponseWriter, r *http.Request) {
@@ -119,20 +244,35 @@ func (s *server) ota(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "设备参数无效", http.StatusBadRequest)
 		return
 	}
-	data, err := os.ReadFile(s.firmwarePath)
-	if err != nil || len(data) < 4 || data[0] != 0xE9 {
+	path, name := s.firmwareSnapshot()
+	info, err := firmwareInfo(path, name)
+	if err != nil {
 		http.Error(w, "固件不可用或格式错误", http.StatusConflict)
 		return
 	}
-	hash := fmt.Sprintf("%x", sha256.Sum256(data))
 	requestID := fmt.Sprintf("ota-%d", time.Now().UnixNano())
-	sent := s.hub.Send(input.DeviceID, map[string]any{"type": "command", "requestId": requestID, "command": "ota.start", "payload": map[string]any{"sha256": hash, "size": len(data)}})
+	sent := s.hub.Send(input.DeviceID, map[string]any{
+		"type":      "command",
+		"requestId": requestID,
+		"command":   "ota.start",
+		"payload": map[string]any{
+			"sha256": info["sha256"],
+			"size":   info["size"],
+		},
+	})
 	w.Header().Set("Content-Type", "application/json")
 	if !sent {
 		w.WriteHeader(http.StatusConflict)
 	}
-	_ = json.NewEncoder(w).Encode(map[string]any{"sent": sent, "requestId": requestID, "sha256": hash, "size": len(data)})
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"sent":      sent,
+		"requestId": requestID,
+		"sha256":    info["sha256"],
+		"size":      info["size"],
+		"name":      info["name"],
+	})
 }
+
 func (s *server) visionDeviceCommand(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "仅支持 POST", http.StatusMethodNotAllowed)
@@ -182,16 +322,19 @@ func (s *server) visionDeviceCommand(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"sent": sent, "requestId": requestID})
 }
+
 func (s *server) health(w http.ResponseWriter, r *http.Request) {
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
+
 func (s *server) devices(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(s.hub.List())
+	_ = json.NewEncoder(w).Encode(s.hub.List())
 }
+
 func (s *server) command(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		http.Error(w, "仅支持 POST", 405)
+	if r.Method != http.MethodPost {
+		http.Error(w, "仅支持 POST", http.StatusMethodNotAllowed)
 		return
 	}
 	var x struct {
@@ -200,19 +343,26 @@ func (s *server) command(w http.ResponseWriter, r *http.Request) {
 		Bias                 float64
 	}
 	if json.NewDecoder(r.Body).Decode(&x) != nil {
-		http.Error(w, "请求格式错误", 400)
+		http.Error(w, "请求格式错误", http.StatusBadRequest)
 		return
 	}
 	if x.DeviceID == "" || x.Frequency < 0.3 || x.Frequency > 5 || x.Amplitude < 0 || x.Amplitude > 50 || x.Bias < -45 || x.Bias > 45 {
-		http.Error(w, "参数无效", 400)
+		http.Error(w, "参数无效", http.StatusBadRequest)
 		return
 	}
 	requestID := fmt.Sprintf("%d", time.Now().UnixNano())
-	msg := map[string]any{"type": "command", "requestId": requestID, "command": "motion.set", "payload": map[string]any{"mode": strings.ToLower(x.Mode), "frequency": x.Frequency, "amplitude": x.Amplitude, "bias": x.Bias}}
+	msg := map[string]any{
+		"type": "command", "requestId": requestID, "command": "motion.set",
+		"payload": map[string]any{
+			"mode": strings.ToLower(x.Mode), "frequency": x.Frequency,
+			"amplitude": x.Amplitude, "bias": x.Bias,
+		},
+	}
 	ok := s.hub.Send(x.DeviceID, msg)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"sent": ok, "requestId": requestID})
+	_ = json.NewEncoder(w).Encode(map[string]any{"sent": ok, "requestId": requestID})
 }
+
 func (s *server) deviceSocket(w http.ResponseWriter, r *http.Request) {
 	rawConn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -236,14 +386,14 @@ func (s *server) deviceSocket(w http.ResponseWriter, r *http.Request) {
 	proof, _ := reg["proof"].(string)
 	version, _ := reg["protocolVersion"].(float64)
 	if id == "" || version != 1 || !identity.Verify(s.key, "fish-websocket-v1", nonce, id, proof) {
-		c.WriteJSON(map[string]any{"type": "register.result", "success": false})
+		_ = c.WriteJSON(map[string]any{"type": "register.result", "success": false})
 		return
 	}
 	d := hub.Device{ID: id, Name: text(reg["name"]), IP: text(reg["ip"]), FirmwareVersion: text(reg["firmwareVersion"])}
 	s.hub.Register(d, c)
 	log.Printf("设备已注册：%s (%s)，来源 %s", id, d.IP, r.RemoteAddr)
 	defer s.hub.Remove(id, c)
-	c.WriteJSON(map[string]any{"type": "register.result", "success": true})
+	_ = c.WriteJSON(map[string]any{"type": "register.result", "success": true})
 	done := make(chan struct{})
 	go func() {
 		ticker := time.NewTicker(time.Second)
@@ -270,9 +420,8 @@ func (s *server) deviceSocket(w http.ResponseWriter, r *http.Request) {
 		s.hub.Update(id, msg)
 	}
 }
-func text(v any) string { s, _ := v.(string); return s }
 
-const page = `<!doctype html><html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>机器鱼控制台</title><style>body{font-family:sans-serif;max-width:760px;margin:30px auto;padding:16px;background:#f4f7fb;color:#172033}.card{background:white;padding:18px;border-radius:12px;margin:12px 0}button{padding:12px 18px;margin:5px;border:0;border-radius:8px;background:#1677ff;color:white}.stop{background:#e53935}input{padding:9px;width:80px}.muted{color:#65758b}</style></head><body><h1>机器鱼控制台</h1><p class="muted">最小功能测试界面</p><div id="list">正在等待设备……</div><script>let devices=[];async function load(){devices=await fetch('/api/devices').then(r=>r.json());render()}function render(){let e=document.getElementById('list');if(!devices.length){e.innerHTML='<div class="card">暂无设备，请确认机器鱼和电脑处于同一局域网。</div>';return}e.innerHTML=devices.map((d,i)=>'<div class="card"><h3>'+d.name+' '+(d.online?'🟢':'⚫')+'</h3><div>'+d.deviceId+' · '+d.ip+' · 固件 '+d.firmwareVersion+'</div><p>频率 <input id="f'+i+'" value="'+(d.frequency||2.5)+'" type="number" step="0.1"> 幅度 <input id="a'+i+'" value="'+(d.amplitude||28)+'" type="number"></p><button onclick="send('+i+',\'forward\')">前进</button><button onclick="send('+i+',\'left\')">左转</button><button onclick="send('+i+',\'right\')">右转</button><button onclick="send('+i+',\'idle\')">待机</button><button class="stop" onclick="send('+i+',\'stop\')">停止</button><p id="s'+i+'" class="muted">RSSI '+d.rssi+'</p></div>').join('')}async function send(i,m){let d=devices[i],body={deviceId:d.deviceId,mode:m,frequency:+document.getElementById('f'+i).value,amplitude:+document.getElementById('a'+i).value};let r=await fetch('/api/command',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});let x=await r.json();document.getElementById('s'+i).textContent=x.sent?'命令已发送':'设备不在线'}setInterval(load,1000);load()</script></body></html>`
+func text(v any) string { s, _ := v.(string); return s }
 
 func (s *server) dashboard(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
