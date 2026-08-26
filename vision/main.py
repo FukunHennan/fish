@@ -100,6 +100,7 @@ class VisionApplication:
         self._loop_fps = 0.0
         self._exit_requested = False
         self._stop_latched_reason = None
+        self._last_web_metrics_t = 0.0
 
     def run(self):
         os.chdir(WORK_DIR)
@@ -409,6 +410,7 @@ class VisionApplication:
         )
         self.tablet.send(telemetry)
         self.mjpeg.update(image)
+        self._publish_web_metrics(result)
         if self.is_recording and self.recorder is not None:
             current = result.current_position
             row = [
@@ -541,6 +543,28 @@ class VisionApplication:
             "previousValue": result.previous_value,
             "actualValue": result.actual_value,
             "errorCode": result.error_code,
+        })
+
+    def _publish_web_metrics(self, result):
+        if self.action_result_sink is None:
+            return
+        now = time.monotonic()
+        if now - self._last_web_metrics_t < 0.5:
+            return
+        self._last_web_metrics_t = now
+        height, width = result.frame.shape[:2]
+        yolo = dict(result.yolo_status)
+        yolo["lastInferenceError"] = yolo.pop("last_inference_error", None)
+        yolo["loadSeconds"] = yolo.pop("load_seconds", None)
+        yolo["inferFps"] = result.yolo_result.get("infer_fps", 0.0)
+        self.action_result_sink({
+            "type": "system.metrics",
+            "metrics": {
+                "frame": {"width": int(width), "height": int(height)},
+                "yolo": yolo,
+                "cameraFps": self.cam.measured_fps,
+                "visionFps": self._loop_fps,
+            },
         })
 
     def _safe_stop(self, status, *, force=False):

@@ -24,11 +24,13 @@ export default function VisionPanel() {
   const retryTimerRef = useRef(null);
 
   const running = ["previewing", "processing", "tracking"].includes(status.state);
-  const processing = status.state === "processing";
+  const processing = ["processing", "tracking"].includes(status.state);
   const editable = canEditVision(status);
   const selectedCamera = cameras.find((camera) => camera.index === Number(cameraIndex));
-  const videoWidth = selectedCamera?.width || 640;
-  const videoHeight = selectedCamera?.height || 480;
+  const videoWidth = status.metrics?.frame?.width || selectedCamera?.width || 640;
+  const videoHeight = status.metrics?.frame?.height || selectedCamera?.height || 480;
+  const yolo = status.metrics?.yolo;
+  const yoloLabel = yolo?.ready ? "YOLO 就绪" : yolo?.loading ? "YOLO 加载中" : yolo?.error ? "YOLO 异常" : "YOLO 等待启动";
 
   useEffect(() => {
     let active = true;
@@ -131,7 +133,8 @@ export default function VisionPanel() {
   }
 
   function pointFrom(event) {
-    return toVideoPoint(event, imageRef.current.getBoundingClientRect(), videoWidth, videoHeight);
+    const image = imageRef.current;
+    return toVideoPoint(event, image.getBoundingClientRect(), videoWidth, videoHeight, image.naturalWidth, image.naturalHeight);
   }
 
   function pointerDown(event) {
@@ -167,7 +170,7 @@ export default function VisionPanel() {
     <section className="vision-card" aria-label="视觉控制">
       <header className="vision-header">
         <div><span className="eyebrow">RERVISION / WEB VISION</span><h2>视觉工作区</h2></div>
-        <span className={`status ${running ? "online" : "offline"}`}><i />{running ? "运行中" : "已停止"}</span>
+        <div className="vision-header-status"><span className={`status ${running ? "online" : "offline"}`}><i />{running ? "运行中" : "已停止"}</span><span className={`status ${yolo?.ready ? "online" : "offline"}`}><i />{yoloLabel}</span></div>
       </header>
       <div className="vision-layout">
         <div className="video-stage" onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp}>
@@ -188,7 +191,7 @@ export default function VisionPanel() {
             <button disabled={!running} onClick={() => sendAction({ type: "camera.clahe" })}>画面增强</button>
           </div>
           <div className="tracking-actions"><button disabled={!running} onClick={() => sendAction({ type: "tracking.start" })}>启动循迹</button><button className="stop" disabled={!running} onClick={() => sendAction({ type: "tracking.stop" })}>停止循迹</button></div>
-          <p className="feedback" aria-live="polite">{streamFeedback || feedback || (running ? `摄像头 ${status.cameraIndex} 正在处理` : "视觉服务未启动")}</p>
+          <p className="feedback" aria-live="polite">{streamFeedback || feedback || yolo?.error || yolo?.lastInferenceError || (running ? `摄像头 ${status.cameraIndex} 正在处理 · ${yoloLabel}` : "视觉服务未启动")}</p>
         </aside>
       </div>
     </section>

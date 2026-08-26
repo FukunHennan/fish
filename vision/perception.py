@@ -60,6 +60,7 @@ class FishDetector:
             "error": None,
             "last_inference_error": None,
             "load_seconds": None,
+            "device": None,
         }
 
         self._fps_smooth = 0.0
@@ -78,6 +79,7 @@ class FishDetector:
                 error=None,
                 last_inference_error=None,
                 load_seconds=None,
+                device=None,
             )
         self.thread = threading.Thread(
             target=self._loop,
@@ -146,6 +148,8 @@ class FishDetector:
         inference_device = resolve_inference_device(
             self.device, getattr(model, "device", self.device)
         )
+        with self._status_lock:
+            self._status["device"] = str(inference_device)
 
         while not self._stop_event.is_set():
             with self._latest_frame_lock:

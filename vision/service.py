@@ -82,8 +82,12 @@ def enumerate_cameras(
 ):
     names = (name_provider or _directshow_camera_names)()
     cameras = []
+    # DirectShow already gives us the complete ordered device list on Windows.
+    # Do not probe indexes beyond it: OpenCV emits scary "index out of range"
+    # errors for every missing slot and makes an otherwise healthy scan noisy.
+    probe_count = min(max_index, len(names)) if names else max_index
 
-    for index in range(max_index):
+    for index in range(probe_count):
         name = names[index] if index < len(names) else f"摄像头 {index}"
 
         if open_capture is None:
@@ -277,6 +281,11 @@ class VisionService:
     def publish(self, event):
         with self._lock:
             if self._session is None or not isinstance(event, dict):
+                return
+            if event.get("type") == "system.metrics":
+                metrics = event.get("metrics")
+                if isinstance(metrics, dict):
+                    self._session.metrics.update(metrics)
                 return
             self._session.last_action = dict(event)
             if event.get("type") == "camera.exposure":

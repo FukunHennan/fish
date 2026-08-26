@@ -1,9 +1,23 @@
-export function toVideoPoint(pointer, bounds, videoWidth, videoHeight) {
-  const displayedX = Math.max(0, Math.min(bounds.width, pointer.clientX - bounds.left));
-  const displayedY = Math.max(0, Math.min(bounds.height, pointer.clientY - bounds.top));
+export function containedMediaRect(bounds, mediaWidth, mediaHeight) {
+  if (!bounds?.width || !bounds?.height || !mediaWidth || !mediaHeight) return bounds;
+  const scale = Math.min(bounds.width / mediaWidth, bounds.height / mediaHeight);
+  const width = mediaWidth * scale;
+  const height = mediaHeight * scale;
   return {
-    x: Math.min(videoWidth - 1, Math.round(displayedX * videoWidth / bounds.width)),
-    y: Math.min(videoHeight - 1, Math.round(displayedY * videoHeight / bounds.height)),
+    left: bounds.left + (bounds.width - width) / 2,
+    top: bounds.top + (bounds.height - height) / 2,
+    width,
+    height,
+  };
+}
+
+export function toVideoPoint(pointer, bounds, videoWidth, videoHeight, mediaWidth = videoWidth, mediaHeight = videoHeight) {
+  const content = containedMediaRect(bounds, mediaWidth, mediaHeight);
+  const displayedX = Math.max(0, Math.min(content.width, pointer.clientX - content.left));
+  const displayedY = Math.max(0, Math.min(content.height, pointer.clientY - content.top));
+  return {
+    x: Math.min(videoWidth - 1, Math.round(displayedX * videoWidth / content.width)),
+    y: Math.min(videoHeight - 1, Math.round(displayedY * videoHeight / content.height)),
   };
 }
 

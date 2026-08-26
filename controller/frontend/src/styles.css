@@ -46,6 +46,7 @@ h1 { margin-top: 2px; font-size: 15px; line-height: 1.2; }
 .status i, .signal { width: 7px; height: 7px; border-radius: 50%; background: #687984; display: inline-block; }
 .status.online { color: #c9ead5; }
 .status.online i, .signal.online { background: var(--green); box-shadow: 0 0 8px rgba(87,217,138,.52); }
+.vision-header-status { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
 .top-metric { min-width: 62px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 8px; background: #10171d; text-align: right; }
 .top-metric b, .top-metric small { display: block; }
 .top-metric b { font-size: 13px; color: var(--text); }

@@ -30,6 +30,22 @@ class FakeCapture:
 
 
 class CameraEnumerationTests(unittest.TestCase):
+    def test_directshow_names_bound_the_number_of_indexes_probed(self):
+        opened = []
+
+        def open_capture(index):
+            opened.append(index)
+            return FakeCapture(opened=True)
+
+        cameras = enumerate_cameras(
+            max_index=8,
+            open_capture=open_capture,
+            name_provider=lambda: ["Integrated Camera", "Global Shutter Camera"],
+        )
+
+        self.assertEqual(opened, [0, 1])
+        self.assertEqual([camera.index for camera in cameras], [0, 1])
+
     def test_only_openable_cameras_are_returned_and_released(self):
         captures = {
             0: FakeCapture(False),
