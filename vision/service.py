@@ -105,12 +105,17 @@ def enumerate_cameras(
                 _safe_release(capture)
             continue
 
-        # Keep dependency injection simple for unit tests and special probes.
+        # Keep dependency injection behavior stable for existing unit tests and
+        # special probes: configuration failures still exclude the candidate.
         capture = open_capture(index)
         try:
             try:
                 if not capture.isOpened():
                     continue
+                capture.set(
+                    cv2.CAP_PROP_FOURCC,
+                    cv2.VideoWriter_fourcc(*"MJPG"),
+                )
             except (cv2.error, OSError, RuntimeError, AttributeError):
                 continue
 
