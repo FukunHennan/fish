@@ -32,6 +32,8 @@ def start_application_runner(
     def stop():
         application.request_exit()
         thread.join(timeout=5)
+        if thread.is_alive():
+            raise RuntimeError("vision_application_stop_timeout")
 
     return stop
 
