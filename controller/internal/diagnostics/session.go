@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -32,6 +33,16 @@ type RuntimeInfo struct {
 	PID        int      `json:"pid"`
 	Args       []string `json:"args"`
 	WorkingDir string   `json:"workingDir"`
+}
+
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusWriter) WriteHeader(code int) {
+	w.status = code
+	w.ResponseWriter.WriteHeader(code)
 }
 
 func New(root string) (*Session, error) {
@@ -71,7 +82,6 @@ func New(root string) (*Session, error) {
 		python:     python,
 	}
 
-	// Preserve existing log.Printf output while also persisting it per run.
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds | log.Lshortfile)
 	log.SetOutput(io.MultiWriter(os.Stdout, console))
 
@@ -96,6 +106,21 @@ func New(root string) (*Session, error) {
 
 func (s *Session) PythonWriter() io.Writer {
 	return io.MultiWriter(os.Stdout, s.python)
+}
+
+func (s *Session) HTTPMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started := time.Now()
+		wrapped := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(wrapped, r)
+		s.Logger.Info(
+			"http_request",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", wrapped.status,
+			"duration_ms", time.Since(started).Milliseconds(),
+		)
+	})
 }
 
 func (s *Session) Close() error {
