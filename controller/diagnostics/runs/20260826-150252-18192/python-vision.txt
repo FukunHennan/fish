@@ -1,0 +1,80 @@
+[ WARN:0@103.232] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:0@103.234] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:0@103.236] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:0@103.237] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:0@103.239] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:0@103.240] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+INFO:werkzeug:127.0.0.1 - - [26/Aug/2026 15:04:52] "GET /video.mjpg?retry=6 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [26/Aug/2026 15:04:52] "GET /video.mjpg?retry=5 HTTP/1.1" 200 -
+
+============================================================
+YOLO 仿生鱼追踪与 RoboFish 视觉控制正在启动...
+工作目录: C:\Users\LENOVO\Desktop\fish\vision
+目标捕获: 640x480 @ 60FPS
+相机失帧保护: 350ms
+平板 TCP: 0.0.0.0:9998
+机器鱼控制: 通过本机 Go 中央控制器
+============================================================
+
+平板 TCP 有线双向服务器已启动: 0.0.0.0:9998
+MJPEG视频流已启动: http://0.0.0.0:8090/video.mjpg
+视觉控制通过 Go 中央控制器转发 -> http://127.0.0.1:8081/api/vision/device-command
+尚未标定鱼尾色标，请先点击【鱼尾标定】。
+[YOLO] 正在后台加载，视觉窗口可先使用（设备: 0, 输入尺寸: 640）
+视觉服务已启动；底部工具栏负责标定、循迹和退出。
+视频流新增1个观看者，当前共 1 个
+视频流新增1个观看者，当前共 2 个
+[ WARN:2@131.386] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:2@131.388] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:2@131.390] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:2@131.391] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:2@131.393] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:2@131.395] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:2@131.396] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+Traceback (most recent call last):
+  File "C:\Users\LENOVO\Desktop\fish\vision\main.py", line 108, in run
+    if not self._start():
+           ~~~~~~~~~~~^^
+  File "C:\Users\LENOVO\Desktop\fish\vision\main.py", line 134, in _start
+    self.cam = CameraStream(src=self.camera_index).start()
+               ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\LENOVO\Desktop\fish\vision\camera_stream.py", line 38, in __init__
+    self.cap.set(cv2.CAP_PROP_FPS, TARGET_FPS)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+cv2.error: Unknown C++ exception from OpenCV code
+WARNING:waitress.queue:Task queue depth is 1
+WARNING:waitress.queue:Task queue depth is 2
+[ WARN:2@199.057] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:2@199.058] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:2@199.060] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:2@199.061] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:2@199.063] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:2@199.064] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+INFO:werkzeug:127.0.0.1 - - [26/Aug/2026 15:06:16] "GET /video.mjpg?retry=5 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [26/Aug/2026 15:06:17] "GET /video.mjpg?retry=5 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [26/Aug/2026 15:06:31] "GET /video.mjpg?retry=3 HTTP/1.1" 200 -
+INFO:werkzeug:127.0.0.1 - - [26/Aug/2026 15:06:32] "GET /video.mjpg?retry=4 HTTP/1.1" 200 -
+[ WARN:0@256.824] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:0@256.826] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:0@256.827] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:0@256.828] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:0@256.829] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:0@256.831] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:2@285.897] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:2@285.898] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:2@285.899] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:2@285.901] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:2@285.902] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:2@285.903] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:3@316.029] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:3@316.031] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:3@316.032] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:3@316.034] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:3@316.035] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:3@316.036] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:4@346.368] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:4@346.369] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:4@346.371] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:4@346.373] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:4@346.374] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:4@346.376] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
