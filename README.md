@@ -2,20 +2,21 @@
 
 ESP32-C3 机器鱼固件正在升级为局域网中央控制架构。当前固件位于 `firmware/`。
 
-## 快速启动（Windows）
+## Windows 日常操作
 
-项目已统一为“一次安装、以后一个命令启动”。在仓库根目录 PowerShell 中执行：
+Windows 端统一只使用 3 个 BAT 文件：
 
-首次准备环境：
-
-```powershell
-.\scripts\setup.ps1
+```text
+scripts/
+├─ start.bat   启动项目
+├─ stop.bat    关闭项目
+└─ upload.bat  提交并推送代码到 GitHub
 ```
 
-以后日常启动：
+启动项目：
 
-```powershell
-.\scripts\start.ps1
+```bat
+scripts\start.bat
 ```
 
 启动后访问：
@@ -24,15 +25,28 @@ ESP32-C3 机器鱼固件正在升级为局域网中央控制架构。当前固�
 http://localhost:8081
 ```
 
-Go Controller 会自动定位项目根目录、读取 `config/deployment.json`、选择 Python 解释器并启动 `vision/server.py`。Python 选择优先级为：`FISH_PYTHON` → `vision/.venv` → 仓库 `.venv` → PATH 中的 `python/python3` → Windows `py -3`，不再写死 Python 3.14。
+关闭项目：
 
-如果你已经有验证过 CUDA / YOLO 的 Python 环境，可在 setup/start 前设置：
-
-```powershell
-$env:FISH_PYTHON = 'D:\path\to\python.exe'
+```bat
+scripts\stop.bat
 ```
 
-完整启动说明见 `docs/STARTUP.md`。
+提交并推送当前代码：
+
+```bat
+scripts\upload.bat
+```
+
+`upload.bat` 会显示当前改动、询问 commit message，然后自动执行 `git add -A`、`git commit` 和 `git push`。如果没有新的文件改动，会直接尝试推送已有本地提交。
+
+`start.bat` 会自动安装缺失的前端 npm 依赖、构建 React 前端、编译固定的 `controller/.runtime/fish-controller.exe`，然后启动 Go Controller。Go Controller 会读取 `config/deployment.json`、自动选择 Python 解释器并启动 `vision/server.py`。Python 选择优先级为：`FISH_PYTHON` → `vision/.venv` → 仓库 `.venv` → PATH 中的 `python/python3` → Windows `py -3`。
+
+如果你已经有验证过 CUDA / YOLO 的 Python 环境，可在 CMD 中启动前设置：
+
+```bat
+set FISH_PYTHON=D:\path\to\python.exe
+scripts\start.bat
+```
 
 ## 默认目标
 
@@ -44,15 +58,17 @@ $env:FISH_PYTHON = 'D:\path\to\python.exe'
 
 ## 本地配置与敏感信息
 
-仓库只包含示例配置。首次运行 `scripts/setup.ps1` 会在本机生成 `config/deployment.json`。如需单独生成，也可以运行：
+仓库只包含示例配置。启动前需要本机存在：
 
-```powershell
-.\scripts\generate-deployment-config.ps1
+```text
+config/deployment.json
 ```
+
+可从 `config/deployment.example.json` 复制后填写本机部署密钥。`config/deployment.json` 已被 Git 忽略，不会通过 `upload.bat` 提交。
 
 如需出厂配网热点，复制 `firmware/include/FactoryWifi.local.example.h` 为 `firmware/include/FactoryWifi.local.h`，填写仅用于本地设备的 SSID 和密码。`FactoryWifi.local.h` 已被 Git 忽略。
 
-不要提交 Wi-Fi 密码、部署密钥、设备标定结果、普通运行日志或编译产物。需要远程分析一次运行时，可将指定的 `controller/diagnostics/runs/<session>` 复制到 `controller/diagnostics/uploaded/<session>` 后再提交。
+不要提交 Wi-Fi 密码、部署密钥、设备标定结果、普通运行日志或编译产物。需要远程分析一次运行时，可将指定诊断日志复制到专门的可提交目录后再上传。
 
 未提供本地出厂 Wi-Fi 配置时，固件不会携带默认网络凭据；设备应通过正常的配网流程配置网络。
 
