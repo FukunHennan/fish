@@ -15,6 +15,7 @@ def start_application_runner(
     action_source,
     action_result_sink=None,
     application_factory=VisionApplication,
+    stop_timeout=5.0,
 ):
     application = application_factory(
         camera_index=camera_index,
@@ -31,7 +32,7 @@ def start_application_runner(
 
     def stop():
         application.request_exit()
-        thread.join(timeout=5)
+        thread.join(timeout=stop_timeout)
         if thread.is_alive():
             raise RuntimeError("vision_application_stop_timeout")
 
