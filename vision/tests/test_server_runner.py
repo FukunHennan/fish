@@ -21,6 +21,12 @@ class BlockingApplication:
         self.exit_requested.set()
 
 
+class StuckApplication(BlockingApplication):
+    def run(self):
+        self.running.set()
+        threading.Event().wait(timeout=1)
+
+
 class ApplicationRunnerTests(unittest.TestCase):
     def test_http_server_binds_only_to_loopback(self):
         calls = []
@@ -48,6 +54,27 @@ class ApplicationRunnerTests(unittest.TestCase):
         self.assertTrue(created[0].headless)
 
         stop()
+
+        self.assertTrue(created[0].exit_requested.is_set())
+
+    def test_stop_raises_when_runner_does_not_exit_before_timeout(self):
+        created = []
+
+        def factory(**kwargs):
+            app = StuckApplication(**kwargs)
+            created.append(app)
+            return app
+
+        stop = start_application_runner(
+            camera_index=1,
+            action_source=lambda: None,
+            application_factory=factory,
+            stop_timeout=0.01,
+        )
+        self.assertTrue(created[0].running.wait(timeout=1))
+
+        with self.assertRaisesRegex(RuntimeError, "vision_application_stop_timeout"):
+            stop()
 
         self.assertTrue(created[0].exit_requested.is_set())
 
