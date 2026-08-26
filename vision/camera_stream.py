@@ -1,12 +1,15 @@
-"""Restart-safe DirectShow camera stream used by the web vision service.
+"""Restart-safe camera stream with backend fallback for the web vision service.
 
-The original CameraStream lives in interface.py.  This implementation keeps
-camera shutdown strict: a new session must not be allowed to reopen the same
-DirectShow device until the capture thread has actually exited.
+The web UI repeatedly opens and closes camera sessions.  This implementation
+keeps shutdown strict and makes startup defensive: a backend must actually
+open and return a frame before it is accepted, optional camera properties are
+best-effort, and Windows falls back from DirectShow to Media Foundation and
+finally OpenCV's automatic backend selection.
 """
 
 from __future__ import annotations
 
+import math
 import threading
 import time
 
@@ -16,47 +19,144 @@ from config import TARGET_FPS, TARGET_HEIGHT, TARGET_WIDTH
 from interface import apply_manual_exposure
 
 
-class RestartSafeCameraStream:
-    """Camera capture with deterministic stop/release semantics.
+def _backend_candidates():
+    candidates = []
+    if hasattr(cv2, "CAP_DSHOW"):
+        candidates.append(("DSHOW", cv2.CAP_DSHOW))
+    if hasattr(cv2, "CAP_MSMF"):
+        candidates.append(("MSMF", cv2.CAP_MSMF))
+    # None means let OpenCV choose the backend (CAP_ANY semantics).
+    candidates.append(("ANY", None))
+    return candidates
 
-    Normal shutdown first asks the capture loop to stop and gives it a short
-    chance to leave ``read()`` naturally.  If the driver is still blocking,
-    ``VideoCapture.release()`` is used to break the read.  Shutdown is only
-    considered complete after the capture thread has really terminated.
-    """
+
+def _capture_is_opened(capture):
+    checker = getattr(capture, "isOpened", None)
+    if checker is None:
+        # Test doubles and a few legacy wrappers do not expose isOpened().
+        return True
+    try:
+        return bool(checker())
+    except (cv2.error, OSError, RuntimeError):
+        return False
+
+
+def _safe_release(capture):
+    try:
+        capture.release()
+    except (cv2.error, OSError, RuntimeError):
+        pass
+
+
+def _safe_set(capture, prop, value, label):
+    """Best-effort camera configuration that can never abort startup."""
+    try:
+        accepted = bool(capture.set(prop, value))
+        if not accepted:
+            print(f"[Camera] 参数未被驱动接受: {label}={value}")
+        return accepted
+    except (cv2.error, OSError, RuntimeError) as error:
+        print(f"[Camera] 参数设置失败但继续运行: {label}={value} ({error})")
+        return False
+
+
+def _safe_get(capture, prop, default=0.0):
+    try:
+        value = float(capture.get(prop))
+        return value if math.isfinite(value) else default
+    except (cv2.error, OSError, RuntimeError, TypeError, ValueError):
+        return default
+
+
+def _open_working_capture(src):
+    errors = []
+    for backend_name, backend in _backend_candidates():
+        capture = None
+        try:
+            if backend is None:
+                capture = cv2.VideoCapture(src)
+            else:
+                capture = cv2.VideoCapture(src, backend)
+        except (cv2.error, OSError, RuntimeError) as error:
+            errors.append(f"{backend_name}: open exception: {error}")
+            continue
+
+        if not _capture_is_opened(capture):
+            errors.append(f"{backend_name}: not opened")
+            _safe_release(capture)
+            continue
+
+        # Do not touch FPS/resolution until the backend proves it can deliver a
+        # frame.  This avoids the OpenCV DSHOW C++ exception seen in field logs.
+        try:
+            ok, frame = capture.read()
+        except (cv2.error, OSError, RuntimeError) as error:
+            errors.append(f"{backend_name}: first read exception: {error}")
+            _safe_release(capture)
+            continue
+
+        if not ok or frame is None:
+            errors.append(f"{backend_name}: no first frame")
+            _safe_release(capture)
+            continue
+
+        print(f"[Camera] 已使用 {backend_name} 打开相机索引 {src}")
+        return capture, backend_name, frame
+
+    detail = "; ".join(errors) if errors else "no backend candidates"
+    raise RuntimeError(f"camera_open_failed: index={src}; {detail}")
+
+
+class RestartSafeCameraStream:
+    """Camera capture with restart-safe stop/release and backend fallback."""
 
     def __init__(self, src=0):
-        self.cap = cv2.VideoCapture(src, cv2.CAP_DSHOW)
         self.lock = threading.Lock()
         self._stop_event = threading.Event()
         self._release_lock = threading.Lock()
         self._released = False
 
-        self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, TARGET_WIDTH)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, TARGET_HEIGHT)
-        self.cap.set(cv2.CAP_PROP_FPS, TARGET_FPS)
+        self.cap, self.backend_name, first_frame = _open_working_capture(src)
 
-        self.real_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        self.real_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        self.reported_fps = self.cap.get(cv2.CAP_PROP_FPS)
+        # Camera properties are preferences, not startup requirements.  Some
+        # UVC/DirectShow drivers throw from set() even after opening correctly.
+        _safe_set(
+            self.cap,
+            cv2.CAP_PROP_FOURCC,
+            cv2.VideoWriter_fourcc(*"MJPG"),
+            "FOURCC",
+        )
+        _safe_set(self.cap, cv2.CAP_PROP_FRAME_WIDTH, TARGET_WIDTH, "WIDTH")
+        _safe_set(self.cap, cv2.CAP_PROP_FRAME_HEIGHT, TARGET_HEIGHT, "HEIGHT")
+        _safe_set(self.cap, cv2.CAP_PROP_FPS, TARGET_FPS, "FPS")
+
+        self.real_width = int(_safe_get(self.cap, cv2.CAP_PROP_FRAME_WIDTH, TARGET_WIDTH))
+        self.real_height = int(_safe_get(self.cap, cv2.CAP_PROP_FRAME_HEIGHT, TARGET_HEIGHT))
+        self.reported_fps = _safe_get(self.cap, cv2.CAP_PROP_FPS, TARGET_FPS)
 
         self.exposure_val = -6
-        self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
-        self.cap.set(cv2.CAP_PROP_EXPOSURE, self.exposure_val)
-        self.cap.set(cv2.CAP_PROP_GAIN, 100)
+        _safe_set(self.cap, cv2.CAP_PROP_AUTO_EXPOSURE, 0.25, "AUTO_EXPOSURE")
+        _safe_set(self.cap, cv2.CAP_PROP_EXPOSURE, self.exposure_val, "EXPOSURE")
+        _safe_set(self.cap, cv2.CAP_PROP_GAIN, 100, "GAIN")
 
-        self.ret, self.frame = self.cap.read()
+        self.ret = True
+        self.frame = first_frame
         self.timestamp = time.time()
-        self.sequence = 1 if self.ret else 0
-        self.last_success_monotonic = time.monotonic() if self.ret else None
+        self.sequence = 1
+        self.last_success_monotonic = time.monotonic()
         self.consecutive_failures = 0
         self.measured_fps = TARGET_FPS
         self._last_ts = self.timestamp
         self.thread = threading.Thread(
             target=self.update,
-            name=f"camera-capture-{src}",
+            name=f"camera-capture-{src}-{self.backend_name.lower()}",
             daemon=True,
+        )
+
+        print(
+            "[Camera] 初始化完成: "
+            f"backend={self.backend_name}, "
+            f"actual={self.real_width}x{self.real_height}@{self.reported_fps:.1f}"
         )
 
     @property
@@ -87,15 +187,16 @@ class RestartSafeCameraStream:
         while not self._stop_event.is_set():
             try:
                 ret, frame = self.cap.read()
-            except (cv2.error, OSError, RuntimeError):
+            except (cv2.error, OSError, RuntimeError) as error:
                 if self._stop_event.is_set():
                     break
+                print(f"[Camera] 读帧异常: {error}")
                 ret, frame = False, None
 
             if self._stop_event.is_set():
                 break
 
-            if ret:
+            if ret and frame is not None:
                 now = time.time()
                 now_monotonic = time.monotonic()
                 dt = now - self._last_ts
@@ -114,7 +215,7 @@ class RestartSafeCameraStream:
                 with self.lock:
                     self.ret = False
                     self.consecutive_failures += 1
-                self._stop_event.wait(0.002)
+                self._stop_event.wait(0.01)
 
     def read(self):
         with self.lock:
@@ -137,19 +238,20 @@ class RestartSafeCameraStream:
                 "sequence": self.sequence,
                 "age_s": age_s,
                 "consecutive_failures": self.consecutive_failures,
+                "backend": self.backend_name,
             }
 
     def _release_capture(self):
         with self._release_lock:
             if self._released:
                 return
-            self.cap.release()
+            _safe_release(self.cap)
             self._released = True
 
     def release(self):
         self._stop_event.set()
 
-        # Most UVC cameras return from read() quickly.  Avoid calling release()
+        # Most UVC cameras return from read() quickly. Avoid calling release()
         # concurrently with read() unless the driver actually needs unblocking.
         if self.thread.is_alive():
             self.thread.join(timeout=0.25)
@@ -165,6 +267,7 @@ class RestartSafeCameraStream:
         with self.lock:
             self.ret = False
             self.frame = None
+        print(f"[Camera] 已释放相机 backend={self.backend_name}")
 
 
 class _ClosedCapture:
