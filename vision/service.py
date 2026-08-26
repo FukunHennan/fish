@@ -269,12 +269,8 @@ class VisionService:
 
     def status(self):
         with self._lock:
-            if self._session is not None:
-                state = self._session.state.value
-            else:
-                state = "running" if self._stop_runner is not None else "stopped"
             return {
-                "state": state,
+                "state": "running" if self._stop_runner is not None else "stopped",
                 "cameraIndex": self._camera_index,
                 "error": self._error,
             }
