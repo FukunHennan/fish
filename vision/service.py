@@ -191,7 +191,9 @@ class VisionService:
     def stop_session(self, session_id):
         with self._lock:
             session = self._require_session(session_id)
-        self.stop()
+        if not self.stop():
+            with self._lock:
+                return session.snapshot()
         with self._lock:
             session.transition(VisionState.IDLE)
             snapshot = session.snapshot()
@@ -219,9 +221,21 @@ class VisionService:
                 VisionState.STOPPING, VisionState.ERROR
             ):
                 self._session.transition(VisionState.STOPPING)
+
+        try:
+            stop_runner()
+        except Exception as error:
+            with self._lock:
+                self._error = str(error)
+                if self._session is not None:
+                    self._session.fail("vision_stop_failed", str(error))
+            return False
+
+        with self._lock:
             self._stop_runner = None
             self._camera_index = None
-        stop_runner()
+            self._error = ""
+
         while self.next_action() is not None:
             pass
         return True
@@ -255,8 +269,12 @@ class VisionService:
 
     def status(self):
         with self._lock:
+            if self._session is not None:
+                state = self._session.state.value
+            else:
+                state = "running" if self._stop_runner is not None else "stopped"
             return {
-                "state": "running" if self._stop_runner is not None else "stopped",
+                "state": state,
                 "cameraIndex": self._camera_index,
                 "error": self._error,
             }
