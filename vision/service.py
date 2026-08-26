@@ -10,6 +10,7 @@ import time
 from typing import Callable, Optional
 
 import cv2
+from camera_stream import _open_working_capture, _safe_get, _safe_release
 from session import SessionMismatch, VisionSession, VisionState
 
 
@@ -58,49 +59,77 @@ def _directshow_camera_names():
         return []
 
 
+def _camera_info(index, name, capture):
+    reported_fps = _safe_get(capture, cv2.CAP_PROP_FPS, 0.0)
+    return CameraInfo(
+        index=index,
+        name=name,
+        width=int(_safe_get(capture, cv2.CAP_PROP_FRAME_WIDTH, 0.0)),
+        height=int(_safe_get(capture, cv2.CAP_PROP_FRAME_HEIGHT, 0.0)),
+        fps=(
+            int(reported_fps)
+            if math.isfinite(reported_fps) and reported_fps > 0
+            else None
+        ),
+    )
+
+
 def enumerate_cameras(
     max_index=8,
     open_capture=None,
     name_provider=None,
     probe_attempts=5,
 ):
-    opener = open_capture or (lambda index: cv2.VideoCapture(index, cv2.CAP_DSHOW))
     names = (name_provider or _directshow_camera_names)()
     cameras = []
+
     for index in range(max_index):
-        capture = opener(index)
-        try:
-            if not capture.isOpened():
+        name = names[index] if index < len(names) else f"摄像头 {index}"
+
+        if open_capture is None:
+            # Use the exact same DSHOW -> MSMF -> ANY fallback policy as the
+            # real camera stream. This prevents discovery from repeatedly
+            # assuming DirectShow works when it cannot capture by index.
+            try:
+                capture, backend_name, _first_frame = _open_working_capture(index)
+            except RuntimeError:
                 continue
             try:
-                capture.set(
-                    cv2.CAP_PROP_FOURCC,
-                    cv2.VideoWriter_fourcc(*"MJPG"),
+                info = _camera_info(index, name, capture)
+                cameras.append(info)
+                print(
+                    f"[CameraCatalog] 发现 {name}: index={index}, "
+                    f"backend={backend_name}, {info.width}x{info.height}, fps={info.fps}"
                 )
-                readable = False
+            finally:
+                _safe_release(capture)
+            continue
+
+        # Keep dependency injection simple for unit tests and special probes.
+        capture = open_capture(index)
+        try:
+            try:
+                if not capture.isOpened():
+                    continue
+            except (cv2.error, OSError, RuntimeError, AttributeError):
+                continue
+
+            readable = False
+            try:
                 for _ in range(probe_attempts):
                     ok, frame = capture.read()
                     if ok and frame is not None:
                         readable = True
                         break
-                if not readable:
-                    continue
             except (cv2.error, OSError, RuntimeError):
+                readable = False
+            if not readable:
                 continue
-            reported_fps = float(capture.get(cv2.CAP_PROP_FPS))
-            cameras.append(CameraInfo(
-                index=index,
-                name=names[index] if index < len(names) else f"摄像头 {index}",
-                width=int(capture.get(cv2.CAP_PROP_FRAME_WIDTH)),
-                height=int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT)),
-                fps=(
-                    int(reported_fps)
-                    if math.isfinite(reported_fps) and reported_fps > 0
-                    else None
-                ),
-            ))
+
+            cameras.append(_camera_info(index, name, capture))
         finally:
-            capture.release()
+            _safe_release(capture)
+
     return cameras
 
 
