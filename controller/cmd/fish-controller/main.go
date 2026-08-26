@@ -7,6 +7,7 @@ import (
 	"fish-controller/internal/hub"
 	"fish-controller/internal/visionprocess"
 	webapp "fish-controller/internal/web"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -14,38 +15,64 @@ import (
 	"time"
 )
 
+func findProjectRoot() (string, error) {
+	for _, candidate := range []string{".", ".."} {
+		root, err := filepath.Abs(candidate)
+		if err != nil {
+			continue
+		}
+		visionInfo, visionErr := os.Stat(filepath.Join(root, "vision", "server.py"))
+		controllerInfo, controllerErr := os.Stat(filepath.Join(root, "controller", "go.mod"))
+		if visionErr == nil && controllerErr == nil && !visionInfo.IsDir() && !controllerInfo.IsDir() {
+			return root, nil
+		}
+	}
+	return "", fmt.Errorf("无法定位项目根目录；请从 fish 或 fish/controller 目录启动")
+}
+
 func main() {
+	projectRoot, err := findProjectRoot()
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	diagnosticRoot := os.Getenv("FISH_DIAGNOSTIC_DIR")
+	if diagnosticRoot == "" {
+		diagnosticRoot = filepath.Join(projectRoot, "controller", "diagnostics", "runs")
+	}
 	diag, err := diagnostics.New(diagnosticRoot)
 	if err != nil {
 		log.Fatalf("初始化诊断日志失败：%v", err)
 	}
 	defer diag.Close()
+	log.Printf("项目根目录：%s", projectRoot)
 	log.Printf("诊断日志会话：%s", diag.Dir)
-	diag.Logger.Info("controller_starting")
+	diag.Logger.Info("controller_starting", "project_root", projectRoot)
 
 	configPath := os.Getenv("FISH_CONFIG")
 	if configPath == "" {
-		for _, candidate := range []string{filepath.Join("config", "deployment.json"), filepath.Join("..", "config", "deployment.json")} {
-			if _, statErr := os.Stat(candidate); statErr == nil {
-				configPath = candidate
-				break
-			}
-		}
+		configPath = filepath.Join(projectRoot, "config", "deployment.json")
 	}
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		diag.Logger.Error("config_load_failed", "path", configPath, "error", err)
-		log.Fatalf("读取部署配置失败：%v", err)
+		log.Fatalf("读取部署配置失败：%v\n请先运行项目根目录下的 scripts\\setup.ps1", err)
 	}
 	diag.Logger.Info("config_loaded", "path", configPath)
 
-	visionDir, err := visionprocess.FindDir("vision", filepath.Join("..", "vision"))
-	if err != nil {
-		diag.Logger.Error("vision_dir_not_found", "error", err)
+	visionDir := filepath.Join(projectRoot, "vision")
+	if _, err := visionprocess.FindDir(visionDir); err != nil {
+		diag.Logger.Error("vision_dir_not_found", "path", visionDir, "error", err)
 		log.Fatalf("定位视觉程序失败：%v", err)
 	}
 	diag.Logger.Info("vision_dir_found", "path", visionDir)
+	python, err := visionprocess.ResolvePython(visionDir)
+	if err != nil {
+		diag.Logger.Error("python_not_found", "error", err)
+		log.Fatalf("Python 环境不可用：%v", err)
+	}
+	log.Printf("视觉 Python：%s（%s）", python.Executable, python.Source)
+	diag.Logger.Info("python_resolved", "executable", python.Executable, "source", python.Source)
 
 	visionStart := time.Now()
 	visionManager, err := visionprocess.Ensure(

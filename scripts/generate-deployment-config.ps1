@@ -10,7 +10,14 @@ if (Test-Path -LiteralPath $configPath) {
 
 New-Item -ItemType Directory -Path $configDir -Force | Out-Null
 $bytes = New-Object byte[] 32
-[System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
-$key = [Convert]::ToHexString($bytes).ToLowerInvariant()
-@{ deploymentKey = $key } | ConvertTo-Json | Set-Content -LiteralPath $configPath -Encoding utf8NoBOM
+$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+try {
+    $rng.GetBytes($bytes)
+} finally {
+    $rng.Dispose()
+}
+$key = -join ($bytes | ForEach-Object { $_.ToString('x2') })
+$json = @{ deploymentKey = $key } | ConvertTo-Json
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($configPath, $json + [Environment]::NewLine, $utf8NoBom)
 Write-Host "已生成部署配置：$configPath"
