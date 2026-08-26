@@ -126,6 +126,22 @@ class VisionServiceLifecycleTests(unittest.TestCase):
         self.assertEqual(started, [1])
         self.assertEqual(stopped, [1])
 
+    def test_failed_stop_keeps_camera_reserved_and_blocks_restart(self):
+        def runner_factory(_camera_index, _publish):
+            def stop():
+                raise RuntimeError("vision_application_stop_timeout")
+            return stop
+
+        service = VisionService(runner_factory=runner_factory)
+        self.assertTrue(service.start(1))
+
+        self.assertFalse(service.stop())
+        self.assertEqual(service.status()["state"], "running")
+        self.assertEqual(service.status()["cameraIndex"], 1)
+        self.assertIn("vision_application_stop_timeout", service.status()["error"])
+        self.assertEqual(service.current_session()["state"], "error")
+        self.assertFalse(service.start(2))
+
     def test_actions_are_validated_before_reaching_runner(self):
         service = VisionService(runner_factory=lambda _index, _publish: lambda: None)
         service.start(1)
