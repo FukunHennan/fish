@@ -75,11 +75,15 @@ func (p *commandProcess) Kill() error { return p.command.Process.Kill() }
 func (p *commandProcess) Wait() error { return p.command.Wait() }
 
 func PythonStarter(visionDir string) StartFunc {
+	return PythonStarterWithOutput(visionDir, os.Stdout, os.Stderr)
+}
+
+func PythonStarterWithOutput(visionDir string, stdout, stderr io.Writer) StartFunc {
 	return func(_ string) (Process, error) {
 		command := exec.Command("py", "-3.14", "server.py")
 		command.Dir = visionDir
-		command.Stdout = os.Stdout
-		command.Stderr = os.Stderr
+		command.Stdout = stdout
+		command.Stderr = stderr
 		if err := command.Start(); err != nil { return nil, err }
 		return &commandProcess{command: command}, nil
 	}
