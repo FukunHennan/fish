@@ -7,6 +7,7 @@ dist
 .tools
 controller/frontend/node_modules
 controller/internal/web/dist
+controller/.runtime/
 config/deployment.json
 .superpowers/
 
