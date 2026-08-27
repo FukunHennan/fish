@@ -42,11 +42,11 @@ func main() {
 	}
 	diag, err := diagnostics.New(diagnosticRoot)
 	if err != nil {
-		log.Fatalf("初始化诊断日志失败：%v", err)
+		log.Fatalf("failed to initialize diagnostics: %v", err)
 	}
 	defer diag.Close()
-	log.Printf("项目根目录：%s", projectRoot)
-	log.Printf("诊断日志会话：%s", diag.Dir)
+	log.Printf("project root: %s", projectRoot)
+	log.Printf("diagnostic session: %s", diag.Dir)
 	diag.Logger.Info("controller_starting", "project_root", projectRoot)
 
 	configPath := os.Getenv("FISH_CONFIG")
@@ -56,22 +56,22 @@ func main() {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		diag.Logger.Error("config_load_failed", "path", configPath, "error", err)
-		log.Fatalf("读取部署配置失败：%v\n请先运行项目根目录下的 scripts\\setup.ps1", err)
+		log.Fatalf("failed to load deployment config: %v", err)
 	}
 	diag.Logger.Info("config_loaded", "path", configPath)
 
 	visionDir := filepath.Join(projectRoot, "vision")
 	if _, err := visionprocess.FindDir(visionDir); err != nil {
 		diag.Logger.Error("vision_dir_not_found", "path", visionDir, "error", err)
-		log.Fatalf("定位视觉程序失败：%v", err)
+		log.Fatalf("failed to locate vision service: %v", err)
 	}
 	diag.Logger.Info("vision_dir_found", "path", visionDir)
 	python, err := visionprocess.ResolvePython(visionDir)
 	if err != nil {
 		diag.Logger.Error("python_not_found", "error", err)
-		log.Fatalf("Python 环境不可用：%v", err)
+		log.Fatalf("Python environment unavailable: %v", err)
 	}
-	log.Printf("视觉 Python：%s（%s）", python.Executable, python.Source)
+	log.Printf("vision Python: %s (%s)", python.Executable, python.Source)
 	diag.Logger.Info("python_resolved", "executable", python.Executable, "source", python.Source)
 
 	visionStart := time.Now()
@@ -82,7 +82,7 @@ func main() {
 	)
 	if err != nil {
 		diag.Logger.Error("vision_backend_start_failed", "duration_ms", time.Since(visionStart).Milliseconds(), "error", err)
-		log.Fatalf("启动视觉后台失败：%v", err)
+		log.Fatalf("failed to start vision backend: %v", err)
 	}
 	defer func() {
 		started := time.Now()
@@ -93,15 +93,15 @@ func main() {
 		diag.Logger.Info("vision_backend_closed", "duration_ms", time.Since(started).Milliseconds())
 	}()
 	if visionManager.OwnsProcess() {
-		log.Printf("Python 视觉后台已自动启动")
+		log.Printf("Python vision backend started automatically")
 		diag.Logger.Info("vision_backend_ready", "mode", "started", "duration_ms", time.Since(visionStart).Milliseconds())
 	} else {
-		log.Printf("复用已运行的 Python 视觉后台")
+		log.Printf("reusing running Python vision backend")
 		diag.Logger.Info("vision_backend_ready", "mode", "reused", "duration_ms", time.Since(visionStart).Milliseconds())
 	}
 
 	discoveryService := discovery.NewService(cfg.DeploymentKey, func(device discovery.Response) {
-		log.Printf("发现已认证机器鱼：%s (%s)", device.DeviceID, device.IP)
+		log.Printf("authenticated fish discovered: %s (%s)", device.DeviceID, device.IP)
 		diag.Logger.Info("device_discovered", "device_id", device.DeviceID, "ip", device.IP)
 	})
 	if err := discoveryService.Start(); err != nil {
@@ -113,7 +113,7 @@ func main() {
 
 	address := ":8081"
 	handler := diag.HTTPMiddleware(webapp.NewHandler(hub.New(), cfg.DeploymentKey))
-	log.Printf("机器鱼控制器已启动：http://localhost%s", address)
+	log.Printf("fish controller ready: http://localhost%s", address)
 	diag.Logger.Info("controller_ready", "address", address)
 	if err := http.ListenAndServe(address, handler); err != nil {
 		diag.Logger.Error("http_server_stopped", "error", err)

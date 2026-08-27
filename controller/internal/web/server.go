@@ -391,7 +391,7 @@ func (s *server) deviceSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	d := hub.Device{ID: id, Name: text(reg["name"]), IP: text(reg["ip"]), FirmwareVersion: text(reg["firmwareVersion"])}
 	s.hub.Register(d, c)
-	log.Printf("设备已注册：%s (%s)，来源 %s", id, d.IP, r.RemoteAddr)
+	log.Printf("device registered: %s (%s), source %s", id, d.IP, r.RemoteAddr)
 	defer s.hub.Remove(id, c)
 	_ = c.WriteJSON(map[string]any{"type": "register.result", "success": true})
 	done := make(chan struct{})
@@ -402,7 +402,7 @@ func (s *server) deviceSocket(w http.ResponseWriter, r *http.Request) {
 			select {
 			case <-ticker.C:
 				if err := c.WriteJSON(map[string]any{"type": "heartbeat"}); err != nil {
-					log.Printf("设备心跳发送失败：%s: %v", id, err)
+					log.Printf("device heartbeat failed: %s: %v", id, err)
 					return
 				}
 			case <-done:
@@ -414,7 +414,7 @@ func (s *server) deviceSocket(w http.ResponseWriter, r *http.Request) {
 	for {
 		var msg map[string]any
 		if err := rawConn.ReadJSON(&msg); err != nil {
-			log.Printf("设备连接断开：%s: %v", id, err)
+			log.Printf("device disconnected: %s: %v", id, err)
 			return
 		}
 		s.hub.Update(id, msg)

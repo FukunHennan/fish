@@ -67,7 +67,7 @@ func (s *Service) broadcast() {
 	payload, _ := json.Marshal(request)
 	for _, address := range broadcastAddresses() {
 		if _, err := s.conn.WriteToUDP(payload, &net.UDPAddr{IP: address, Port: Port}); err != nil {
-			log.Printf("UDP 发现广播失败 %s: %v", address, err)
+			log.Printf("UDP discovery broadcast failed %s: %v", address, err)
 		}
 	}
 }
@@ -82,7 +82,7 @@ func (s *Service) readLoop() {
 			case <-s.done:
 				return
 			default:
-				log.Printf("UDP 发现读取失败: %v", err)
+				log.Printf("UDP discovery read failed: %v", err)
 				return
 			}
 		}

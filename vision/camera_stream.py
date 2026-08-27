@@ -53,10 +53,10 @@ def _safe_set(capture, prop, value, label):
     try:
         accepted = bool(capture.set(prop, value))
         if not accepted:
-            print(f"[Camera] 参数未被驱动接受: {label}={value}")
+            print(f"[Camera] Driver rejected setting: {label}={value}")
         return accepted
     except (cv2.error, OSError, RuntimeError) as error:
-        print(f"[Camera] 参数设置失败但继续运行: {label}={value} ({error})")
+        print(f"[Camera] Setting failed; continuing: {label}={value} ({error})")
         return False
 
 
@@ -100,7 +100,7 @@ def _open_working_capture(src):
             _safe_release(capture)
             continue
 
-        print(f"[Camera] 已使用 {backend_name} 打开相机索引 {src}")
+        print(f"[Camera] Opened index {src} with {backend_name}")
         return capture, backend_name, frame
 
     detail = "; ".join(errors) if errors else "no backend candidates"
@@ -154,7 +154,7 @@ class RestartSafeCameraStream:
         )
 
         print(
-            "[Camera] 初始化完成: "
+            "[Camera] Initialized: "
             f"backend={self.backend_name}, "
             f"actual={self.real_width}x{self.real_height}@{self.reported_fps:.1f}"
         )
@@ -178,9 +178,9 @@ class RestartSafeCameraStream:
             result = apply_manual_exposure(self.cap, delta)
             if result.status == "completed":
                 self.exposure_val = result.actual_value
-                print(f"相机手动曝光值调整为: {self.exposure_val}")
+                print(f"[Camera] Manual exposure changed to {self.exposure_val}")
             else:
-                print(f"相机曝光调整失败: {result.error_code}")
+                print(f"[Camera] Exposure adjustment failed: {result.error_code}")
             return result
 
     def update(self):
@@ -190,7 +190,7 @@ class RestartSafeCameraStream:
             except (cv2.error, OSError, RuntimeError) as error:
                 if self._stop_event.is_set():
                     break
-                print(f"[Camera] 读帧异常: {error}")
+                print(f"[Camera] Frame read failed: {error}")
                 ret, frame = False, None
 
             if self._stop_event.is_set():
@@ -267,7 +267,7 @@ class RestartSafeCameraStream:
         with self.lock:
             self.ret = False
             self.frame = None
-        print(f"[Camera] 已释放相机 backend={self.backend_name}")
+        print(f"[Camera] Released camera backend={self.backend_name}")
 
 
 class _ClosedCapture:

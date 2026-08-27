@@ -840,7 +840,7 @@ class VisionMouseController:
                 self.marker_roi_state["dragging"] = False
                 self.marker_roi_state["start"] = None
                 self.marker_roi_state["end"] = None
-                print("已取消色标框选。")
+                print("Tail marker selection cancelled.")
             return
 
         if self.heading_state["selecting"]:
@@ -848,7 +848,7 @@ class VisionMouseController:
                 self.pending_actions.append(("APPLY_HEAD_DIRECTION", (rx, ry)))
             elif event == cv2.EVENT_RBUTTONDOWN:
                 self.heading_state["selecting"] = False
-                print("已取消鱼头方向标定，原有初始方向保持不变。")
+                print("Heading calibration cancelled; previous heading retained.")
             return
 
         if event == cv2.EVENT_LBUTTONDOWN and self.calibration_state["is_calibrating"]:

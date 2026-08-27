@@ -111,7 +111,7 @@ class VisionApplication:
             self._loop()
             return 0
         except Exception as error:
-            print(f"运行过程中发生未捕获异常: {error}")
+            print(f"Unhandled runtime error: {error}")
             traceback.print_exc()
             self._safe_stop("FAULT", force=True)
             return 1
@@ -123,18 +123,18 @@ class VisionApplication:
 
     def _print_startup(self):
         print("\n" + "=" * 60)
-        print("YOLO 仿生鱼追踪与 RoboFish 视觉控制正在启动...")
-        print(f"工作目录: {WORK_DIR}")
-        print(f"目标捕获: {TARGET_WIDTH}x{TARGET_HEIGHT} @ {TARGET_FPS}FPS")
-        print(f"相机失帧保护: {CAMERA_STALE_TIMEOUT_S * 1000:.0f}ms")
-        print(f"平板 TCP: {TABLET_TCP_HOST}:{TABLET_TCP_PORT}")
-        print("机器鱼控制: 通过本机 Go 中央控制器")
+        print("Starting YOLO RoboFish tracking and vision control...")
+        print(f"Working directory: {WORK_DIR}")
+        print(f"Capture target: {TARGET_WIDTH}x{TARGET_HEIGHT} @ {TARGET_FPS} FPS")
+        print(f"Camera stale timeout: {CAMERA_STALE_TIMEOUT_S * 1000:.0f} ms")
+        print(f"Tablet TCP: {TABLET_TCP_HOST}:{TABLET_TCP_PORT}")
+        print("Fish control: routed through the local Go controller")
         print("=" * 60 + "\n")
 
     def _start(self):
         self.cam = CameraStream(src=self.camera_index).start()
         if not self.cam.ret:
-            print("无法打开相机，请检查USB接口或相机索引。")
+            print("Unable to open camera; check USB connection and camera index.")
             return False
 
         self.tablet = TabletTCPServer(
@@ -201,7 +201,7 @@ class VisionApplication:
                 cv2.imshow(self.WINDOW_NAME, startup["frame"])
                 cv2.waitKey(1)
         self.detector.start()
-        print("视觉服务已启动；底部工具栏负责标定、循迹和退出。")
+        print("Vision service started.")
         return True
 
     def _create_path_guidance(self):
@@ -209,7 +209,7 @@ class VisionApplication:
             self.turn_results = load_turn_calibrations(TURN_CALIBRATION_PATH)
         except (OSError, ValueError, TypeError) as error:
             self.turn_results = {}
-            print(f"转圈标定文件无法使用，回退估计半径: {error}")
+            print(f"Turn calibration unavailable; using estimated radius: {error}")
         left = self.turn_results.get("LEFT")
         right = self.turn_results.get("RIGHT")
         return PathGuidance(
@@ -228,11 +228,11 @@ class VisionApplication:
 
     def _report_marker_profile(self):
         if self.reference_tracker.is_profiled:
-            print(f"已加载鱼尾色标模型: {MARKER_PROFILE_PATH}")
+            print(f"Tail marker profile loaded: {MARKER_PROFILE_PATH}")
         elif self.reference_tracker.profile_load_error:
-            print(f"旧色标模型不可用: {self.reference_tracker.profile_load_error}")
+            print(f"Tail marker profile invalid: {self.reference_tracker.profile_load_error}")
         else:
-            print("尚未标定鱼尾色标，请先点击【鱼尾标定】。")
+            print("Tail marker has not been calibrated.")
 
     def _loop(self):
         while not self._exit_requested:
@@ -261,7 +261,7 @@ class VisionApplication:
             if self.status == "CAMERA STALE":
                 self.status = "READY"
                 self.control.status = "READY"
-                print("相机画面已恢复；循迹保持停止，请人工重新启动。")
+                print("Camera stream recovered; tracking remains stopped.")
             self._stop_latched_reason = None
 
             result = self.pipeline.process(
@@ -322,11 +322,11 @@ class VisionApplication:
                 )
                 if error:
                     state["auto_stable_count"] = 0
-                    print(f"自动标定未锁定: {error}")
+                    print(f"Automatic calibration not locked: {error}")
                 else:
                     state["H"] = homography
                     state["auto_locked"] = True
-                    print("四个ArUco角点已稳定，自动标定成功。")
+                    print("Automatic calibration locked from four stable ArUco corners.")
         elif len(corners) < 4:
             state["auto_stable_count"] = 0
             state["auto_prev_points"] = None
@@ -525,7 +525,7 @@ class VisionApplication:
                 self._save_snapshot(rendered_image)
             elif action == "CLAHE":
                 enabled = self.pipeline.toggle_clahe()
-                print(f"CLAHE: {'开启' if enabled else '关闭'}")
+                print(f"CLAHE: {'enabled' if enabled else 'disabled'}")
             elif action == "EXP_DOWN":
                 self._publish_exposure(self.cam.adjust_exposure(-1), payload)
             elif action == "EXP_UP":
@@ -592,19 +592,19 @@ class VisionApplication:
         drawn = self.runtime.drawn_path
         heading = self.runtime.heading
         if self.turn_session.active:
-            print("请先完成转圈测量。")
+            print("Complete turn calibration first.")
             return
         if calibration["H"] is None:
-            print("无法启动：请先完成场地标定。")
+            print("Cannot start: pool calibration is required.")
             return
         if len(drawn["pixels"]) < 2:
-            print("无法启动：请先绘制轨迹。")
+            print("Cannot start: draw a path first.")
             return
         if result.control_position is None:
-            print("无法启动：当前没有可靠鱼尾位置。")
+            print("Cannot start: no reliable tail position.")
             return
         if heading["world_unit_vector"] is None:
-            print("无法启动：请先标定鱼头方向。")
+            print("Cannot start: heading calibration is required.")
             return
         pixels = np.float32([[[x, y] for x, y in drawn["pixels"]]])
         path_world = cv2.perspectiveTransform(pixels, calibration["H"])[0]
@@ -618,24 +618,24 @@ class VisionApplication:
             )
         except (ValueError, RuntimeError) as error:
             self.control.stop("PATH INVALID", clear_path=True)
-            print(f"无法准备轨迹: {error}")
+            print(f"Path preparation failed: {error}")
             return
         start_distance = float(np.linalg.norm(
             np.asarray(result.control_position) - self.control.path_guidance.path[0]
         ))
         if start_distance > 0.40:
             self.control.stop("PATH INVALID", clear_path=True)
-            print(f"轨迹起点距离鱼 {start_distance:.2f}m，请从鱼附近开始画。")
+            print(f"Path starts {start_distance:.2f} m from fish; draw closer to the fish.")
             return
         if not self.fish_comm.ensure_hybrid_mode():
             self.control.stop("CONTROL OFFLINE")
-            print("机器鱼未确认视觉控制准备，未启动。")
+            print("Fish did not acknowledge vision control readiness.")
             return
         self.fish_comm.vision_seq = 0
         self.control.activate(initial)
         drawn["active"] = True
         self.status = self.control.status
-        print(f"循迹已启动：{len(self.control.path_guidance.path)}个等距路径点。")
+        print(f"Tracking started with {len(self.control.path_guidance.path)} path points.")
 
     def _toggle_turn_calibration(self, result):
         if self.turn_session.active:
@@ -644,20 +644,20 @@ class VisionApplication:
                 save_turn_calibration(TURN_CALIBRATION_PATH, fit)
             except (TurnCalibrationError, OSError) as error:
                 self.status = "READY"
-                print(f"转圈测量未保存: {error}")
+                print(f"Turn calibration was not saved: {error}")
                 return
             self.turn_results[fit.direction] = fit
             self.control.path_guidance.set_turn_radius(
                 fit.direction, fit.radius_m
             )
             self.status = "TURN CALIBRATED"
-            print(f"{fit.direction}转圈半径已保存: {fit.radius_m:.3f}m")
+            print(f"{fit.direction} turn radius saved: {fit.radius_m:.3f} m")
             return
         if self.runtime.calibration["H"] is None:
-            print("无法测量：请先完成场地标定。")
+            print("Cannot measure: pool calibration is required.")
             return
         if result.direct_marker_world_position is None:
-            print("无法测量：必须直接锁定鱼尾色标。")
+            print("Cannot measure: tail marker must be locked directly.")
             return
         self._safe_stop("TURN CALIBRATING", force=self.control.active)
         self._cancel_selection_modes()
@@ -665,7 +665,7 @@ class VisionApplication:
             result.direct_marker_world_position, result.frame_time
         )
         self.status = "TURN CALIBRATING"
-        print("转圈测量已开始；再次点击按钮完成拟合。")
+        print("Turn calibration started; click again to fit the circle.")
 
     def _toggle_marker_roi(self):
         self._safe_stop("SELECT MARKER ROI", force=self.control.active)
@@ -691,7 +691,7 @@ class VisionApplication:
             state["dragging"] = False
             state["start"] = state["end"] = None
             self.status = "MARKER ROI RETRY"
-            print(f"鱼尾标定失败: {error}")
+            print(f"Tail marker calibration failed: {error}")
             return
         state["selecting"] = False
         state["dragging"] = False
@@ -700,7 +700,7 @@ class VisionApplication:
         state["confirmed_center"] = found["marker_center"]
         state["confirmed_until"] = time.time() + 3.0
         self.status = "MARKER READY"
-        print(f"鱼尾模型已保存，H={profile.hue_center:.1f}±{profile.hue_tolerance:.1f}")
+        print(f"Tail marker profile saved: H={profile.hue_center:.1f}+/-{profile.hue_tolerance:.1f}")
 
     def _toggle_head_direction(self):
         self._safe_stop("SELECT HEAD DIRECTION", force=self.control.active)
@@ -716,14 +716,14 @@ class VisionApplication:
         tail_point = self.runtime.frame["tail_marker_position"]
         homography = self.runtime.calibration["H"]
         if homography is None or tail_point is None:
-            print("需要有效场地标定和鱼尾中心。")
+            print("Valid pool calibration and tail center are required.")
             return
         head = tuple(float(value) for value in head_point)
         tail = tuple(float(value) for value in tail_point)
         delta = np.asarray(head) - np.asarray(tail)
         length = float(np.linalg.norm(delta))
         if length < 15.0:
-            print("鱼头点离鱼尾太近，请重新点击。")
+            print("Heading point is too close to the tail; select it again.")
             return
         world = cv2.perspectiveTransform(
             np.float32([[tail, head]]), homography
@@ -731,7 +731,7 @@ class VisionApplication:
         world_delta = world[1] - world[0]
         world_length = float(np.linalg.norm(world_delta))
         if world_length <= 1e-6:
-            print("鱼头方向映射失败。")
+            print("Heading mapping failed.")
             return
         unit = world_delta / world_length
         state.update({
@@ -770,7 +770,7 @@ class VisionApplication:
             self.pipeline.reset_motion()
             self._reset_heading()
             self.status = "CALIBRATING"
-            print("依次点击左上、右上、右下、左下。")
+            print("Select corners in order: top-left, top-right, bottom-right, bottom-left.")
         else:
             self.status = "UNCALIBRATED"
 
@@ -785,13 +785,13 @@ class VisionApplication:
             state["pts_raw"], self.cam.real_width, self.cam.real_height
         )
         if error:
-            print(f"手动标定失败: {error}")
+            print(f"Manual calibration failed: {error}")
             state["pts_raw"].clear()
             return
         state["H"] = homography
         state["manual_locked"] = True
         state["is_calibrating"] = False
-        print("手动场地标定完成。")
+        print("Manual pool calibration completed.")
 
     def _cancel_selection_modes(self):
         self.runtime.calibration["is_calibrating"] = False
@@ -811,7 +811,7 @@ class VisionApplication:
             self.recorder.close()
             self.recorder = None
             self.is_recording = False
-            print("录像已保存。")
+            print("Recording saved.")
             return
         stamp = time.strftime("%Y%m%d_%H%M%S")
         fps = max(1.0, round(self.cam.measured_fps, 1))
@@ -824,7 +824,7 @@ class VisionApplication:
             csv_path=os.path.join(OUTPUT_DIR, f"auv_data_{stamp}.csv"),
         )
         self.is_recording = True
-        print(f"开始录像: {fps} FPS")
+        print(f"Recording started at {fps} FPS")
 
     @staticmethod
     def _save_snapshot(image):
@@ -833,10 +833,10 @@ class VisionApplication:
         os.makedirs(OUTPUT_DIR, exist_ok=True)
         path = os.path.join(OUTPUT_DIR, name)
         cv2.imwrite(path, image)
-        print(f"抓拍已保存: {path}")
+        print(f"Snapshot saved: {path}")
 
     def _close(self):
-        print("\n正在停止推进并释放视觉服务...")
+        print("\nStopping propulsion and releasing vision resources...")
         if self.fish_comm is not None:
             self.fish_comm.close()
         if self.tablet is not None:
@@ -851,7 +851,7 @@ class VisionApplication:
             self.recorder.close()
         if not self.headless:
             cv2.destroyAllWindows()
-        print("视觉程序已安全退出。")
+        print("Vision application exited safely.")
 
 
 def main():

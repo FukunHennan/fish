@@ -88,8 +88,8 @@ class FishDetector:
         )
         self.thread.start()
         print(
-            "[YOLO] 正在后台加载，视觉窗口可先使用"
-            f"（设备: {self.device}, 输入尺寸: {self.imgsz}）"
+            "[YOLO] Loading model in background; preview remains available "
+            f"(device={self.device}, image_size={self.imgsz})"
         )
         return self
 
@@ -131,7 +131,7 @@ class FishDetector:
                     error=str(error),
                     load_seconds=load_seconds,
                 )
-            print(f"[YOLO] 后台加载失败: {error}")
+            print(f"[YOLO] Model load failed: {error}")
             return
 
         load_seconds = time.perf_counter() - load_started
@@ -144,7 +144,7 @@ class FishDetector:
                 error=None,
                 load_seconds=load_seconds,
             )
-        print(f"[YOLO] 模型后台加载完成，用时 {load_seconds:.2f}s")
+        print(f"[YOLO] Model ready in {load_seconds:.2f}s")
         inference_device = resolve_inference_device(
             self.device, getattr(model, "device", self.device)
         )
@@ -174,7 +174,7 @@ class FishDetector:
             except Exception as error:
                 with self._status_lock:
                     self._status["last_inference_error"] = str(error)
-                print(f"[YOLO] 推理出错: {error}")
+                print(f"[YOLO] Inference failed: {error}")
                 continue
 
             if self._stop_event.is_set():

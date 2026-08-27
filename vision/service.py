@@ -102,7 +102,7 @@ def enumerate_cameras(
                 info = _camera_info(index, name, capture)
                 cameras.append(info)
                 print(
-                    f"[CameraCatalog] 发现 {name}: index={index}, "
+                    f"[CameraCatalog] Found {name}: index={index}, "
                     f"backend={backend_name}, {info.width}x{info.height}, fps={info.fps}"
                 )
             finally:

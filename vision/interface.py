@@ -83,9 +83,9 @@ class CameraStream:
             result = apply_manual_exposure(self.cap, delta)
             if result.status == "completed":
                 self.exposure_val = result.actual_value
-                print(f"相机手动曝光值调整为: {self.exposure_val}")
+                print(f"[Camera] Manual exposure changed to {self.exposure_val}")
             else:
-                print(f"相机曝光调整失败: {result.error_code}")
+                print(f"[Camera] Exposure adjustment failed: {result.error_code}")
             return result
 
     def update(self):
@@ -141,7 +141,7 @@ class CameraStream:
         if self.thread.is_alive():
             self.thread.join(timeout=2.0)
         if self.thread.is_alive():
-            print("相机采集线程未在2秒内退出，进程结束时将由系统回收。")
+            print("[Camera] Capture thread did not exit within 2 seconds.")
 
 
 import json
@@ -185,7 +185,7 @@ class TabletTCPServer:
             self.server_socket.bind((self.host, self.port))
             self.server_socket.listen(1)
             self.server_socket.settimeout(1.0)
-            print(f"平板 TCP 有线双向服务器已启动: {self.host}:{self.port}")
+            print(f"[Tablet] TCP server started: {self.host}:{self.port}")
             self._accept_thread = threading.Thread(target=self._accept_loop, daemon=True)
             self._accept_thread.start()
             self._sender_thread = threading.Thread(target=self._sender_loop, daemon=True)
@@ -193,7 +193,7 @@ class TabletTCPServer:
             self._receiver_thread = threading.Thread(target=self._receiver_loop, daemon=True)
             self._receiver_thread.start()
         except Exception as error:
-            print(f"平板 TCP 服务器启动失败: {error}")
+            print(f"[Tablet] TCP server failed to start: {error}")
 
     def _accept_loop(self):
         while not self._stop:
@@ -208,7 +208,7 @@ class TabletTCPServer:
                             pass
                     self.client_socket = conn
                     self.client_addr = addr
-                print(f"平板 UI 已建立连接: {addr}")
+                print(f"[Tablet] UI connected: {addr}")
             except socket.timeout:
                 continue
             except (OSError, AttributeError):
@@ -236,7 +236,7 @@ class TabletTCPServer:
             except (OSError, BrokenPipeError):
                 with self._lock:
                     if self.client_socket:
-                        print(f"平板 UI 连接断开: {self.client_addr}")
+                        print(f"[Tablet] UI disconnected: {self.client_addr}")
                         try:
                             self.client_socket.close()
                         except OSError:
@@ -280,8 +280,8 @@ class TabletTCPServer:
                         reverse = parsed.get("reverse", False)
                         loop_flag = parsed.get("loop", False)
                         print(
-                            " [UI 消息] 收到轨迹规划: "
-                            f"点数={num_pts} | 模式={mode} | 反向={reverse} | 循环={loop_flag}"
+                            "[Tablet] Path plan received: "
+                            f"points={num_pts} | mode={mode} | reverse={reverse} | loop={loop_flag}"
                         )
                     elif msg_type == "tracking_error":
                         with self._rx_lock:
@@ -289,13 +289,13 @@ class TabletTCPServer:
                     elif msg_type == "command":
                         command = parsed.get("cmd")
                         self._command_queue.put(parsed)
-                        print(f" [UI 消息] 收到控制指令: 【{str(command).upper()}】")
+                        print(f"[Tablet] Control command received: {str(command).upper()}")
             except socket.timeout:
                 continue
             except (OSError, ConnectionResetError):
                 with self._lock:
                     if self.client_socket:
-                        print("平板 UI 接收通道已断开")
+                        print("[Tablet] UI receive channel disconnected")
                         try:
                             self.client_socket.close()
                         except OSError:
@@ -390,7 +390,7 @@ class MJPEGServer:
         def video():
             with self._viewer_lock:
                 if not has_viewer_capacity(self._viewer_count, self.max_viewers):
-                    print(f"视频流已有 {self._viewer_count} 个客户端在看，拒绝新连接")
+                    print(f"[MJPEG] Viewer limit reached ({self._viewer_count}); rejecting connection")
                     return Response("视频流已被占用，请先关闭其他正在观看的窗口/设备", status=503)
             return Response(
                 self.generate(),
@@ -411,7 +411,7 @@ class MJPEGServer:
     def generate(self):
         with self._viewer_lock:
             self._viewer_count += 1
-            print(f"视频流新增1个观看者，当前共 {self._viewer_count} 个")
+            print(f"[MJPEG] Viewer connected; total={self._viewer_count}")
 
         last_send_t = 0.0
         min_interval = 1.0 / MJPEG_MAX_FPS
@@ -445,7 +445,7 @@ class MJPEGServer:
         finally:
             with self._viewer_lock:
                 self._viewer_count = max(0, self._viewer_count - 1)
-                print(f"视频流断开1个观看者，当前共 {self._viewer_count} 个")
+                print(f"[MJPEG] Viewer disconnected; total={self._viewer_count}")
 
     def start(self):
         if self._thread is not None and self._thread.is_alive():
@@ -459,7 +459,7 @@ class MJPEGServer:
             daemon=True,
         )
         self._thread.start()
-        print(f"MJPEG视频流已启动: http://0.0.0.0:{self.port}/video.mjpg")
+        print(f"[MJPEG] Stream started: http://0.0.0.0:{self.port}/video.mjpg")
         return self
 
     def close(self):
@@ -521,4 +521,4 @@ class AsyncVideoRecorder:
         self.video_out.release()
         self.csv_file.close()
         if self.dropped_frames > 0:
-            print(f"录制过程中磁盘写入跟不上，丢弃了 {self.dropped_frames} 帧")
+            print(f"[Recorder] Disk writer lagged; dropped {self.dropped_frames} frames")

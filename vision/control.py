@@ -27,7 +27,7 @@ class RoboFishComm:
         self._motion_enabled = False
         self.thread = threading.Thread(target=self._worker_loop, daemon=True)
         self.thread.start()
-        print(f"视觉控制通过 Go 中央控制器转发 -> {self.base_url}")
+        print(f"Vision control routed through Go controller -> {self.base_url}")
 
     def _post(self, payload, timeout=0.5):
         request = urllib.request.Request(
@@ -93,7 +93,7 @@ class RoboFishComm:
                         )
                         latency_ms = (time.perf_counter() - request_started) * 1000.0
                         print(
-                            f"[VISION 已转发] seq={params['seq']} "
+                            f"[VISION Forwarded] seq={params['seq']} "
                             f"RTT={latency_ms:.1f}ms"
                         )
                     else:
@@ -107,13 +107,13 @@ class RoboFishComm:
             except Exception as error:
                 if params.get("kind") == "vision_pid":
                     print(
-                        f"[VISION ACK 失败] seq={params.get('seq', '-')} "
+                        f"[VISION ACK Failed] seq={params.get('seq', '-')} "
                         f"x={float(params.get('x_error', 0.0)):+.4f}m "
                         f"y={float(params.get('y_error', 0.0)):.4f}m "
-                        f"错误={error}"
+                        f"error={error}"
                     )
                 else:
-                    print(f"[Go 转发失败] {error}")
+                    print(f"[Go Forwarding] Failed: {error}")
 
     def get_mcu_hz(self):
         if time.time() - self._last_send_t > 1.5:
@@ -163,7 +163,7 @@ class RoboFishComm:
             "hybrid": "mode_hybrid",
         }
         target_mode = mode_map.get(str(motion_mode).lower(), "mode_bionic")
-        print(f"[HTTP 下发] 切换机器鱼模式为: {target_mode}")
+        print(f"[HTTP Command] Switching fish mode to {target_mode}")
         self._send_async({"action": target_mode})
 
     def ensure_hybrid_mode(self):
@@ -182,17 +182,17 @@ class RoboFishComm:
                     return False
                 self._motion_enabled = True
             print(
-                f"[HTTP 视觉准备] 会话 {session} 已建立，"
-                "旧 PID 命令全部失效"
+                f"[HTTP Vision Ready] Session {session} established; "
+                "all previous PID commands invalidated"
             )
             return True
         except Exception as error:
-            print(f"[HTTP 视觉准备失败] {error}")
+            print(f"[HTTP Vision Ready] Failed: {error}")
             return False
 
     def send_command(self, cmd_str):
         if cmd_str in ["stop", "emergency_stop"]:
-            print("[HTTP 下发] 机器鱼急停/停止推进")
+            print("[HTTP Command] Emergency stop / propulsion stop")
             return self.stop_now()
 
     def stop_now(self):
@@ -205,10 +205,10 @@ class RoboFishComm:
         try:
             with self._request_lock:
                 self._post({"operation": "stop", "sessionId": self._session_id}, timeout=0.5)
-            print("[HTTP 反馈] 推进已停止")
+            print("[HTTP Response] Propulsion stopped")
             return True
         except Exception as error:
-            print(f"[HTTP 停止失败] {error}")
+            print(f"[HTTP Stop] Failed: {error}")
             return False
 
     def process_tracking_error(
@@ -238,13 +238,13 @@ class RoboFishComm:
         })
         if queued:
             print(
-                f"[VISION 入队] seq={self.vision_seq} "
+                f"[VISION Queued] seq={self.vision_seq} "
                 f"x={cross_m:+.3f}m y={dist_m:.3f}m "
-                f"v={speed_mps:.2f}m/s 离={cross_track_m:.2f}m "
-                f"角={heading_error_deg:+.0f}° "
-                f"曲率={path_curvature_per_m:+.2f}/m "
-                f"转向={steering_demand:+.2f} "
-                f"制动={'是' if brake_request else '否'}"
+                f"v={speed_mps:.2f}m/s cross={cross_track_m:.2f}m "
+                f"heading={heading_error_deg:+.0f}deg "
+                f"curvature={path_curvature_per_m:+.2f}/m "
+                f"steering={steering_demand:+.2f} "
+                f"brake={'yes' if brake_request else 'no'}"
             )
         return queued
 
