@@ -5,14 +5,13 @@ import { transitionVisionTool } from "./visionTools.js";
 import { canEditVision, visionRequest, visionStreamUrl } from "./visionSession.js";
 
 const TOOLS = [
-  ["calibration", "场地标定"],
   ["path", "绘制轨迹"],
+  ["calibration", "场地测量标定（可选）"],
 ];
 
 const WORKFLOW_STAGES = [
   ["targetDetected", "单鱼目标"],
   ["headingCalibrated", "方向标定"],
-  ["poolCalibrated", "场地标定"],
   ["pathReady", "轨迹路径"],
   ["trackingActive", "循迹运行"],
 ];
@@ -48,6 +47,7 @@ export default function VisionPanel() {
   const workflow = status.metrics?.workflow || {};
   const workflowLabel = STAGE_LABELS[workflow.stage] || "等待视觉状态";
   const yoloLabel = yolo?.ready ? "YOLO 就绪" : yolo?.loading ? "YOLO 加载中" : yolo?.error ? "YOLO 异常" : "YOLO 等待启动";
+  const coordinateLabel = workflow.controlCoordinateMode === "FIELD" ? "场地坐标" : "画面坐标";
 
   useEffect(() => {
     let active = true;
@@ -95,9 +95,7 @@ export default function VisionPanel() {
   function reconnectStream() {
     setStreamFeedback("视频流中断，正在自动重连…");
     window.clearTimeout(retryTimerRef.current);
-    retryTimerRef.current = window.setTimeout(() => {
-      setStreamRetry((current) => current + 1);
-    }, 1000);
+    retryTimerRef.current = window.setTimeout(() => setStreamRetry((current) => current + 1), 1000);
   }
 
   function streamConnected() {
@@ -144,9 +142,7 @@ export default function VisionPanel() {
     const { activeTool, actionType } = transitionVisionTool(tool, nextTool);
     setTool(activeTool);
     if (actionType) await sendAction({ type: actionType });
-    setFeedback(activeTool
-      ? `${TOOLS.find(([name]) => name === activeTool)?.[1]}模式`
-      : "画布工具已关闭");
+    setFeedback(activeTool ? `${TOOLS.find(([name]) => name === activeTool)?.[1] || "画布工具"}模式` : "画布工具已关闭");
   }
 
   function pointFrom(event) {
@@ -166,9 +162,7 @@ export default function VisionPanel() {
     if (!drag || tool !== "path") return;
     const point = pointFrom(event);
     const last = drag.points[drag.points.length - 1];
-    if ((point.x - last.x) ** 2 + (point.y - last.y) ** 2 >= 16) {
-      setDrag({ ...drag, points: [...drag.points, point] });
-    }
+    if ((point.x - last.x) ** 2 + (point.y - last.y) ** 2 >= 16) setDrag({ ...drag, points: [...drag.points, point] });
   }
 
   async function pointerUp(event) {
@@ -187,7 +181,11 @@ export default function VisionPanel() {
     <section className="vision-card" aria-label="视觉控制">
       <header className="vision-header">
         <div><span className="eyebrow">FISH VISION</span><h2>视觉工作区</h2></div>
-        <div className="vision-header-status"><span className={`status ${running ? "online" : "offline"}`}><i />{running ? "运行中" : "已停止"}</span><span className={`status ${yolo?.ready ? "online" : "offline"}`}><i />{yoloLabel}</span></div>
+        <div className="vision-header-status">
+          <span className={`status ${running ? "online" : "offline"}`}><i />{running ? "运行中" : "已停止"}</span>
+          <span className={`status ${yolo?.ready ? "online" : "offline"}`}><i />{yoloLabel}</span>
+          {running && <span className="status online"><i />{coordinateLabel}</span>}
+        </div>
       </header>
       <div className="vision-layout">
         <div className="video-stage" onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp}>
@@ -215,7 +213,7 @@ export default function VisionPanel() {
             <button disabled={!running} onClick={() => sendAction({ type: "snapshot.capture" })}>截图</button>
           </div>
           <div className="tracking-actions"><button disabled={!running || !workflow.canStart} onClick={() => sendAction({ type: "tracking.start" })}>{workflow.headingCalibrating ? "方向标定中" : workflow.trackingActive ? "循迹运行中" : "启动循迹"}</button><button className="stop" disabled={!running} onClick={() => sendAction({ type: "tracking.stop" })}>停止循迹</button></div>
-          <p className="feedback" aria-live="polite">{streamFeedback || feedback || yolo?.error || yolo?.lastInferenceError || (running ? `摄像头 ${status.cameraIndex} 正在处理 · ${yoloLabel}` : "视觉服务未启动")}</p>
+          <p className="feedback" aria-live="polite">{streamFeedback || feedback || yolo?.error || yolo?.lastInferenceError || (running ? `摄像头 ${status.cameraIndex} 正在处理 · ${yoloLabel} · ${coordinateLabel}` : "视觉服务未启动")}</p>
         </aside>
       </div>
     </section>
