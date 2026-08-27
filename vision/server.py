@@ -8,13 +8,14 @@ from waitress import serve as waitress_serve
 import main as vision_main
 from camera_stream import RestartSafeCameraStream
 from service import VisionService
+from tracking_application import TrackingVisionApplication
 from web_api import create_app
 
 # The web UI repeatedly opens and closes preview sessions. Use stricter
 # DirectShow shutdown semantics for this path so a new session cannot race a
 # capture thread that still owns the USB camera.
 vision_main.CameraStream = RestartSafeCameraStream
-VisionApplication = vision_main.VisionApplication
+VisionApplication = TrackingVisionApplication
 
 
 def start_application_runner(
