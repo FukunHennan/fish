@@ -5,13 +5,17 @@
 #include "CommandProcessor.h"
 #include "DeviceConfig.h"
 #include "VisualController.h"
+#include "BatteryMonitor.h"
+#include "AmbientLightMonitor.h"
+#include "StatusLight.h"
 
 class ControllerClient {
 public:
-    ControllerClient(MotionController& motion, CommandProcessor& commands, VisualController& visual);
+    ControllerClient(MotionController& motion, CommandProcessor& commands, VisualController& visual, BatteryMonitor& battery, AmbientLightMonitor& ambientLight, StatusLight& statusLight);
     void begin(const DeviceConfig& config);
     void setEndpoint(const IPAddress& host, uint16_t port);
     bool endpointReady() const { return endpointReady_; }
+    bool registered() const { return registered_; }
     void update(uint32_t nowMs, bool networkConnected);
 private:
     void onEvent(WStype_t type, uint8_t* payload, size_t length);
@@ -24,6 +28,9 @@ private:
     MotionController& motion_;
     CommandProcessor& commands_;
     VisualController& visual_;
+    BatteryMonitor& battery_;
+    AmbientLightMonitor& ambientLight_;
+    StatusLight& statusLight_;
     DeviceConfig config_;
     bool started_=false,registered_=false;
     bool endpointReady_=false;

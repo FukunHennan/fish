@@ -1,0 +1,96 @@
+INFO:werkzeug:127.0.0.1 - - [27/Aug/2026 13:20:45] "GET /video.mjpg?retry=3 HTTP/1.1" 200 -
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 1 with DSHOW
+[CameraCatalog] Found Global Shutter Camera: index=1, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 1 with DSHOW
+[CameraCatalog] Found Global Shutter Camera: index=1, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 0 with DSHOW
+[CameraCatalog] Found Integrated Camera: index=0, backend=DSHOW, 640x480, fps=None
+[Camera] Opened index 1 with DSHOW
+[CameraCatalog] Found Global Shutter Camera: index=1, backend=DSHOW, 640x480, fps=None
+
+============================================================
+Starting YOLO RoboFish tracking and vision control...
+Working directory: C:\Users\LENOVO\Desktop\fish\vision
+Capture target: 640x480 @ 60 FPS
+Camera stale timeout: 350 ms
+Tablet TCP: 0.0.0.0:9998
+Fish control: routed through the local Go controller
+============================================================
+
+[Camera] Opened index 1 with DSHOW
+[Camera] Initialized: backend=DSHOW, actual=640x480@60.0
+[Tablet] TCP server started: 0.0.0.0:9998
+[MJPEG] Stream started: http://0.0.0.0:8090/video.mjpg
+Vision control routed through Go controller -> http://127.0.0.1:8081/api/vision/device-command
+Tail marker has not been calibrated.
+[YOLO] Loading model in background; preview remains available (device=0, image_size=640)
+Vision service started.
+[MJPEG] Viewer connected; total=1

@@ -23,7 +23,10 @@ func TestOtaEndpointServesFirmwareAndSendsVerifiedMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := hub.New()
-	connection := &captureConn{}
+	connection := &captureConn{onWrite: func(value any) {
+		message := value.(map[string]any)
+		h.ResolveCommandResult(map[string]any{"type": "command.result", "requestId": message["requestId"], "success": true, "code": "OK", "message": "installed"})
+	}}
 	h.Register(hub.Device{ID: "fish-1"}, connection)
 	handler := NewHandlerWithFirmware(h, testKey(), path)
 	w := httptest.NewRecorder()
@@ -42,12 +45,25 @@ func TestOtaEndpointServesFirmwareAndSendsVerifiedMetadata(t *testing.T) {
 	if message["command"] != "ota.start" || payload["sha256"] != expected || payload["size"] != len(firmware) {
 		t.Fatalf("OTA 元数据错误: %#v", message)
 	}
+	var otaResponse map[string]any
+	if json.Unmarshal(w.Body.Bytes(), &otaResponse) != nil || otaResponse["acknowledged"] != true || otaResponse["success"] != true {
+		t.Fatalf("OTA response did not include device acknowledgement: %s", w.Body.String())
+	}
 }
 
-type captureConn struct{ sent []any }
+type captureConn struct {
+	sent    []any
+	onWrite func(any)
+}
 
-func (c *captureConn) WriteJSON(v any) error { c.sent = append(c.sent, v); return nil }
-func (c *captureConn) Close() error          { return nil }
+func (c *captureConn) WriteJSON(v any) error {
+	c.sent = append(c.sent, v)
+	if c.onWrite != nil {
+		c.onWrite(v)
+	}
+	return nil
+}
+func (c *captureConn) Close() error { return nil }
 
 func testKey() []byte { return make([]byte, 32) }
 
@@ -158,7 +174,14 @@ func TestDashboardServesReactApplication(t *testing.T) {
 
 func TestMotionCommandIncludesBiasAndRequestID(t *testing.T) {
 	h := hub.New()
-	c := &captureConn{}
+	c := &captureConn{onWrite: func(value any) {
+		message := value.(map[string]any)
+		h.ResolveCommandResult(map[string]any{
+			"type": "command.result", "requestId": message["requestId"], "success": true,
+			"code": "OK", "message": "applied",
+			"applied": map[string]any{"mode": 3.0, "frequency": 2.5, "amplitude": 28.0, "bias": -8.0},
+		})
+	}}
 	h.Register(hub.Device{ID: "fish-1"}, c)
 	handler := NewHandler(h, testKey())
 	body := `{"deviceId":"fish-1","mode":"left","frequency":2.5,"amplitude":28,"bias":-8}`
@@ -174,7 +197,7 @@ func TestMotionCommandIncludesBiasAndRequestID(t *testing.T) {
 		t.Fatalf("命令缺少偏置或请求 ID: %#v", message)
 	}
 	var response map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil || response["requestId"] == "" || response["sent"] != true {
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil || response["requestId"] == "" || response["sent"] != true || response["acknowledged"] != true {
 		t.Fatalf("响应缺少发送结果: %s", w.Body.String())
 	}
 }

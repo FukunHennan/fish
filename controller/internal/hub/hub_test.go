@@ -1,6 +1,9 @@
 package hub
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 type fakeConn struct{ sent []any }
 
@@ -32,9 +35,10 @@ func TestDeviceStateUpdateKeepsDashboardFields(t *testing.T) {
 		"mode": 1.0, "frequency": 2.8, "amplitude": 31.0, "bias": -6.0,
 		"rssi": -48.0, "ip": "192.168.137.117", "firmwareVersion": "1.1.0",
 		"uptimeMs": 12345.0, "lastControlMs": 12000.0, "stopReason": "",
+		"batteryVoltage": 7.82, "batteryPercent": 76.0, "batterySampleAgeMs": 321.0,
 	})
 	d := h.List()[0]
-	if d.Bias != -6 || d.IP != "192.168.137.117" || d.UptimeMs != 12345 || d.LastControlMs != 12000 {
+	if d.Bias != -6 || d.IP != "192.168.137.117" || d.UptimeMs != 12345 || d.LastControlMs != 12000 || d.BatteryVoltage != 7.82 || d.BatteryPercent != 76 || d.BatterySampleAgeMs != 321 {
 		t.Fatalf("设备状态字段未完整保存: %+v", d)
 	}
 }
@@ -64,5 +68,21 @@ func TestSendOnlyRequiresExactlyOneConnectedDevice(t *testing.T) {
 	h.Register(Device{ID: "fish-2"}, &fakeConn{})
 	if h.SendOnly(map[string]any{"command": "vision.stop"}) {
 		t.Fatal("多设备且未选择目标时不应发送")
+	}
+}
+
+func TestSendAndWaitClosesCommandLoop(t *testing.T) {
+	h := New()
+	c := &fakeConn{}
+	h.Register(Device{ID: "fish-1"}, c)
+	go func() {
+		for len(c.sent) == 0 {
+			time.Sleep(time.Millisecond)
+		}
+		h.ResolveCommandResult(map[string]any{"type": "command.result", "requestId": "req-1", "success": true})
+	}()
+	ack, sent, acknowledged := h.SendAndWait("fish-1", "req-1", map[string]any{"type": "command"}, time.Second)
+	if !sent || !acknowledged || ack["success"] != true {
+		t.Fatalf("command loop did not close: sent=%v acknowledged=%v ack=%#v", sent, acknowledged, ack)
 	}
 }

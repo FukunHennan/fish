@@ -11,6 +11,7 @@ const MODE_LABELS = {
 };
 const ACTIONS = [["left", "左转"], ["forward", "前进"], ["right", "右转"], ["idle", "IDLE"]];
 const ALIAS_STORAGE_KEY = "fish-controller-device-aliases-v1";
+const MODE_NAMES = { 0: "stop", 1: "idle", 2: "forward", 3: "left", 4: "right" };
 
 function clamp(value, min, max, fallback) {
   const number = Number(value);
@@ -37,6 +38,11 @@ function loadAliases() {
   } catch { return {}; }
 }
 function normalizeDeviceName(value) { return String(value || "").trim().toLocaleLowerCase(); }
+function batteryLevel(device) {
+  const value = Number(device?.batteryPercent);
+  return Number.isFinite(value) && Number(device?.batteryVoltage) > 0 ? value : null;
+}
+function batteryTone(percent) { return percent == null ? "unknown" : percent < 20 ? "critical" : percent < 40 ? "low" : "normal"; }
 
 function App() {
   const [page, setPage] = useState("control");
@@ -60,16 +66,26 @@ function App() {
   const [renameDevice, setRenameDevice] = useState(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [renameError, setRenameError] = useState("");
+  const [rgbColor, setRgbColor] = useState("#00ff66");
+  const [rgbBrightness, setRgbBrightness] = useState(32);
+  const [rgbOrder, setRgbOrder] = useState("GRB");
 
   const onlineDevices = useMemo(() => devices.filter((device) => device.online), [devices]);
+  const lowBatteryCount = useMemo(() => onlineDevices.filter((device) => (batteryLevel(device) ?? 101) < 20).length, [onlineDevices]);
   const selectedDevices = useMemo(() => devices.filter((device) => selectedIds.has(device.deviceId)), [devices, selectedIds]);
   const selectedOnline = useMemo(() => selectedDevices.filter((device) => device.online), [selectedDevices]);
+  const parameterSelectionKey = useMemo(() => selectedDevices.map((device) => device.deviceId).sort().join("|"), [selectedDevices]);
   const otaSelectedDevices = useMemo(() => devices.filter((device) => otaSelectedIds.has(device.deviceId) && device.online), [devices, otaSelectedIds]);
   const visibleDevices = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return devices;
     return devices.filter((device) => `${deviceLabel(device)} ${device.deviceId || ""} ${device.ip || ""}`.toLowerCase().includes(needle));
   }, [devices, query]);
+  const selectedBattery = useMemo(() => {
+    const measured = selectedDevices.filter((device) => batteryLevel(device) != null);
+    if (!measured.length) return null;
+    return measured.reduce((lowest, device) => batteryLevel(device) < batteryLevel(lowest) ? device : lowest);
+  }, [selectedDevices]);
 
   useEffect(() => {
     let active = true;
@@ -115,7 +131,7 @@ function App() {
     setFrequency(device.frequency ?? 2.5);
     setAmplitude(device.amplitude ?? 28);
     setBias(device.bias ?? 0);
-  }, [selectedDevices, sending]);
+  }, [parameterSelectionKey]);
 
   function toggleSet(setter, deviceId) {
     setter((current) => {
@@ -171,8 +187,29 @@ function App() {
       }),
     });
     const result = await response.json().catch(() => ({}));
-    if (!response.ok || result.sent === false) throw new Error(result.message || `${deviceLabel(device)} 发送失败`);
+    if (!response.ok || result.sent === false || result.acknowledged !== true || result.success !== true) {
+      throw new Error(result.message || `${deviceLabel(device)} 未确认应用`);
+    }
+    if (result.applied) {
+      setDevices((current) => current.map((item) => item.deviceId === device.deviceId ? { ...item, ...result.applied } : item));
+    }
     return result;
+  }
+
+  async function applyParameters() {
+    if (paramMode !== "sync" || !selectedOnline.length || sending) {
+      if (!selectedOnline.length) setFeedback("请选择至少一台在线机器鱼");
+      return;
+    }
+    setSending(true);
+    setFeedback(`参数已发送，等待 ${selectedOnline.length} 台开发板确认…`);
+    const params = { frequency, amplitude, bias };
+    const results = await Promise.allSettled(selectedOnline.map((device) => sendCommand(device, activeMode || MODE_NAMES[device.mode] || "stop", params)));
+    const failed = results.filter((result) => result.status === "rejected");
+    setFeedback(failed.length
+      ? `开发板确认 ${results.length - failed.length}/${results.length} 台：${failed[0].reason?.message || "部分设备失败"}`
+      : `开发板已确认应用：${Number(frequency).toFixed(1)} Hz · ${amplitude}° · ${Number(bias) > 0 ? "+" : ""}${bias}°`);
+    setSending(false);
   }
 
   async function sendToSelection(mode) {
@@ -183,7 +220,7 @@ function App() {
     const results = await Promise.allSettled(selectedOnline.map((device) => sendCommand(device, mode, shared)));
     const failed = results.filter((result) => result.status === "rejected").length;
     if (mode === "stop") setActiveMode(""); else if (!failed) setActiveMode(mode);
-    setFeedback(failed ? `已发送 ${results.length - failed}/${results.length} 台，${failed} 台失败` : `已发送：${MODE_LABELS[mode] || mode} · ${results.length} 台设备`);
+    setFeedback(failed ? `开发板确认 ${results.length - failed}/${results.length} 台，${failed} 台失败` : `开发板已确认：${MODE_LABELS[mode] || mode} · ${results.length} 台设备`);
     setSending(false);
   }
 
@@ -229,12 +266,23 @@ function App() {
     const results = await Promise.allSettled(otaSelectedDevices.map(async (device) => {
       const response = await fetch("/api/ota", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deviceId: device.deviceId }) });
       const result = await response.json().catch(() => ({}));
-      if (!response.ok || result.sent === false) throw new Error(result.message || "OTA 启动失败");
+      if (!response.ok || result.sent === false || result.acknowledged !== true || result.success !== true) throw new Error(result.message || "开发板未确认 OTA 完成");
       return result;
     }));
     const failed = results.filter((result) => result.status === "rejected").length;
-    setOtaFeedback(failed ? `OTA 已启动 ${results.length - failed}/${results.length} 台，${failed} 台失败` : `OTA 任务已发送 · ${results.length} 台`);
+    setOtaFeedback(failed ? `OTA 确认 ${results.length - failed}/${results.length} 台，${failed} 台失败` : `开发板已确认 OTA 写入完成 · ${results.length} 台`);
     setSending(false);
+  }
+
+  async function setRgb(device, mode) {
+    const red = parseInt(rgbColor.slice(1, 3), 16), green = parseInt(rgbColor.slice(3, 5), 16), blue = parseInt(rgbColor.slice(5, 7), 16);
+    setOtaFeedback(`正在等待 ${deviceLabel(device)} 确认 RGB 设置…`);
+    try {
+      const response = await fetch("/api/rgb", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({deviceId:device.deviceId,mode,order:rgbOrder,red,green,blue,brightness:Number(rgbBrightness)}) });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.acknowledged !== true || result.success !== true) throw new Error(result.message || "RGB 设置失败");
+      setOtaFeedback(mode === "AUTO" ? `${deviceLabel(device)} 已恢复自动状态灯` : `${deviceLabel(device)} 已确认 RGB 颜色`);
+    } catch (rgbError) { setOtaFeedback(`RGB 设置失败：${rgbError.message}`); }
   }
 
   const targetTitle = selectedDevices.length === 0 ? "未选择设备" : selectedDevices.length === 1 ? deviceLabel(selectedDevices[0]) : `已选择 ${selectedDevices.length} 台`;
@@ -252,6 +300,7 @@ function App() {
             <button className={page === "maintenance" ? "active" : ""} onClick={() => setPage("maintenance")}>OTA / 设置</button>
           </nav>
           <span className="top-metric"><b>{onlineDevices.length}</b><small>在线 / {devices.length}</small></span>
+          <span className={`top-metric battery-metric ${lowBatteryCount ? "critical" : ""}`}><b>{lowBatteryCount}</b><small>低电量</small></span>
           <span className="status online"><i /> Controller</span>
           <button className="top-stop" disabled={!onlineDevices.length || sending} onClick={stopAll}>ALL STOP</button>
         </div>
@@ -267,10 +316,12 @@ function App() {
             <div className="device-list">
               {visibleDevices.map((device) => {
                 const selected = selectedIds.has(device.deviceId);
-                return <button key={device.deviceId} className={`device-row ${selected ? "selected" : ""}`} disabled={!device.online} onClick={() => toggleSet(setSelectedIds, device.deviceId)}>
+                const percent = batteryLevel(device);
+                const tone = batteryTone(percent);
+                return <button key={device.deviceId} className={`device-row ${selected ? "selected" : ""} battery-${tone}`} disabled={!device.online} onClick={() => toggleSet(setSelectedIds, device.deviceId)}>
                   <span className="device-check">{selected ? "✓" : ""}</span>
                   <span className="device-main"><strong>{deviceLabel(device)}</strong><small>{MODE_LABELS[device.mode] || "未知"} · {device.frequency ?? "—"} Hz</small></span>
-                  <span className={`signal ${device.online ? "online" : ""}`} />
+                  <span className="device-battery"><span className="battery-shell"><i style={{ width: `${percent ?? 0}%` }} /></span><b>{percent == null ? "—" : `${percent}%`}</b></span>
                 </button>;
               })}
               {!visibleDevices.length && <div className="sidebar-empty">{devices.length ? "没有匹配的设备" : "等待设备上线…"}</div>}
@@ -289,6 +340,13 @@ function App() {
             </section>
 
             <section className="control-section">
+              <span className="sidebar-label">电池状态</span>
+              <div className={`battery-status-card ${batteryTone(batteryLevel(selectedBattery))}`}>
+                {selectedBattery ? <><div className="battery-status-main"><span className="battery-shell large"><i style={{ width: `${batteryLevel(selectedBattery)}%` }} /></span><b>{batteryLevel(selectedBattery)}%</b><span>{Number(selectedBattery.batteryVoltage).toFixed(2)} V</span></div><small>{selectedDevices.length > 1 ? `显示所选设备中的最低电量 · ${deviceLabel(selectedBattery)}` : deviceLabel(selectedBattery)}</small><p>{batteryLevel(selectedBattery) < 20 ? "低电量，建议尽快回收设备。" : batteryLevel(selectedBattery) < 40 ? "电量偏低，请关注剩余电量。" : "电量正常"}</p></> : <span className="battery-empty">选择设备后显示实时电池状态</span>}
+              </div>
+            </section>
+
+            <section className="control-section">
               <span className="sidebar-label">参数应用方式</span>
               <div className="param-mode-grid">
                 <button className={paramMode === "sync" ? "active" : ""} onClick={() => setParamMode("sync")}><strong>统一参数</strong><small>所选设备使用同一组参数</small></button>
@@ -298,9 +356,9 @@ function App() {
 
             {paramMode === "sync" ? <section className="control-section">
               <span className="sidebar-label">统一控制参数</span>
-              <label className="range-field"><span>频率 <b>{Number(frequency).toFixed(1)} Hz</b></span><input type="range" min="0.3" max="5" step="0.1" value={frequency} onChange={(event) => setFrequency(event.target.value)} /></label>
-              <label className="range-field"><span>幅度 <b>{amplitude}°</b></span><input type="range" min="0" max="50" step="1" value={amplitude} onChange={(event) => setAmplitude(event.target.value)} /></label>
-              <label className="range-field"><span>偏置 <b>{Number(bias) > 0 ? "+" : ""}{bias}°</b></span><input type="range" min="-45" max="45" step="1" value={bias} onChange={(event) => setBias(event.target.value)} /></label>
+              <label className="range-field"><span>频率 <b>{Number(frequency).toFixed(1)} Hz</b></span><input type="range" min="0.3" max="5" step="0.1" value={frequency} disabled={sending} onChange={(event) => setFrequency(event.target.value)} onPointerUp={applyParameters} onKeyUp={applyParameters} /></label>
+              <label className="range-field"><span>幅度 <b>{amplitude}°</b></span><input type="range" min="0" max="50" step="1" value={amplitude} disabled={sending} onChange={(event) => setAmplitude(event.target.value)} onPointerUp={applyParameters} onKeyUp={applyParameters} /></label>
+              <label className="range-field"><span>偏置 <b>{Number(bias) > 0 ? "+" : ""}{bias}°</b></span><input type="range" min="-45" max="45" step="1" value={bias} disabled={sending} onChange={(event) => setBias(event.target.value)} onPointerUp={applyParameters} onKeyUp={applyParameters} /></label>
             </section> : <section className="control-section">
               <span className="sidebar-label">当前独立参数</span>
               <div className="individual-params">{selectedDevices.map((device) => <div key={device.deviceId}><strong>{deviceLabel(device)}</strong><span>{device.frequency ?? "—"} Hz · {device.amplitude ?? "—"}° · {device.bias ?? 0}°</span></div>)}{!selectedDevices.length && <small>选择设备后显示各自参数</small>}</div>
@@ -346,10 +404,14 @@ function App() {
                 <dt>IP 地址</dt><dd>{device.ip || "—"}</dd>
                 <dt>固件版本</dt><dd>{device.firmwareVersion || "—"}</dd>
                 <dt>RSSI</dt><dd>{device.online && device.rssi ? `${device.rssi} dBm` : "—"}</dd>
+                <dt>电池电量</dt><dd>{device.online && Number.isFinite(device.batteryVoltage) && device.batteryVoltage > 0 ? `${device.batteryPercent}% · ${device.batteryVoltage.toFixed(2)} V` : "—"}</dd>
+                <dt>环境照度</dt><dd>{device.lightSensorOnline ? `${Number(device.illuminanceLux).toFixed(2)} lux` : `未检测到${device.i2cAddresses?.length ? ` · I²C ${device.i2cAddresses.map((address) => `0x${Number(address).toString(16).toUpperCase()}`).join(", ")}` : ""}`}</dd>
+                <dt>RGB 模式</dt><dd>{device.rgbMode || "AUTO"} · {device.rgbOrder || "GRB"}</dd>
                 <dt>当前模式</dt><dd>{MODE_LABELS[device.mode] || "未知"}</dd>
                 <dt>最后在线</dt><dd>{formatTime(device.lastSeen)}</dd>
                 <dt>停止原因</dt><dd>{device.stopReason || "无"}</dd>
               </dl>
+              <div className="rgb-controls"><label><span>RGB 颜色</span><input type="color" value={rgbColor} onChange={(event) => setRgbColor(event.target.value)} /></label><label><span>灯珠色序</span><select value={rgbOrder} onChange={(event) => setRgbOrder(event.target.value)}>{["RGB","GRB","RBG","GBR","BRG","BGR"].map((order) => <option key={order}>{order}</option>)}</select></label><label><span>亮度 {rgbBrightness}</span><input type="range" min="1" max="255" value={rgbBrightness} onChange={(event) => setRgbBrightness(event.target.value)} onPointerUp={() => setRgb(device, device.rgbMode === "SOLID" ? "SOLID" : "AUTO")} onKeyUp={() => setRgb(device, device.rgbMode === "SOLID" ? "SOLID" : "AUTO")} /></label><small>松开滑块后立即下发，并等待开发板确认。</small><div><button type="button" disabled={!device.online} onClick={() => setRgb(device,"SOLID")}>应用颜色</button><button type="button" disabled={!device.online} onClick={() => setRgb(device,"AUTO")}>自动模式</button></div></div>
               <div className="device-card-actions"><button type="button" onClick={() => openRename(device)}>✎ 重命名设备</button></div>
             </article>)}</div>
           </aside>

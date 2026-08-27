@@ -18,7 +18,7 @@ NetworkManager::NetworkManager(ConfigStore& store):store_(store){}
 void NetworkManager::begin(DeviceConfig& config){config_=&config; policy_.begin(config.valid(),millis());}
 bool NetworkManager::connected() const{return WiFi.status()==WL_CONNECTED;}
 bool NetworkManager::provisioning() const{return portalStarted_;}
-void NetworkManager::connect(){WiFi.mode(WIFI_STA);WiFi.begin(config_->ssid.c_str(),config_->password.c_str());lastReconnect_=millis();}
+void NetworkManager::connect(){WiFi.mode(WIFI_STA);WiFi.setSleep(false);WiFi.begin(config_->ssid.c_str(),config_->password.c_str());lastReconnect_=millis();}
 
 void NetworkManager::registerRoutes(){
     auto showPortal=[this](){server_.sendHeader("Cache-Control","no-store");server_.send(200,"text/html; charset=utf-8",PAGE);};

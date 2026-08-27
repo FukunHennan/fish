@@ -65,9 +65,30 @@ h1 { margin-top: 2px; font-size: 15px; line-height: 1.2; }
 .device-search input { width: 100%; height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: #0d151c; font-size: 9px; }
 .device-search input::placeholder { color: #657781; }
 .device-list { display: flex; flex-direction: column; gap: 6px; max-height: 454px; overflow: auto; padding: 9px 10px 10px; }
-.device-row { width: 100%; display: grid; grid-template-columns: 18px minmax(0,1fr) 10px; align-items: center; gap: 8px; min-height: 50px; padding: 8px; border: 1px solid var(--line); border-radius: 10px; color: var(--text); background: #111a21; text-align: left; transition: border-color .15s, background .15s; }
+.device-row { width: 100%; display: grid; grid-template-columns: 18px minmax(0,1fr) auto; align-items: center; gap: 8px; min-height: 50px; padding: 8px; border: 1px solid var(--line); border-radius: 10px; color: var(--text); background: #111a21; text-align: left; transition: border-color .15s, background .15s; }
 .device-row:hover:not(:disabled) { border-color: #39515f; background: #142029; }
 .device-row.selected { border-color: #367c74; background: linear-gradient(180deg,#16302d,#12231f); box-shadow: 0 0 0 1px rgba(70,216,199,.14) inset; }
+.device-row.battery-low { border-color:#6c5428; }
+.device-row.battery-critical { border-color:#71323d; background:#29171b; }
+.device-battery { display:flex; align-items:center; gap:5px; color:#c8d4da; font-size:8px; white-space:nowrap; }
+.battery-shell { width:27px; height:12px; display:block; padding:2px; border:1px solid #667985; border-radius:3px; background:#0a1117; }
+.battery-shell i { display:block; height:100%; border-radius:1px; background:var(--green); }
+.battery-low .battery-shell i, .battery-status-card.low .battery-shell i { background:#f0c44f; }
+.battery-critical .battery-shell i, .battery-status-card.critical .battery-shell i { background:#ff667d; }
+.battery-unknown .battery-shell i { background:#687984; }
+.battery-metric.critical { border-color:#71323d; color:#ff9cab; background:#29171b; }
+.battery-status-card { margin-top:8px; padding:10px; border:1px solid var(--line); border-radius:10px; background:#101820; }
+.battery-status-card.low { border-color:#6c5428; }
+.battery-status-card.critical { border-color:#71323d; background:#29171b; }
+.battery-status-main { display:grid; grid-template-columns:auto auto 1fr; align-items:center; gap:9px; }
+.battery-status-main .battery-shell.large { width:50px; height:20px; padding:3px; }
+.battery-status-main b { font-size:18px; }
+.battery-status-main > span:last-child { justify-self:end; color:var(--muted); font:9px ui-monospace,"Cascadia Mono",monospace; }
+.battery-status-card small { display:block; margin-top:7px; color:var(--muted); font-size:8px; }
+.battery-status-card p { margin:6px 0 0; color:#9fd7c5; font-size:8px; }
+.battery-status-card.low p { color:#f3cf78; }
+.battery-status-card.critical p { color:#ff9cab; }
+.battery-empty { color:var(--muted); font-size:8px; }
 .device-check { width: 14px; height: 14px; display: grid; place-items: center; border: 1px solid #49606b; border-radius: 4px; color: #06211e; background: #0e151b; font-size: 9px; }
 .device-row.selected .device-check { border-color: var(--accent); background: var(--accent); }
 .device-main { min-width: 0; }

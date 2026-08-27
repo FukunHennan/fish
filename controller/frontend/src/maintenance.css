@@ -41,6 +41,12 @@
 .device-info-panel { overflow:hidden; }
 .device-info-list { display:flex; flex-direction:column; gap:7px; max-height:650px; overflow:auto; padding:10px; }
 .device-info-card { overflow:hidden; border:1px solid var(--line); border-radius:10px; background:#101820; }
+.rgb-controls { display:grid; gap:8px; padding:10px; border-top:1px solid var(--line); }
+.rgb-controls label { display:grid; grid-template-columns:80px 1fr; align-items:center; gap:8px; color:var(--muted); font-size:8px; }
+.rgb-controls input { width:100%; }
+.rgb-controls input[type="color"] { height:30px; padding:2px; border:1px solid var(--line); border-radius:6px; background:#0c151c; }
+.rgb-controls > div { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+.rgb-controls button { min-height:32px; border:1px solid #367c74; border-radius:7px; color:#d7fff9; background:#15312d; font-size:8px; font-weight:800; }
 .device-info-card header { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:9px 10px; border-bottom:1px solid var(--line); }
 .device-info-card header strong { font-size:9.5px; }
 .online-text, .offline-text { font-size:8px; }

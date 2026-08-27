@@ -9,19 +9,19 @@
 #include <Update.h>
 #include <mbedtls/sha256.h>
 
-ControllerClient::ControllerClient(MotionController& m,CommandProcessor& c,VisualController& v):motion_(m),commands_(c),visual_(v){}
+ControllerClient::ControllerClient(MotionController& m,CommandProcessor& c,VisualController& v,BatteryMonitor& b,AmbientLightMonitor& l,StatusLight& s):motion_(m),commands_(c),visual_(v),battery_(b),ambientLight_(l),statusLight_(s){}
 void ControllerClient::begin(const DeviceConfig& c){config_=c;socket_.onEvent([this](WStype_t t,uint8_t*p,size_t n){onEvent(t,p,n);});socket_.setReconnectInterval(3000);}
 void ControllerClient::setEndpoint(const IPAddress& host,uint16_t port){
     if(endpointReady_&&controllerIP_==host&&config_.controllerPort==port)return;
     if(started_)socket_.disconnect();controllerIP_=host;config_.controllerPort=port;endpointReady_=true;started_=false;registered_=false;
 }
 void ControllerClient::sendRegistration(const String& nonce){
-    JsonDocument d;char mac[18];char proof[65];formatDeviceMac(mac);if(!computeIdentityProof("fish-websocket-v1",nonce.c_str(),proof))return;d["type"]="register";d["protocolVersion"]=1;d["deviceId"]=mac;d["proof"]=proof;d["name"]=config_.displayName;d["firmwareVersion"]=FIRMWARE_VERSION;d["ip"]=WiFi.localIP().toString();JsonArray a=d["capabilities"].to<JsonArray>();a.add("motion");a.add("ota");String out;serializeJson(d,out);socket_.sendTXT(out);
+    JsonDocument d;char mac[18];char proof[65];formatDeviceMac(mac);if(!computeIdentityProof("fish-websocket-v1",nonce.c_str(),proof))return;d["type"]="register";d["protocolVersion"]=1;d["deviceId"]=mac;d["proof"]=proof;d["name"]=config_.displayName;d["firmwareVersion"]=FIRMWARE_VERSION;d["ip"]=WiFi.localIP().toString();JsonArray a=d["capabilities"].to<JsonArray>();a.add("motion");a.add("ota");a.add("battery");a.add("status-rgb");a.add("ambient-light");String out;serializeJson(d,out);socket_.sendTXT(out);
 }
 void ControllerClient::sendState(const char* type){
-    MotionSnapshot s=motion_.snapshot();JsonDocument d;d["type"]=type;d["frequency"]=s.frequency;d["amplitude"]=s.amplitude;d["bias"]=s.bias;d["mode"]=(int)s.mode;d["rssi"]=WiFi.RSSI();d["ip"]=WiFi.localIP().toString();d["firmwareVersion"]=FIRMWARE_VERSION;d["uptimeMs"]=millis();d["lastControlMs"]=lastControlMs_;d["stopReason"]=stopReason_;d["controlSource"]=visual_.active()?"VISION":"MANUAL";d["visionActive"]=visual_.active();d["visionSessionId"]=visual_.sessionId();d["visionSequence"]=visual_.lastSequence();d["otaState"]=otaState_;String out;serializeJson(d,out);socket_.sendTXT(out);
+    MotionSnapshot s=motion_.snapshot();BatteryReading battery=battery_.reading();AmbientLightReading light=ambientLight_.reading();uint32_t now=millis();JsonDocument d;d["type"]=type;d["frequency"]=s.frequency;d["amplitude"]=s.amplitude;d["bias"]=s.bias;d["mode"]=(int)s.mode;d["rssi"]=WiFi.RSSI();d["ip"]=WiFi.localIP().toString();d["firmwareVersion"]=FIRMWARE_VERSION;d["uptimeMs"]=now;d["lastControlMs"]=lastControlMs_;d["stopReason"]=stopReason_;d["controlSource"]=visual_.active()?"VISION":"MANUAL";d["visionActive"]=visual_.active();d["visionSessionId"]=visual_.sessionId();d["visionSequence"]=visual_.lastSequence();d["otaState"]=otaState_;d["rgbMode"]=statusLight_.manual()?"SOLID":"AUTO";d["rgbOrder"]=statusLight_.colorOrder();d["rgbRed"]=statusLight_.red();d["rgbGreen"]=statusLight_.green();d["rgbBlue"]=statusLight_.blue();d["rgbBrightness"]=statusLight_.brightness();if(battery.valid){d["batteryVoltage"]=roundf(battery.voltage*100.0f)/100.0f;d["batteryPercent"]=battery.percent;d["batterySampleAgeMs"]=now-battery.sampledAtMs;}d["lightSensorOnline"]=light.online;if(light.online)d["illuminanceLux"]=roundf(light.lux*100.0f)/100.0f;JsonArray addresses=d["i2cAddresses"].to<JsonArray>();for(uint8_t i=0;i<light.addressCount;i++)addresses.add(light.addresses[i]);String out;serializeJson(d,out);socket_.sendTXT(out);
 }
-void ControllerClient::sendResult(const String& id,bool success,const char* code,const String& message){JsonDocument d;d["type"]="command.result";d["requestId"]=id;d["success"]=success;d["code"]=code;d["message"]=message;String out;serializeJson(d,out);socket_.sendTXT(out);}
+void ControllerClient::sendResult(const String& id,bool success,const char* code,const String& message){JsonDocument d;MotionSnapshot s=motion_.snapshot();d["type"]="command.result";d["requestId"]=id;d["success"]=success;d["code"]=code;d["message"]=message;JsonObject applied=d["applied"].to<JsonObject>();applied["mode"]=(int)s.mode;applied["frequency"]=s.frequency;applied["amplitude"]=s.amplitude;applied["bias"]=s.bias;String out;serializeJson(d,out);socket_.sendTXT(out);}
 
 void ControllerClient::runOta(const String& id,const String& expectedHash,size_t expectedSize){
     motion_.safeStop();visual_.stop();stopReason_="OTA_REQUEST";otaState_="DOWNLOADING";sendState();
@@ -53,13 +53,22 @@ void ControllerClient::handleCommand(JsonDocument& d){
     if(command=="pid.set"){
         VisualPidParameters p=visual_.parameters();p.crossKp=d["payload"]["crossKp"]|p.crossKp;p.crossKi=d["payload"]["crossKi"]|p.crossKi;p.crossKd=d["payload"]["crossKd"]|p.crossKd;p.headingKp=d["payload"]["headingKp"]|p.headingKp;p.curveFeedForward=d["payload"]["curveFeedForward"]|p.curveFeedForward;p.maxBias=d["payload"]["maxBias"]|p.maxBias;p.timeoutMs=d["payload"]["timeoutMs"]|p.timeoutMs;bool ok=visual_.setParameters(p);sendResult(id,ok,ok?"OK":"INVALID_PID",ok?"PID 参数已更新":"PID 参数无效");return;
     }
+    if(command=="rgb.set"){
+        String mode=d["payload"]["mode"]|"AUTO";mode.toUpperCase();
+        String order=d["payload"]["order"]|statusLight_.colorOrder();if(!statusLight_.setColorOrder(order)){sendResult(id,false,"INVALID_RGB_ORDER","Unsupported RGB color order");return;}
+        int brightness=d["payload"]["brightness"]|STATUS_LED_BRIGHTNESS;if(brightness<1||brightness>255){sendResult(id,false,"INVALID_RGB","RGB brightness out of range");return;}
+        if(mode=="AUTO"){statusLight_.clearManual(brightness);sendResult(id,true,"OK","RGB automatic brightness applied");sendState();return;}
+        int red=d["payload"]["red"]|-1,green=d["payload"]["green"]|-1,blue=d["payload"]["blue"]|-1;
+        if(mode!="SOLID"||red<0||red>255||green<0||green>255||blue<0||blue>255){sendResult(id,false,"INVALID_RGB","RGB parameter out of range");return;}
+        statusLight_.setManualColor(red,green,blue,brightness);sendResult(id,true,"OK","RGB color applied");sendState();return;
+    }
     if(command=="ota.start"){String sha=d["payload"]["sha256"]|"";size_t size=d["payload"]["size"]|0U;if(sha.length()!=64||size==0){sendResult(id,false,"INVALID_FIRMWARE","固件信息无效");return;}runOta(id,sha,size);return;}
     if(command=="ota.cancel"){otaState_="IDLE";sendResult(id,true,"OK","OTA 预留任务已取消");sendState();return;}
     sendResult(id,false,"UNKNOWN_COMMAND","未知命令");
 }
 void ControllerClient::onEvent(WStype_t type,uint8_t* payload,size_t length){
     if(type==WStype_CONNECTED){registered_=false;return;}
-    if(type==WStype_DISCONNECTED){registered_=false;endpointReady_=false;started_=false;motion_.safeStop();return;}
+    if(type==WStype_DISCONNECTED){registered_=false;visual_.stop();motion_.safeStop();stopReason_="CONTROLLER_DISCONNECTED";return;}
     if(type!=WStype_TEXT)return;
     JsonDocument d;if(deserializeJson(d,payload,length))return;String messageType=d["type"]|"";
     String nonce;if(readAuthChallenge(d,nonce)){sendRegistration(nonce);return;}
@@ -74,6 +83,6 @@ void ControllerClient::update(uint32_t nowMs,bool online){
     if(!started_){socket_.begin(controllerIP_.toString().c_str(),config_.controllerPort,"/ws/device");started_=true;}
     socket_.loop();
     if(visual_.timedOut(nowMs)){visual_.stop();motion_.safeStop();stopReason_="VISION_TIMEOUT";sendState();}
-    if(registered_&&hasElapsed(nowMs,lastHeartbeat_,2000)){registered_=false;visual_.stop();motion_.safeStop();stopReason_="CONTROLLER_TIMEOUT";socket_.disconnect();return;}
+    if(registered_&&hasElapsed(nowMs,lastHeartbeat_,CONTROLLER_HEARTBEAT_TIMEOUT_MS)){registered_=false;visual_.stop();motion_.safeStop();stopReason_="CONTROLLER_TIMEOUT";socket_.disconnect();return;}
     if(registered_&&hasElapsed(nowMs,lastReport_,1000)){lastReport_=nowMs;sendState("heartbeat");}
 }

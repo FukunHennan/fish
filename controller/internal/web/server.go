@@ -104,6 +104,7 @@ func newHandler(h *hub.Hub, key []byte, apiAddress, streamAddress, firmwarePath 
 	m.HandleFunc("/healthz", s.health)
 	m.HandleFunc("/api/devices", s.devices)
 	m.HandleFunc("/api/command", s.command)
+	m.HandleFunc("/api/rgb", s.rgb)
 	m.HandleFunc("/api/ota", s.ota)
 	m.HandleFunc("/api/firmware", s.firmwareAPI)
 	m.HandleFunc("/api/firmware/current.bin", s.firmware)
@@ -251,7 +252,7 @@ func (s *server) ota(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	requestID := fmt.Sprintf("ota-%d", time.Now().UnixNano())
-	sent := s.hub.Send(input.DeviceID, map[string]any{
+	message := map[string]any{
 		"type":      "command",
 		"requestId": requestID,
 		"command":   "ota.start",
@@ -259,18 +260,28 @@ func (s *server) ota(w http.ResponseWriter, r *http.Request) {
 			"sha256": info["sha256"],
 			"size":   info["size"],
 		},
-	})
+	}
+	ack, sent, acknowledged := s.hub.SendAndWait(input.DeviceID, requestID, message, 30*time.Second)
 	w.Header().Set("Content-Type", "application/json")
 	if !sent {
 		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(map[string]any{"sent": false, "acknowledged": false, "requestId": requestID, "message": "device offline"})
+		return
 	}
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"sent":      sent,
-		"requestId": requestID,
-		"sha256":    info["sha256"],
-		"size":      info["size"],
-		"name":      info["name"],
-	})
+	if !acknowledged {
+		w.WriteHeader(http.StatusGatewayTimeout)
+		_ = json.NewEncoder(w).Encode(map[string]any{"sent": true, "acknowledged": false, "requestId": requestID, "message": "OTA acknowledgement timeout"})
+		return
+	}
+	if success, _ := ack["success"].(bool); !success {
+		w.WriteHeader(http.StatusConflict)
+	}
+	ack["sent"] = true
+	ack["acknowledged"] = true
+	ack["sha256"] = info["sha256"]
+	ack["size"] = info["size"]
+	ack["name"] = info["name"]
+	_ = json.NewEncoder(w).Encode(ack)
 }
 
 func (s *server) visionDeviceCommand(w http.ResponseWriter, r *http.Request) {
@@ -358,9 +369,78 @@ func (s *server) command(w http.ResponseWriter, r *http.Request) {
 			"amplitude": x.Amplitude, "bias": x.Bias,
 		},
 	}
-	ok := s.hub.Send(x.DeviceID, msg)
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"sent": ok, "requestId": requestID})
+	ack, sent, acknowledged := s.hub.SendAndWait(x.DeviceID, requestID, msg, 2500*time.Millisecond)
+	if !sent {
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(map[string]any{"sent": false, "acknowledged": false, "requestId": requestID, "message": "device offline"})
+		return
+	}
+	if !acknowledged {
+		w.WriteHeader(http.StatusGatewayTimeout)
+		_ = json.NewEncoder(w).Encode(map[string]any{"sent": true, "acknowledged": false, "requestId": requestID, "message": "device acknowledgement timeout"})
+		return
+	}
+	if success, _ := ack["success"].(bool); !success {
+		w.WriteHeader(http.StatusConflict)
+	}
+	ack["sent"] = true
+	ack["acknowledged"] = true
+	_ = json.NewEncoder(w).Encode(ack)
+}
+
+func (s *server) rgb(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	var input struct {
+		DeviceID, Mode, Order        string
+		Red, Green, Blue, Brightness int
+	}
+	if json.NewDecoder(r.Body).Decode(&input) != nil || input.DeviceID == "" {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	input.Mode = strings.ToUpper(input.Mode)
+	input.Order = strings.ToUpper(input.Order)
+	if input.Order == "" {
+		input.Order = "GRB"
+	}
+	validOrder := false
+	for _, order := range []string{"RGB", "RBG", "GRB", "GBR", "BRG", "BGR"} {
+		if input.Order == order {
+			validOrder = true
+		}
+	}
+	if !validOrder {
+		http.Error(w, "invalid RGB order", http.StatusBadRequest)
+		return
+	}
+	if input.Mode != "AUTO" && (input.Mode != "SOLID" || input.Red < 0 || input.Red > 255 || input.Green < 0 || input.Green > 255 || input.Blue < 0 || input.Blue > 255 || input.Brightness < 1 || input.Brightness > 255) {
+		http.Error(w, "invalid RGB parameters", http.StatusBadRequest)
+		return
+	}
+	requestID := fmt.Sprintf("rgb-%d", time.Now().UnixNano())
+	message := map[string]any{"type": "command", "requestId": requestID, "command": "rgb.set", "payload": map[string]any{"mode": input.Mode, "order": input.Order, "red": input.Red, "green": input.Green, "blue": input.Blue, "brightness": input.Brightness}}
+	ack, sent, acknowledged := s.hub.SendAndWait(input.DeviceID, requestID, message, 2500*time.Millisecond)
+	w.Header().Set("Content-Type", "application/json")
+	if !sent {
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(map[string]any{"sent": false, "acknowledged": false, "requestId": requestID, "message": "device offline"})
+		return
+	}
+	if !acknowledged {
+		w.WriteHeader(http.StatusGatewayTimeout)
+		_ = json.NewEncoder(w).Encode(map[string]any{"sent": true, "acknowledged": false, "requestId": requestID, "message": "device acknowledgement timeout"})
+		return
+	}
+	if success, _ := ack["success"].(bool); !success {
+		w.WriteHeader(http.StatusConflict)
+	}
+	ack["sent"] = true
+	ack["acknowledged"] = true
+	_ = json.NewEncoder(w).Encode(ack)
 }
 
 func (s *server) deviceSocket(w http.ResponseWriter, r *http.Request) {
@@ -389,7 +469,7 @@ func (s *server) deviceSocket(w http.ResponseWriter, r *http.Request) {
 		_ = c.WriteJSON(map[string]any{"type": "register.result", "success": false})
 		return
 	}
-	d := hub.Device{ID: id, Name: text(reg["name"]), IP: text(reg["ip"]), FirmwareVersion: text(reg["firmwareVersion"])}
+	d := hub.Device{ID: id, Name: text(reg["name"]), IP: text(reg["ip"]), FirmwareVersion: text(reg["firmwareVersion"]), Capabilities: texts(reg["capabilities"])}
 	s.hub.Register(d, c)
 	log.Printf("device registered: %s (%s), source %s", id, d.IP, r.RemoteAddr)
 	defer s.hub.Remove(id, c)
@@ -417,11 +497,24 @@ func (s *server) deviceSocket(w http.ResponseWriter, r *http.Request) {
 			log.Printf("device disconnected: %s: %v", id, err)
 			return
 		}
+		if messageType, _ := msg["type"].(string); messageType == "command.result" {
+			s.hub.ResolveCommandResult(msg)
+		}
 		s.hub.Update(id, msg)
 	}
 }
 
 func text(v any) string { s, _ := v.(string); return s }
+func texts(v any) []string {
+	values, _ := v.([]any)
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if item, ok := value.(string); ok {
+			result = append(result, item)
+		}
+	}
+	return result
+}
 
 func (s *server) dashboard(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {

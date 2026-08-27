@@ -11,20 +11,38 @@ type Conn interface {
 }
 
 type Device struct {
-	ID              string    `json:"deviceId"`
-	Name            string    `json:"name"`
-	IP              string    `json:"ip"`
-	FirmwareVersion string    `json:"firmwareVersion"`
-	Online          bool      `json:"online"`
-	LastSeen        time.Time `json:"lastSeen"`
-	Mode            int       `json:"mode"`
-	Frequency       float64   `json:"frequency"`
-	Amplitude       float64   `json:"amplitude"`
-	Bias            float64   `json:"bias"`
-	RSSI            int       `json:"rssi"`
-	UptimeMs        uint64    `json:"uptimeMs"`
-	LastControlMs   uint64    `json:"lastControlMs"`
-	StopReason      string    `json:"stopReason"`
+	ID                 string    `json:"deviceId"`
+	Name               string    `json:"name"`
+	IP                 string    `json:"ip"`
+	FirmwareVersion    string    `json:"firmwareVersion"`
+	Online             bool      `json:"online"`
+	LastSeen           time.Time `json:"lastSeen"`
+	Mode               int       `json:"mode"`
+	Frequency          float64   `json:"frequency"`
+	Amplitude          float64   `json:"amplitude"`
+	Bias               float64   `json:"bias"`
+	RSSI               int       `json:"rssi"`
+	UptimeMs           uint64    `json:"uptimeMs"`
+	LastControlMs      uint64    `json:"lastControlMs"`
+	StopReason         string    `json:"stopReason"`
+	BatteryVoltage     float64   `json:"batteryVoltage"`
+	BatteryPercent     int       `json:"batteryPercent"`
+	BatterySampleAgeMs uint64    `json:"batterySampleAgeMs"`
+	Capabilities       []string  `json:"capabilities,omitempty"`
+	ControlSource      string    `json:"controlSource"`
+	VisionActive       bool      `json:"visionActive"`
+	VisionSessionID    string    `json:"visionSessionId"`
+	VisionSequence     uint32    `json:"visionSequence"`
+	OTAState           string    `json:"otaState"`
+	LightSensorOnline  bool      `json:"lightSensorOnline"`
+	IlluminanceLux     float64   `json:"illuminanceLux"`
+	I2CAddresses       []int     `json:"i2cAddresses,omitempty"`
+	RGBMode            string    `json:"rgbMode"`
+	RGBOrder           string    `json:"rgbOrder"`
+	RGBRed             int       `json:"rgbRed"`
+	RGBGreen           int       `json:"rgbGreen"`
+	RGBBlue            int       `json:"rgbBlue"`
+	RGBBrightness      int       `json:"rgbBrightness"`
 }
 
 type entry struct {
@@ -34,9 +52,12 @@ type entry struct {
 type Hub struct {
 	mu      sync.RWMutex
 	entries map[string]*entry
+	pending map[string]chan map[string]any
 }
 
-func New() *Hub { return &Hub{entries: make(map[string]*entry)} }
+func New() *Hub {
+	return &Hub{entries: make(map[string]*entry), pending: make(map[string]chan map[string]any)}
+}
 
 func (h *Hub) Register(d Device, c Conn) {
 	h.mu.Lock()
@@ -95,6 +116,62 @@ func (h *Hub) Update(id string, values map[string]any) {
 	if v, ok := values["stopReason"].(string); ok {
 		e.device.StopReason = v
 	}
+	if v, ok := values["batteryVoltage"].(float64); ok && v >= 0 {
+		e.device.BatteryVoltage = v
+	}
+	if v, ok := values["batteryPercent"].(float64); ok && v >= 0 && v <= 100 {
+		e.device.BatteryPercent = int(v)
+	}
+	if v, ok := values["batterySampleAgeMs"].(float64); ok && v >= 0 {
+		e.device.BatterySampleAgeMs = uint64(v)
+	}
+	if v, ok := values["controlSource"].(string); ok {
+		e.device.ControlSource = v
+	}
+	if v, ok := values["visionActive"].(bool); ok {
+		e.device.VisionActive = v
+	}
+	if v, ok := values["visionSessionId"].(string); ok {
+		e.device.VisionSessionID = v
+	}
+	if v, ok := values["visionSequence"].(float64); ok && v >= 0 {
+		e.device.VisionSequence = uint32(v)
+	}
+	if v, ok := values["otaState"].(string); ok {
+		e.device.OTAState = v
+	}
+	if v, ok := values["lightSensorOnline"].(bool); ok {
+		e.device.LightSensorOnline = v
+	}
+	if v, ok := values["illuminanceLux"].(float64); ok && v >= 0 {
+		e.device.IlluminanceLux = v
+	}
+	if values, ok := values["i2cAddresses"].([]any); ok {
+		e.device.I2CAddresses = e.device.I2CAddresses[:0]
+		for _, value := range values {
+			if address, ok := value.(float64); ok && address > 0 && address < 127 {
+				e.device.I2CAddresses = append(e.device.I2CAddresses, int(address))
+			}
+		}
+	}
+	if v, ok := values["rgbMode"].(string); ok {
+		e.device.RGBMode = v
+	}
+	if v, ok := values["rgbOrder"].(string); ok {
+		e.device.RGBOrder = v
+	}
+	if v, ok := values["rgbRed"].(float64); ok {
+		e.device.RGBRed = int(v)
+	}
+	if v, ok := values["rgbGreen"].(float64); ok {
+		e.device.RGBGreen = int(v)
+	}
+	if v, ok := values["rgbBlue"].(float64); ok {
+		e.device.RGBBlue = int(v)
+	}
+	if v, ok := values["rgbBrightness"].(float64); ok {
+		e.device.RGBBrightness = int(v)
+	}
 }
 
 func (h *Hub) Send(id string, v any) bool {
@@ -107,6 +184,48 @@ func (h *Hub) Send(id string, v any) bool {
 	return e.conn.WriteJSON(v) == nil
 }
 
+// SendAndWait routes a command and waits for the matching device result.
+// The waiter is installed before the write so an immediate reply cannot be missed.
+func (h *Hub) SendAndWait(id, requestID string, v any, timeout time.Duration) (map[string]any, bool, bool) {
+	result := make(chan map[string]any, 1)
+	h.mu.Lock()
+	h.pending[requestID] = result
+	h.mu.Unlock()
+	defer func() {
+		h.mu.Lock()
+		delete(h.pending, requestID)
+		h.mu.Unlock()
+	}()
+	if !h.Send(id, v) {
+		return nil, false, false
+	}
+	select {
+	case acknowledgement := <-result:
+		return acknowledgement, true, true
+	case <-time.After(timeout):
+		return nil, true, false
+	}
+}
+
+func (h *Hub) ResolveCommandResult(values map[string]any) bool {
+	requestID, _ := values["requestId"].(string)
+	if requestID == "" {
+		return false
+	}
+	h.mu.RLock()
+	waiter := h.pending[requestID]
+	h.mu.RUnlock()
+	if waiter == nil {
+		return false
+	}
+	select {
+	case waiter <- values:
+		return true
+	default:
+		return false
+	}
+}
+
 func (h *Hub) SendOnly(v any) bool {
 	h.mu.RLock()
 	if len(h.entries) != 1 {
@@ -114,7 +233,9 @@ func (h *Hub) SendOnly(v any) bool {
 		return false
 	}
 	var connection Conn
-	for _, entry := range h.entries { connection = entry.conn }
+	for _, entry := range h.entries {
+		connection = entry.conn
+	}
 	h.mu.RUnlock()
 	return connection != nil && connection.WriteJSON(v) == nil
 }

@@ -13,7 +13,30 @@
 
 
 /* Wi-Fi 和控制器配置通过 Fish-Setup-XXXXXX 热点写入 NVS。 */
-#define FIRMWARE_VERSION "1.2.1"
+#define FIRMWARE_VERSION "1.2.8"
+
+/* Allow short Wi-Fi stalls without falsely declaring the controller lost. */
+#define CONTROLLER_HEARTBEAT_TIMEOUT_MS 8000
+
+/* Four WS2812 status LEDs connected to XIAO ESP32-C3 D3 / GPIO5. */
+#define STATUS_LED_PIN   D3
+#define STATUS_LED_COUNT 4
+#define STATUS_LED_BRIGHTNESS 32
+
+/* On-board BOOT button: active-low GPIO9 on XIAO ESP32-C3. */
+#define BOOT_BUTTON_PIN 9
+#define BOOT_LONG_PRESS_MS 3000
+
+/* Battery voltage divider connected to XIAO ESP32-C3 D0 / GPIO2 (ADC). */
+#define BATTERY_SENSE_PIN D0
+#define BATTERY_DIVIDER_RATIO 3.0f
+#define BATTERY_EMPTY_VOLTAGE 6.0f
+#define BATTERY_FULL_VOLTAGE 8.39f
+#define BATTERY_SAMPLE_INTERVAL_MS 10000
+
+/* Default XIAO I2C pins are D4/SDA (GPIO6) and D5/SCL (GPIO7). */
+#define AMBIENT_LIGHT_SAMPLE_INTERVAL_MS 5000
+#define AMBIENT_LIGHT_RESCAN_INTERVAL_MS 60000
 
 
 /* ========================================== */
