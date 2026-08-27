@@ -11,15 +11,15 @@ class TrackingApplicationCoordinateTests(unittest.TestCase):
     def make_app(self, field_homography=None):
         app = object.__new__(TrackingVisionApplication)
         app.control_mapper = ControlCoordinateMapper(640, 480)
-        app.runtime = SimpleNamespace() if False else {
-            "calibration": {"H": field_homography},
-            "heading": {
+        app.runtime = SimpleNamespace(
+            calibration={"H": field_homography},
+            heading={
                 "pixel_unit_vector": (1.0, 0.0),
                 "world_unit_vector": None,
                 "control_heading": None,
                 "control_heading_source": None,
             },
-        }
+        )
         return app
 
     def test_image_coordinates_are_available_without_field_calibration(self):
@@ -45,7 +45,7 @@ class TrackingApplicationCoordinateTests(unittest.TestCase):
 
         app._promote_pixel_heading(None, (320.0, 240.0))
 
-        heading = app.runtime["heading"]
+        heading = app.runtime.heading
         self.assertIsNotNone(heading["world_unit_vector"])
         self.assertEqual(heading["control_heading_source"], "IMAGE")
         self.assertGreater(heading["world_unit_vector"][0], 0.99)
