@@ -1,0 +1,9 @@
+2026/08/26 19:08:40.999740 main.go:48: project root: C:\Users\LENOVO\Desktop\fish
+2026/08/26 19:08:41.000246 main.go:49: diagnostic session: C:\Users\LENOVO\Desktop\fish\controller\diagnostics\runs\20260826-190840-11952
+2026/08/26 19:08:41.001522 main.go:74: vision Python: C:\Python314\python.exe (PATH)
+2026/08/26 19:08:41.516524 main.go:96: Python vision backend started automatically
+2026/08/26 19:08:41.517162 main.go:116: fish controller ready: http://localhost:8081
+2026/08/26 19:08:53.366499 reverseproxy.go:747: http: proxy error: dial tcp 127.0.0.1:8090: connectex: No connection could be made because the target machine actively refused it.
+2026/08/26 19:08:54.386448 reverseproxy.go:747: http: proxy error: dial tcp 127.0.0.1:8090: connectex: No connection could be made because the target machine actively refused it.
+2026/08/26 19:08:55.405829 reverseproxy.go:747: http: proxy error: dial tcp 127.0.0.1:8090: connectex: No connection could be made because the target machine actively refused it.
+2026/08/26 19:26:14.651052 reverseproxy.go:747: httputil: ReverseProxy read error during body copy: read tcp 127.0.0.1:61817->127.0.0.1:8090: wsarecv: An existing connection was forcibly closed by the remote host.
