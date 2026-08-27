@@ -240,6 +240,22 @@ func (h *Hub) SendOnly(v any) bool {
 	return connection != nil && connection.WriteJSON(v) == nil
 }
 
+// OnlyDeviceID returns the device ID only when exactly one device is connected.
+// Vision control currently targets a single fish, so ambiguity must fail closed.
+func (h *Hub) OnlyDeviceID() (string, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if len(h.entries) != 1 {
+		return "", false
+	}
+	for id, entry := range h.entries {
+		if entry != nil && entry.conn != nil {
+			return id, true
+		}
+	}
+	return "", false
+}
+
 func (h *Hub) List() []Device {
 	h.mu.RLock()
 	defer h.mu.RUnlock()

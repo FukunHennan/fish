@@ -45,6 +45,10 @@ void ControllerClient::handleCommand(JsonDocument& d){
         if(!motion_.setTuning(f,a)||!motion_.setBias(bias)){sendResult(id,false,"INVALID_PARAMETER","运动参数越界");return;}mode.toUpperCase();String result=commands_.process(mode=="FORWARD"?"FWD":mode);lastControlMs_=millis();stopReason_=mode=="STOP"?"MANUAL_STOP":"";sendResult(id,result=="OK",result=="OK"?"OK":"UNKNOWN_COMMAND",result);sendState();return;
     }
     if(command=="vision.start"){String session=d["payload"]["sessionId"]|"";motion_.safeStop();if(!visual_.start(session.c_str(),millis())){sendResult(id,false,"INVALID_SESSION","视觉会话 ID 无效");return;}stopReason_="";lastControlMs_=millis();sendResult(id,true,"OK","视觉会话已启动");sendState();return;}
+    if(command=="vision.calibrate.forward"){
+        if(!visual_.active()){sendResult(id,false,"VISION_NOT_ACTIVE","Vision session is not active");return;}
+        motion_.setTuning(2.0f,22.0f);commands_.process("FWD");calibrationStopAtMs_=millis()+1200;lastControlMs_=millis();stopReason_="CAL_FORWARD";sendResult(id,true,"OK","Forward calibration started");sendState();return;
+    }
     if(command=="vision.update"){
         VisualInput input{d["payload"]["sequence"]|0U,d["payload"]["crossTrackError"]|0.0f,d["payload"]["headingErrorDeg"]|0.0f,d["payload"]["distanceToTarget"]|0.0f,d["payload"]["speed"]|0.0f,d["payload"]["curvature"]|0.0f,d["payload"]["brake"]|false};String session=d["payload"]["sessionId"]|"";VisualOutput output;
         if(!visual_.update(session.c_str(),input,millis(),output)){sendResult(id,false,"STALE_VISION_COMMAND","会话错误或视觉序号无效");return;}if(output.stop){motion_.safeStop();stopReason_="VISION_BRAKE";}else motion_.applyVisual(output.frequency,output.amplitude,output.bias);lastControlMs_=millis();sendResult(id,true,"OK","视觉指令已应用");return;
@@ -82,7 +86,12 @@ void ControllerClient::update(uint32_t nowMs,bool online){
     if(!endpointReady_)return;
     if(!started_){socket_.begin(controllerIP_.toString().c_str(),config_.controllerPort,"/ws/device");started_=true;}
     socket_.loop();
-    if(visual_.timedOut(nowMs)){visual_.stop();motion_.safeStop();stopReason_="VISION_TIMEOUT";sendState();}
+    // WebSocket callbacks above may start a visual session using a newer millis()
+    // value than the loop timestamp supplied by the caller. Refresh the clock to
+    // avoid unsigned underflow immediately timing out the new session.
+    const uint32_t commandNowMs=millis();
+    if(calibrationStopAtMs_!=0&&(int32_t)(commandNowMs-calibrationStopAtMs_)>=0){calibrationStopAtMs_=0;visual_.stop();motion_.safeStop();stopReason_="CAL_FORWARD_DONE";sendState();}
+    if(calibrationStopAtMs_==0&&visual_.timedOut(commandNowMs)){visual_.stop();motion_.safeStop();stopReason_="VISION_TIMEOUT";sendState();}
     if(registered_&&hasElapsed(nowMs,lastHeartbeat_,CONTROLLER_HEARTBEAT_TIMEOUT_MS)){registered_=false;visual_.stop();motion_.safeStop();stopReason_="CONTROLLER_TIMEOUT";socket_.disconnect();return;}
     if(registered_&&hasElapsed(nowMs,lastReport_,1000)){lastReport_=nowMs;sendState("heartbeat");}
 }

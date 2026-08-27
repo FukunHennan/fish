@@ -304,7 +304,7 @@ func (s *server) visionDeviceCommand(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "请求格式错误", http.StatusBadRequest)
 		return
 	}
-	if command.Operation != "start" && command.Operation != "update" && command.Operation != "stop" {
+	if command.Operation != "start" && command.Operation != "update" && command.Operation != "stop" && command.Operation != "calibrate-forward" {
 		http.Error(w, "视觉操作无效", http.StatusBadRequest)
 		return
 	}
@@ -323,15 +323,47 @@ func (s *server) visionDeviceCommand(w http.ResponseWriter, r *http.Request) {
 		payload["brake"] = command.Brake
 	}
 	requestID := fmt.Sprintf("vision-%d", time.Now().UnixNano())
-	sent := s.hub.SendOnly(map[string]any{
-		"type": "command", "requestId": requestID,
-		"command": "vision." + command.Operation, "payload": payload,
-	})
+	deviceID, unique := s.hub.OnlyDeviceID()
 	w.Header().Set("Content-Type", "application/json")
+	if !unique {
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"sent": false, "acknowledged": false, "success": false,
+			"requestId": requestID, "message": "vision control requires exactly one online device",
+		})
+		return
+	}
+	message := map[string]any{
+		"type": "command", "requestId": requestID,
+		"command": "vision." + strings.ReplaceAll(command.Operation, "-", "."), "payload": payload,
+	}
+	wait := 700 * time.Millisecond
+	if command.Operation == "update" {
+		wait = 250 * time.Millisecond
+	}
+	ack, sent, acknowledged := s.hub.SendAndWait(deviceID, requestID, message, wait)
 	if !sent {
 		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"sent": false, "acknowledged": false, "success": false,
+			"requestId": requestID, "message": "device offline",
+		})
+		return
 	}
-	_ = json.NewEncoder(w).Encode(map[string]any{"sent": sent, "requestId": requestID})
+	if !acknowledged {
+		w.WriteHeader(http.StatusGatewayTimeout)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"sent": true, "acknowledged": false, "success": false,
+			"requestId": requestID, "message": "device acknowledgement timeout",
+		})
+		return
+	}
+	if success, _ := ack["success"].(bool); !success {
+		w.WriteHeader(http.StatusConflict)
+	}
+	ack["sent"] = true
+	ack["acknowledged"] = true
+	_ = json.NewEncoder(w).Encode(ack)
 }
 
 func (s *server) health(w http.ResponseWriter, r *http.Request) {

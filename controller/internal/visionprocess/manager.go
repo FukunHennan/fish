@@ -3,12 +3,14 @@ package visionprocess
 import (
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -20,9 +22,15 @@ type Process interface {
 type StartFunc func(visionDir string) (Process, error)
 
 type Manager struct {
-	baseURL string
-	process Process
-	client  *http.Client
+	baseURL        string
+	process        Process
+	client         *http.Client
+	start          StartFunc
+	startupTimeout time.Duration
+	mu             sync.Mutex
+	stop           chan struct{}
+	done           chan struct{}
+	closing        bool
 }
 
 type PythonCommand struct {
@@ -45,8 +53,9 @@ func FindDir(candidates ...string) (string, error) {
 }
 
 func Ensure(baseURL string, start StartFunc, timeout time.Duration) (*Manager, error) {
-	manager := &Manager{baseURL: baseURL, client: &http.Client{Timeout: 500 * time.Millisecond}}
+	manager := &Manager{baseURL: baseURL, client: &http.Client{Timeout: 500 * time.Millisecond}, start: start, startupTimeout: timeout, stop: make(chan struct{}), done: make(chan struct{})}
 	if manager.healthy() {
+		go manager.guard()
 		return manager, nil
 	}
 	process, err := start("")
@@ -57,6 +66,7 @@ func Ensure(baseURL string, start StartFunc, timeout time.Duration) (*Manager, e
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if manager.healthy() {
+			go manager.guard()
 			return manager, nil
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -76,21 +86,117 @@ func (m *Manager) healthy() bool {
 	return response.StatusCode == http.StatusOK
 }
 
-func (m *Manager) OwnsProcess() bool { return m.process != nil }
+func (m *Manager) OwnsProcess() bool { m.mu.Lock(); defer m.mu.Unlock(); return m.process != nil }
+
+func (m *Manager) guard() {
+	defer close(m.done)
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	failures := 0
+	restarts := []time.Time{}
+	for {
+		select {
+		case <-m.stop:
+			return
+		case <-ticker.C:
+		}
+		if m.healthy() {
+			failures = 0
+			continue
+		}
+		failures++
+		if failures < 2 {
+			continue
+		}
+		now := time.Now()
+		kept := restarts[:0]
+		for _, value := range restarts {
+			if now.Sub(value) < time.Minute {
+				kept = append(kept, value)
+			}
+		}
+		restarts = kept
+		if len(restarts) >= 5 {
+			log.Printf("vision watchdog: crash loop detected; automatic restart paused for 60s")
+			select {
+			case <-m.stop:
+				return
+			case <-time.After(time.Minute):
+			}
+			restarts = nil
+		}
+		delay := time.Second << min(len(restarts), 4)
+		log.Printf("vision watchdog: backend unavailable; restarting in %s", delay)
+		select {
+		case <-m.stop:
+			return
+		case <-time.After(delay):
+		}
+		m.mu.Lock()
+		if m.closing {
+			m.mu.Unlock()
+			return
+		}
+		old := m.process
+		m.process = nil
+		m.mu.Unlock()
+		if old != nil {
+			_ = old.Kill()
+			_ = old.Wait()
+		}
+		process, err := m.start("")
+		if err != nil {
+			log.Printf("vision watchdog: restart failed: %v", err)
+			restarts = append(restarts, time.Now())
+			continue
+		}
+		m.mu.Lock()
+		m.process = process
+		m.mu.Unlock()
+		restarts = append(restarts, time.Now())
+		deadline := time.Now().Add(m.startupTimeout)
+		ready := false
+		for time.Now().Before(deadline) {
+			if m.healthy() {
+				ready = true
+				break
+			}
+			select {
+			case <-m.stop:
+				return
+			case <-time.After(100 * time.Millisecond):
+			}
+		}
+		if ready {
+			log.Printf("vision watchdog: backend restored")
+			failures = 0
+		} else {
+			log.Printf("vision watchdog: restarted process did not become healthy")
+		}
+	}
+}
 
 func (m *Manager) Close() error {
-	if m.process == nil {
+	m.mu.Lock()
+	if !m.closing {
+		m.closing = true
+		close(m.stop)
+	}
+	process := m.process
+	m.process = nil
+	m.mu.Unlock()
+	<-m.done
+	if process == nil {
 		return nil
 	}
 	response, _ := m.client.Post(m.baseURL+"/stop", "application/json", nil)
 	if response != nil {
 		response.Body.Close()
 	}
-	if err := m.process.Kill(); err != nil {
+	if err := process.Kill(); err != nil {
 		return err
 	}
-	_ = m.process.Wait()
-	m.process = nil
+	_ = process.Wait()
 	return nil
 }
 

@@ -120,6 +120,27 @@ h1 { margin-top: 2px; font-size: 15px; line-height: 1.2; }
 .camera-select { color: #98a9b1; font-size: 9px; font-weight: 700; }
 .camera-select select { width: 100%; margin-top: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 7px; color: var(--text); background: #0e161d; font-size: 9px; }
 .vision-primary, .tracking-actions { display: grid; grid-template-columns: repeat(2,1fr); gap: 6px; }
+.vision-targets { display: grid; gap: 5px; padding: 8px; border: 1px solid var(--line); border-radius: 7px; background: #0c141b; }
+.vision-targets > strong { color: #a9bbc2; font-size: 9px; }
+.vision-targets > div { display: grid; grid-template-columns: 8px 1fr auto auto; align-items: center; gap: 5px; color: #cbd7dc; font-size: 8px; }
+.vision-targets i { width: 7px; height: 7px; border-radius: 50%; box-shadow: 0 0 7px currentColor; }
+.vision-targets b { color: #e5eef1; font-size: 8px; }
+.vision-targets small,.vision-targets p { margin: 0; color: #71858e; font-size: 8px; }
+.vision-workflow { display: grid; gap: 7px; padding: 8px; border: 1px solid var(--line); border-radius: 7px; background: #0c141b; }
+.vision-workflow > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.vision-workflow > header strong { color: #a9bbc2; font-size: 9px; }
+.vision-workflow > header span { color: #7f939c; font-size: 7.5px; }
+.vision-workflow > div { display: grid; gap: 4px; }
+.vision-workflow p { display: grid; grid-template-columns: 17px 1fr auto; align-items: center; gap: 5px; margin: 0; color: #758791; font-size: 8px; }
+.vision-workflow p i { display: grid; place-items: center; width: 15px; height: 15px; border: 1px solid #33434c; border-radius: 50%; color: #70838d; font-style: normal; font-size: 7px; }
+.vision-workflow p b { color: #60737c; font-size: 7px; }
+.vision-workflow p.complete { color: #bde9db; }
+.vision-workflow p.complete i { color: #d3fff1; border-color: #2f7463; background: #1b4a3e; }
+.vision-workflow p.complete b { color: #62c5a6; }
+.vision-workflow p.current { color: #f2d99a; }
+.vision-workflow p.current i { color: #ffe7ab; border-color: #8c7137; background: #493b1d; box-shadow: 0 0 8px rgba(231,190,92,.2); }
+.vision-workflow > small { padding-top: 5px; border-top: 1px solid var(--line); color: #e5b66b; font-size: 7.5px; line-height: 1.35; }
+.vision-workflow.active { border-color: #2d6a5b; box-shadow: inset 0 0 18px rgba(62,160,130,.06); }
 .tool-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 6px; padding-top: 9px; border-top: 1px solid var(--line); }
 .tool-grid.compact { grid-template-columns: repeat(2,1fr); }
 .vision-controls button { min-height: 34px; padding: 7px 8px; border: 1px solid var(--line); border-radius: 7px; color: #c9d5da; background: #161f27; font-size: 9px; font-weight: 700; }

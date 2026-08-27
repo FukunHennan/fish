@@ -1,0 +1,12 @@
+{
+  "sessionId": "20260827-163652-31068",
+  "startedAt": "2026-08-27T16:36:52.6493822+08:00",
+  "goos": "windows",
+  "goarch": "amd64",
+  "goVersion": "go1.27.0",
+  "pid": 31068,
+  "args": [
+    "C:\\Users\\LENOVO\\Desktop\\fish\\controller\\.runtime\\fish-controller.exe"
+  ],
+  "workingDir": "C:\\Users\\LENOVO\\Desktop\\fish\\controller"
+}

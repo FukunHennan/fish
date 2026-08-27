@@ -37,6 +37,7 @@ private:
     IPAddress controllerIP_;
     uint32_t lastHeartbeat_=0,lastReport_=0;
     uint32_t lastControlMs_=0;
+    uint32_t calibrationStopAtMs_=0;
     String stopReason_="BOOT";
     String otaState_="IDLE";
 };

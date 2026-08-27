@@ -10,12 +10,13 @@ from control import RoboFishComm
 class CaptureHandler(BaseHTTPRequestHandler):
     messages = []
     event = threading.Event()
+    response = {"sent": True, "acknowledged": True, "success": True, "code": "OK"}
 
     def do_POST(self):
         body = self.rfile.read(int(self.headers["Content-Length"]))
         self.__class__.messages.append(json.loads(body))
         self.__class__.event.set()
-        payload = json.dumps({"sent": True}).encode()
+        payload = json.dumps(self.__class__.response).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
@@ -30,6 +31,7 @@ class GoControllerCommTests(unittest.TestCase):
     def setUp(self):
         CaptureHandler.messages = []
         CaptureHandler.event.clear()
+        CaptureHandler.response = {"sent": True, "acknowledged": True, "success": True, "code": "OK"}
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), CaptureHandler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -66,6 +68,17 @@ class GoControllerCommTests(unittest.TestCase):
         self.assertEqual(update["crossTrackError"], 0.2)
         self.assertEqual(update["headingErrorDeg"], -12.0)
         self.assertEqual(update["curvature"], 0.4)
+
+    def test_device_rejection_does_not_enable_vision_motion(self):
+        CaptureHandler.response = {
+            "sent": True, "acknowledged": True, "success": False,
+            "code": "VISION_NOT_ACTIVE", "message": "rejected",
+        }
+        comm = RoboFishComm(controller_url=self.url)
+        self.assertFalse(comm.ensure_hybrid_mode())
+        self.assertFalse(comm.start_forward_calibration())
+        comm.stopped = True
+        comm.thread.join(timeout=1)
 
 
 if __name__ == "__main__":

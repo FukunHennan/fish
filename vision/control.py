@@ -44,6 +44,12 @@ class RoboFishComm:
             result = json.loads(response.read().decode("utf-8"))
         if not result.get("sent"):
             raise RuntimeError("没有唯一在线机器鱼可接收视觉命令")
+        if not result.get("acknowledged"):
+            raise RuntimeError(result.get("message") or "机器鱼响应超时")
+        if not result.get("success"):
+            code = result.get("code") or "DEVICE_REJECTED"
+            message = result.get("message") or "机器鱼拒绝执行视觉命令"
+            raise RuntimeError(f"{code}: {message}")
         return result
 
     def _request_vision_pid(
@@ -176,7 +182,7 @@ class RoboFishComm:
         try:
             with self._request_lock:
                 self._session_id = f"vision-{session}-{time.time_ns()}"
-                self._post({"operation": "start", "sessionId": self._session_id}, timeout=0.5)
+                self._post({"operation": "start", "sessionId": self._session_id}, timeout=1.0)
             with self._state_lock:
                 if self._control_session != session:
                     return False
@@ -188,6 +194,17 @@ class RoboFishComm:
             return True
         except Exception as error:
             print(f"[HTTP Vision Ready] Failed: {error}")
+            return False
+
+    def start_forward_calibration(self):
+        if not self._session_id:
+            return False
+        try:
+            self._post({"operation": "calibrate-forward", "sessionId": self._session_id}, timeout=1.0)
+            print("[Vision Calibration] ESP32 forward preset started")
+            return True
+        except Exception as error:
+            print(f"[Vision Calibration] Forward preset failed: {error}")
             return False
 
     def send_command(self, cmd_str):
@@ -204,7 +221,7 @@ class RoboFishComm:
         self._clear_queue()
         try:
             with self._request_lock:
-                self._post({"operation": "stop", "sessionId": self._session_id}, timeout=0.5)
+                self._post({"operation": "stop", "sessionId": self._session_id}, timeout=1.0)
             print("[HTTP Response] Propulsion stopped")
             return True
         except Exception as error:

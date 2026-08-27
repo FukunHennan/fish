@@ -6,6 +6,7 @@ from __future__ import annotations
 SIMPLE_ACTIONS = {
     "marker.select": "MARKER_ROI",
     "heading.select": "HEAD_DIRECTION",
+    "heading.calibrate": "AUTO_HEAD_DIRECTION",
     "calibration.toggle": "POOL_CALIB",
     "path.clear": "CLEAR_PATH",
     "tracking.start": "START",

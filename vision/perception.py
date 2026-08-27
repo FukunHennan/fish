@@ -52,7 +52,12 @@ class FishDetector:
             "track_id": None,
             "frame_time": 0.0,
             "infer_fps": 0.0,
+            "detections": [],
         }
+        self._tracks = {}
+        self._next_track_id = 1
+        self._last_nonempty_result = None
+        self._detection_hold_seconds = 0.75
         self._status_lock = threading.Lock()
         self._status = {
             "loading": False,
@@ -167,10 +172,10 @@ class FishDetector:
                     imgsz=self.imgsz,
                     device=inference_device,
                     iou=0.50,
-                    max_det=3,
+                    max_det=10,
                     verbose=False,
                 )
-                parsed = self._parse_result(results, frame_time)
+                parsed = self._parse_result(results, frame, frame_time)
             except Exception as error:
                 with self._status_lock:
                     self._status["last_inference_error"] = str(error)
@@ -193,7 +198,29 @@ class FishDetector:
                 self._status["last_inference_error"] = None
 
     @staticmethod
-    def _parse_result(results, frame_time):
+    def _colour_signature(frame, bbox):
+        import cv2
+        import numpy as np
+        height, width = frame.shape[:2]
+        x1, y1, x2, y2 = [int(round(value)) for value in bbox]
+        pad_x, pad_y = max(1, (x2-x1)//6), max(1, (y2-y1)//6)
+        x1, x2 = max(0, x1+pad_x), min(width, x2-pad_x)
+        y1, y2 = max(0, y1+pad_y), min(height, y2-pad_y)
+        if x2 <= x1 or y2 <= y1: return "UNKNOWN", "#808080"
+        hsv = cv2.cvtColor(frame[y1:y2, x1:x2], cv2.COLOR_BGR2HSV)
+        pixels = hsv.reshape(-1, 3)
+        pixels = pixels[(pixels[:, 1] >= 55) & (pixels[:, 2] >= 45)]
+        if len(pixels) < 20: return "NEUTRAL", "#9aa4aa"
+        hue = float(np.median(pixels[:, 0]))
+        bands = [
+            (8, "RED", "#ff4d5e"), (20, "ORANGE", "#ff9f43"),
+            (36, "YELLOW", "#f6d84a"), (85, "GREEN", "#35d07f"),
+            (100, "CYAN", "#35cce0"), (132, "BLUE", "#4b7bec"),
+            (165, "PURPLE", "#b36bff"), (180, "RED", "#ff4d5e"),
+        ]
+        return next((name, colour) for limit, name, colour in bands if hue < limit)
+
+    def _parse_result(self, results, frame, frame_time):
         parsed = {
             "pixel": None,
             "bbox": None,
@@ -201,24 +228,89 @@ class FishDetector:
             "track_id": None,
             "frame_time": frame_time,
             "infer_fps": 0.0,
+            "detections": [],
         }
         if not results:
-            return parsed
+            return self._hold_recent_detection(parsed, frame_time)
         boxes = getattr(results[0], "boxes", None)
         if boxes is None or len(boxes) == 0:
-            return parsed
+            return self._hold_recent_detection(parsed, frame_time)
 
-        best_idx = int(boxes.conf.argmax().item())
-        x1, y1, x2, y2 = boxes.xyxy[best_idx].tolist()
-        parsed["pixel"] = [(x1 + x2) / 2.0, (y1 + y2) / 2.0]
-        parsed["bbox"] = [x1, y1, x2, y2]
-        parsed["confidence"] = float(boxes.conf[best_idx].item())
-
-        if boxes.id is not None:
-            track_ids = boxes.id.cpu().numpy()
-            if len(track_ids) > best_idx:
-                parsed["track_id"] = int(track_ids[best_idx])
+        previous = dict(self._tracks)
+        used = set()
+        detections = []
+        candidates = []
+        for index in range(len(boxes)):
+            coordinates = [float(value) for value in boxes.xyxy[index].tolist()]
+            candidates.append({
+                "bbox": coordinates,
+                "confidence": float(boxes.conf[index].item()),
+            })
+        candidates = self._merge_duplicate_candidates(candidates)
+        for candidate in candidates:
+            coordinates = candidate["bbox"]
+            x1, y1, x2, y2 = coordinates
+            centre = [(x1+x2)/2.0, (y1+y2)/2.0]
+            colour_name, colour_hex = self._colour_signature(frame, coordinates)
+            matches = [(track_id, (centre[0]-item[0])**2 + (centre[1]-item[1])**2) for track_id, item in previous.items() if track_id not in used and item[2] == colour_name]
+            track_id, distance = min(matches, key=lambda item: item[1]) if matches else (None, None)
+            if track_id is None or distance > 140.0**2:
+                track_id = self._next_track_id; self._next_track_id += 1
+            used.add(track_id)
+            detections.append({"trackId": track_id, "bbox": coordinates, "center": centre, "confidence": candidate["confidence"], "color": colour_name, "colorHex": colour_hex, "lastSeenMs": int(frame_time*1000), "held": False})
+        self._tracks = {item["trackId"]: (item["center"][0], item["center"][1], item["color"]) for item in detections}
+        parsed["detections"] = sorted(detections, key=lambda item: item["confidence"], reverse=True)
+        best = parsed["detections"][0]
+        parsed["pixel"] = list(best["center"])
+        parsed["bbox"] = list(best["bbox"])
+        parsed["confidence"] = best["confidence"]
+        parsed["track_id"] = best["trackId"]
+        self._last_nonempty_result = dict(parsed)
         return parsed
+
+    def _hold_recent_detection(self, empty, frame_time):
+        previous = self._last_nonempty_result
+        if previous is None:
+            return empty
+        age = float(frame_time) - float(previous.get("frame_time", 0.0))
+        if age < 0.0 or age > self._detection_hold_seconds:
+            return empty
+        held = dict(previous)
+        held["frame_time"] = frame_time
+        held["confidence"] = float(held.get("confidence", 0.0)) * max(
+            0.35, 1.0 - age / self._detection_hold_seconds
+        )
+        held["detections"] = [dict(item, held=True) for item in held.get("detections", [])]
+        return held
+
+    @staticmethod
+    def _merge_duplicate_candidates(candidates):
+        """Merge overlapping/adjacent boxes produced for parts of one small fish."""
+        merged = []
+        for candidate in sorted(candidates, key=lambda item: item["confidence"], reverse=True):
+            x1, y1, x2, y2 = candidate["bbox"]
+            centre = ((x1+x2)/2.0, (y1+y2)/2.0)
+            diagonal = max(1.0, ((x2-x1)**2 + (y2-y1)**2) ** 0.5)
+            match = None
+            for item in merged:
+                a1, b1, a2, b2 = item["bbox"]
+                other = ((a1+a2)/2.0, (b1+b2)/2.0)
+                other_diagonal = max(1.0, ((a2-a1)**2 + (b2-b1)**2) ** 0.5)
+                distance = ((centre[0]-other[0])**2 + (centre[1]-other[1])**2) ** 0.5
+                intersection = max(0.0, min(x2, a2)-max(x1, a1)) * max(0.0, min(y2, b2)-max(y1, b1))
+                area = max(1.0, (x2-x1)*(y2-y1))
+                other_area = max(1.0, (a2-a1)*(b2-b1))
+                iou = intersection / max(1.0, area + other_area - intersection)
+                if iou >= 0.20 or distance <= 0.55 * max(diagonal, other_diagonal):
+                    match = item
+                    break
+            if match is None:
+                merged.append({"bbox": list(candidate["bbox"]), "confidence": candidate["confidence"]})
+            else:
+                a1, b1, a2, b2 = match["bbox"]
+                match["bbox"] = [min(x1, a1), min(y1, b1), max(x2, a2), max(y2, b2)]
+                match["confidence"] = max(match["confidence"], candidate["confidence"])
+        return merged
 
 
 import json
@@ -1483,14 +1575,12 @@ class VisionPipeline:
             yolo_timestamp=yolo_result.get("frame_time"),
         )
 
-        pixel = (
-            tuple(float(value) for value in reference.position)
-            if reference.position is not None
-            else None
-        )
+        yolo_pixel = yolo_result.get("pixel")
+        pixel = (tuple(float(value) for value in reference.position) if reference.position is not None else (tuple(float(value) for value in yolo_pixel) if yolo_pixel is not None else None))
+        position_source = reference.source if reference.position is not None else ReferenceSource.ESTIMATED_FALLBACK
         display_pixel = self._smooth_pixel(pixel)
         current, direct_marker = self._world_position(
-            pixel, reference.source, frame_time, homography
+            pixel, position_source, frame_time, homography
         )
 
         velocity = None
@@ -1566,6 +1656,7 @@ class VisionPipeline:
             ReferenceSource.RIGID_BODY,
             ReferenceSource.MARKER,
             ReferenceSource.PREDICTED,
+            ReferenceSource.ESTIMATED_FALLBACK,
         }
         if homography is None or pixel is None or source not in allowed:
             self._position_smooth = None

@@ -63,6 +63,7 @@ def create_runtime_state(
             "tail_point": None,
             "head_point": None,
             "unit_vector": None,
+            "pixel_unit_vector": None,
             "world_unit_vector": None,
             "control_heading": None,
             "control_heading_source": None,
@@ -1052,19 +1053,19 @@ class VisionPresentation:
             _outlined_text(image, str(index + 1), (centre[0] + 10, centre[1] - 10))
 
     def _draw_detection(self, image, result):
-        bbox = result.yolo_bbox
-        if bbox is None:
+        detections = result.yolo_result.get("detections", [])
+        if not detections and result.yolo_bbox is not None:
+            detections = [{"bbox": result.yolo_bbox, "trackId": result.track_id, "confidence": result.yolo_confidence, "color": "UNKNOWN", "colorHex": "#29d3b2"}]
+        if not detections:
             return
-        x1, y1, x2, y2 = [int(value) for value in bbox]
-        cv2.rectangle(image, (x1, y1), (x2, y2), UiPalette.PRIMARY, 1)
-        label = (
-            f"机器鱼 #{result.track_id if result.track_id is not None else '-'}　"
-            f"{result.yolo_confidence * 100:.0f}%"
-        )
-        draw_unicode_text(
-            image, label, (x1, max(3, y1 - 20)),
-            13, UiPalette.PRIMARY, bold=True, stroke_width=1,
-        )
+        for detection in detections:
+            x1, y1, x2, y2 = [int(value) for value in detection["bbox"]]
+            value = detection.get("colorHex", "#29d3b2").lstrip("#")
+            rgb = tuple(int(value[index:index+2], 16) for index in (0, 2, 4))
+            colour = (rgb[2], rgb[1], rgb[0])
+            cv2.rectangle(image, (x1, y1), (x2, y2), colour, 2)
+            label = f"#{detection.get('trackId', '-')} {detection.get('color', 'UNKNOWN')} {float(detection.get('confidence', 0))*100:.0f}%"
+            draw_unicode_text(image, label, (x1, max(3, y1 - 20)), 13, colour, bold=True, stroke_width=1)
 
     def _draw_reference(self, image, result):
         if result.display_pixel is None:

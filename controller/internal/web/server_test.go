@@ -103,7 +103,13 @@ func TestVisionRoutesUseConfiguredProxy(t *testing.T) {
 
 func TestVisionDeviceCommandRoutesToOnlyConnectedFish(t *testing.T) {
 	h := hub.New()
-	connection := &captureConn{}
+	connection := &captureConn{onWrite: func(value any) {
+		message := value.(map[string]any)
+		h.ResolveCommandResult(map[string]any{
+			"type": "command.result", "requestId": message["requestId"],
+			"success": true, "code": "OK", "message": "applied",
+		})
+	}}
 	h.Register(hub.Device{ID: "fish-1"}, connection)
 	handler := NewHandler(h, testKey())
 	body := `{"operation":"update","sessionId":"session-1","sequence":7,"crossTrackError":0.2,"headingErrorDeg":-12,"distanceToTarget":0.8,"speed":0.1,"curvature":0.3,"brake":false}`
@@ -112,6 +118,9 @@ func TestVisionDeviceCommandRoutesToOnlyConnectedFish(t *testing.T) {
 	handler.ServeHTTP(w, r)
 	if w.Code != http.StatusOK {
 		t.Fatalf("状态=%d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"acknowledged":true`) {
+		t.Fatalf("响应没有设备确认: %s", w.Body.String())
 	}
 	if len(connection.sent) != 1 {
 		t.Fatalf("发送数量=%d", len(connection.sent))
@@ -123,6 +132,20 @@ func TestVisionDeviceCommandRoutesToOnlyConnectedFish(t *testing.T) {
 	payload := message["payload"].(map[string]any)
 	if payload["sequence"] != uint32(7) || payload["headingErrorDeg"] != -12.0 {
 		t.Fatalf("载荷=%+v", payload)
+	}
+}
+
+func TestVisionDeviceCommandFailsWhenDeviceDoesNotAcknowledge(t *testing.T) {
+	h := hub.New()
+	h.Register(hub.Device{ID: "fish-1"}, &captureConn{})
+	handler := NewHandler(h, testKey())
+	r := httptest.NewRequest(http.MethodPost, "/api/vision/device-command", strings.NewReader(
+		`{"operation":"calibrate-forward","sessionId":"session-1"}`,
+	))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+	if w.Code != http.StatusGatewayTimeout || !strings.Contains(w.Body.String(), `"acknowledged":false`) {
+		t.Fatalf("未确认命令应超时: status=%d body=%s", w.Code, w.Body.String())
 	}
 }
 

@@ -101,6 +101,7 @@ class VisionApplication:
         self._exit_requested = False
         self._stop_latched_reason = None
         self._last_web_metrics_t = 0.0
+        self._forward_calibration = None
 
     def run(self):
         os.chdir(WORK_DIR)
@@ -279,6 +280,7 @@ class VisionApplication:
             self._update_loop_fps()
             self._update_auto_calibration(result)
             self._collect_turn_sample(result)
+            self._update_forward_calibration(result)
             self._handle_tablet_commands()
             self.last_decision = self._update_control(result)
 
@@ -513,6 +515,8 @@ class VisionApplication:
                 self._apply_marker_roi(payload)
             elif action == "HEAD_DIRECTION":
                 self._toggle_head_direction()
+            elif action == "AUTO_HEAD_DIRECTION":
+                self._start_heading_calibration(result)
             elif action == "APPLY_HEAD_DIRECTION":
                 self._apply_head_direction(payload)
             elif action == "POOL_CALIB":
@@ -557,6 +561,45 @@ class VisionApplication:
         yolo["lastInferenceError"] = yolo.pop("last_inference_error", None)
         yolo["loadSeconds"] = yolo.pop("load_seconds", None)
         yolo["inferFps"] = result.yolo_result.get("infer_fps", 0.0)
+        yolo["detections"] = result.yolo_result.get("detections", [])
+        yolo["detectionCount"] = len(yolo["detections"])
+        calibration_ready = self.runtime.calibration["H"] is not None
+        path_ready = len(self.runtime.drawn_path["pixels"]) >= 2
+        target_detected = yolo["detectionCount"] == 1
+        position_ready = result.control_position is not None
+        heading_ready = (
+            self.runtime.heading["world_unit_vector"] is not None
+            or self.runtime.heading.get("pixel_unit_vector") is not None
+        )
+        calibrating_heading = self._forward_calibration is not None
+        tracking_active = bool(self.control.active)
+        blockers = []
+        if not bool(yolo.get("ready")):
+            blockers.append("等待 YOLO 就绪")
+        if yolo["detectionCount"] == 0:
+            blockers.append("未检测到机器鱼")
+        elif yolo["detectionCount"] > 1:
+            blockers.append("检测到多条鱼，请锁定单一目标")
+        if not calibration_ready:
+            blockers.append("场地尚未标定")
+        if not path_ready:
+            blockers.append("尚未绘制有效轨迹")
+        if not heading_ready:
+            blockers.append("方向尚未自标定")
+        if not position_ready:
+            blockers.append("缺少可用于控制的鱼位置")
+        if self.turn_session.active:
+            blockers.append("转圈测量尚未结束")
+        if tracking_active:
+            stage = "TRACKING"
+        elif calibrating_heading:
+            stage = "HEADING_CALIBRATING"
+        elif heading_ready and not blockers:
+            stage = "READY"
+        elif bool(yolo.get("ready")):
+            stage = "PREPARING"
+        else:
+            stage = "INITIALIZING"
         self.action_result_sink({
             "type": "system.metrics",
             "metrics": {
@@ -564,6 +607,22 @@ class VisionApplication:
                 "yolo": yolo,
                 "cameraFps": self.cam.measured_fps,
                 "visionFps": self._loop_fps,
+                "workflow": {
+                    "stage": stage,
+                    "status": self.status,
+                    "targetDetected": target_detected,
+                    "targetCount": yolo["detectionCount"],
+                    "poolCalibrated": calibration_ready,
+                    "pathReady": path_ready,
+                    "pathPointCount": len(self.runtime.drawn_path["pixels"]),
+                    "positionReady": position_ready,
+                    "headingCalibrated": heading_ready,
+                    "headingCalibrating": calibrating_heading,
+                    "canCalibrateHeading": target_detected and not calibrating_heading and not tracking_active,
+                    "trackingActive": tracking_active,
+                    "canStart": not blockers and not calibrating_heading,
+                    "blockers": blockers,
+                },
             },
         })
 
@@ -603,8 +662,9 @@ class VisionApplication:
         if result.control_position is None:
             print("Cannot start: no reliable tail position.")
             return
+        self._promote_pixel_heading(calibration["H"], result.pixel)
         if heading["world_unit_vector"] is None:
-            print("Cannot start: heading calibration is required.")
+            print("Cannot start: run automatic direction calibration first.")
             return
         pixels = np.float32([[[x, y] for x, y in drawn["pixels"]]])
         path_world = cv2.perspectiveTransform(pixels, calibration["H"])[0]
@@ -636,6 +696,88 @@ class VisionApplication:
         drawn["active"] = True
         self.status = self.control.status
         print(f"Tracking started with {len(self.control.path_guidance.path)} path points.")
+
+    def _start_heading_calibration(self, result):
+        if self._forward_calibration is not None:
+            print("Forward heading calibration is already running.")
+            return
+        if result.pixel is None:
+            print("Cannot calibrate heading: no single fish is locked.")
+            return
+        if len(result.yolo_result.get("detections", [])) != 1:
+            print("Cannot calibrate heading: exactly one fish must be detected.")
+            return
+        if not self.fish_comm.ensure_hybrid_mode():
+            print("Cannot calibrate heading: device did not acknowledge vision session.")
+            return
+        if not self.fish_comm.start_forward_calibration():
+            self._safe_stop("CAL_FORWARD_FAILED", force=True)
+            return
+        self._forward_calibration = {
+            "started": time.monotonic(),
+            "start_pixel": np.asarray(result.pixel, dtype=np.float64),
+            "start_world": (
+                np.asarray(result.control_position, dtype=np.float64)
+                if result.control_position is not None else None
+            ),
+        }
+        self.status = "CAL_FORWARD"
+        print("Automatic forward-heading calibration started from the locked fish.")
+
+    def _update_forward_calibration(self, result):
+        state = self._forward_calibration
+        if state is None or time.monotonic() - state["started"] < 1.45:
+            return
+        self._forward_calibration = None
+        if result.pixel is None:
+            self._safe_stop("CAL_FORWARD_FAILED", force=True)
+            print("Automatic heading failed: target position was lost.")
+            return
+        pixel_displacement = np.asarray(result.pixel, dtype=np.float64) - state["start_pixel"]
+        pixel_distance = float(np.linalg.norm(pixel_displacement))
+        if pixel_distance < 10.0:
+            self._safe_stop("CAL_FORWARD_FAILED", force=True)
+            print(f"Automatic heading failed: travelled only {pixel_distance:.1f} px.")
+            return
+        pixel_unit = pixel_displacement / pixel_distance
+        heading = self.runtime.heading
+        heading.update({
+            "pixel_unit_vector": tuple(float(v) for v in pixel_unit),
+            "angle_deg": float((np.degrees(np.arctan2(-pixel_unit[1], pixel_unit[0])) + 360.0) % 360.0),
+            "selecting": False,
+        })
+        if state["start_world"] is not None and result.control_position is not None:
+            world_displacement = np.asarray(result.control_position, dtype=np.float64) - state["start_world"]
+            world_distance = float(np.linalg.norm(world_displacement))
+            if world_distance >= 0.015:
+                world_unit = world_displacement / world_distance
+                heading.update({
+                    "world_unit_vector": tuple(float(v) for v in world_unit),
+                    "control_heading": tuple(float(v) for v in world_unit),
+                    "control_heading_source": "MOTION",
+                })
+        self.status = "HEADING_READY"
+        print(f"Automatic forward heading ready: {heading['angle_deg']:.1f} deg, travel={pixel_distance:.1f} px")
+
+    def _promote_pixel_heading(self, homography, pixel):
+        heading = self.runtime.heading
+        if heading["world_unit_vector"] is not None or heading.get("pixel_unit_vector") is None:
+            return
+        if homography is None or pixel is None:
+            return
+        origin = np.asarray(pixel, dtype=np.float32)
+        tip = origin + np.asarray(heading["pixel_unit_vector"], dtype=np.float32) * 30.0
+        world = cv2.perspectiveTransform(np.float32([[origin, tip]]), homography)[0]
+        delta = np.asarray(world[1] - world[0], dtype=np.float64)
+        length = float(np.linalg.norm(delta))
+        if length <= 1e-6:
+            return
+        unit = delta / length
+        heading.update({
+            "world_unit_vector": tuple(float(v) for v in unit),
+            "control_heading": tuple(float(v) for v in unit),
+            "control_heading_source": "MOTION",
+        })
 
     def _toggle_turn_calibration(self, result):
         if self.turn_session.active:

@@ -34,7 +34,7 @@ class CameraInfo:
 
 
 class CameraCatalog:
-    def __init__(self, provider, ttl_seconds=30, clock=time.monotonic):
+    def __init__(self, provider, ttl_seconds=60, clock=time.monotonic):
         self._provider = provider
         self._ttl_seconds = ttl_seconds
         self._clock = clock
@@ -150,6 +150,7 @@ class VisionService:
         "marker.select",
         "heading.point",
         "heading.select",
+        "heading.calibrate",
         "path.draw",
         "path.clear",
         "tracking.start",

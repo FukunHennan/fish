@@ -43,7 +43,7 @@ MARKER_BL = 3
 
 # Fish detection and fixed marker tracking.
 YOLO_MODEL_PATH = os.path.join(ASSET_DIR, "best.pt")
-YOLO_CONF_THRESHOLD = 0.18
+YOLO_CONF_THRESHOLD = 0.25
 YOLO_IMG_SIZE = 640
 YOLO_DEVICE = 0
 YOLO_DETECT_INTERVAL_S = 0.20

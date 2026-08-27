@@ -23,6 +23,7 @@ controller/diagnostics/runs/
 
 # Python environments, caches and local calibration output
 vision/.venv/
+vision/.venv312/
 .venv/
 __pycache__/
 *.py[cod]

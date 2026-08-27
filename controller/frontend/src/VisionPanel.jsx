@@ -6,10 +6,24 @@ import { canEditVision, visionRequest, visionStreamUrl } from "./visionSession.j
 
 const TOOLS = [
   ["calibration", "场地标定"],
-  ["marker", "鱼尾标定"],
-  ["heading", "鱼头方向"],
   ["path", "绘制轨迹"],
 ];
+
+const WORKFLOW_STAGES = [
+  ["targetDetected", "单鱼目标"],
+  ["headingCalibrated", "方向标定"],
+  ["poolCalibrated", "场地标定"],
+  ["pathReady", "轨迹路径"],
+  ["trackingActive", "循迹运行"],
+];
+
+const STAGE_LABELS = {
+  INITIALIZING: "系统初始化",
+  PREPARING: "循迹准备中",
+  HEADING_CALIBRATING: "正在自标定方向",
+  READY: "可以启动循迹",
+  TRACKING: "循迹运行中",
+};
 
 export default function VisionPanel() {
   const [cameras, setCameras] = useState([]);
@@ -30,6 +44,9 @@ export default function VisionPanel() {
   const videoWidth = status.metrics?.frame?.width || selectedCamera?.width || 640;
   const videoHeight = status.metrics?.frame?.height || selectedCamera?.height || 480;
   const yolo = status.metrics?.yolo;
+  const detections = yolo?.detections || [];
+  const workflow = status.metrics?.workflow || {};
+  const workflowLabel = STAGE_LABELS[workflow.stage] || "等待视觉状态";
   const yoloLabel = yolo?.ready ? "YOLO 就绪" : yolo?.loading ? "YOLO 加载中" : yolo?.error ? "YOLO 异常" : "YOLO 等待启动";
 
   useEffect(() => {
@@ -180,8 +197,19 @@ export default function VisionPanel() {
         <aside className="vision-controls">
           <label className="camera-select">摄像头<select value={cameraIndex} disabled={running} onChange={(event) => setCameraIndex(event.target.value)}><option value="">请选择摄像头</option>{cameras.map((camera) => <option key={camera.index} value={camera.index}>{camera.name} · {camera.width}×{camera.height} @ {camera.fps}FPS</option>)}</select></label>
           <div className="vision-primary"><button disabled={running || cameraIndex === ""} onClick={start}>开始预览</button><button disabled={!running} onClick={toggleProcessing}>{processing ? "停止视觉处理" : "启动视觉处理"}</button><button className="stop" disabled={!running} onClick={stop}>关闭视频</button></div>
+          <section className="vision-targets"><strong>检测目标 · {detections.length}</strong>{detections.length ? detections.map((target) => <div key={target.trackId}><i style={{ background: target.colorHex }} /><span>目标 #{target.trackId}</span><b>{target.color}</b><small>{Math.round(target.confidence * 100)}%</small></div>) : <p>{processing ? "暂未检测到机器鱼" : "启动视觉处理后显示目标"}</p>}</section>
+          <section className={`vision-workflow ${workflow.trackingActive ? "active" : ""}`}>
+            <header><strong>循迹流程</strong><span>{workflowLabel}</span></header>
+            <div>{WORKFLOW_STAGES.map(([key, label], index) => {
+              const complete = Boolean(workflow[key]);
+              const current = !complete && WORKFLOW_STAGES.slice(0, index).every(([previous]) => workflow[previous]);
+              return <p key={key} className={complete ? "complete" : current ? "current" : "pending"}><i>{complete ? "✓" : index + 1}</i><span>{label}</span><b>{complete ? "完成" : current ? "待处理" : "等待"}</b></p>;
+            })}</div>
+            {workflow.blockers?.length > 0 && <small>{workflow.blockers[0]}</small>}
+          </section>
           <div className="tool-grid">{TOOLS.map(([name, label]) => <button key={name} className={tool === name ? "active" : ""} disabled={!editable} onClick={() => selectTool(name)}>{label}</button>)}</div>
           <div className="tool-grid compact">
+            <button disabled={!running || !workflow.canCalibrateHeading} onClick={() => sendAction({ type: "heading.calibrate" })}>{workflow.headingCalibrating ? "方向标定中" : "方向自标定"}</button>
             <button disabled={!running} onClick={() => sendAction({ type: "path.clear" })}>清除轨迹</button>
             <button disabled={!running} onClick={() => sendAction({ type: "turn_calibration.toggle" })}>转圈测量</button>
             <button disabled={!running} onClick={() => sendAction({ type: "recording.toggle" })}>录像</button>
@@ -190,7 +218,7 @@ export default function VisionPanel() {
             <button disabled={!editable || status.metrics?.exposure?.supported === false} onClick={() => sendAction({ type: "camera.exposure", value: 1 })}>提高曝光</button>
             <button disabled={!running} onClick={() => sendAction({ type: "camera.clahe" })}>画面增强</button>
           </div>
-          <div className="tracking-actions"><button disabled={!running} onClick={() => sendAction({ type: "tracking.start" })}>启动循迹</button><button className="stop" disabled={!running} onClick={() => sendAction({ type: "tracking.stop" })}>停止循迹</button></div>
+          <div className="tracking-actions"><button disabled={!running || !workflow.canStart} onClick={() => sendAction({ type: "tracking.start" })}>{workflow.headingCalibrating ? "方向标定中" : workflow.trackingActive ? "循迹运行中" : "启动循迹"}</button><button className="stop" disabled={!running} onClick={() => sendAction({ type: "tracking.stop" })}>停止循迹</button></div>
           <p className="feedback" aria-live="polite">{streamFeedback || feedback || yolo?.error || yolo?.lastInferenceError || (running ? `摄像头 ${status.cameraIndex} 正在处理 · ${yoloLabel}` : "视觉服务未启动")}</p>
         </aside>
       </div>
