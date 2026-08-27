@@ -20,7 +20,7 @@ const WORKFLOW_STAGES = [
 const STAGE_LABELS = {
   INITIALIZING: "系统初始化",
   PREPARING: "循迹准备中",
-  HEADING_CALIBRATING: "正在自标定方向",
+  HEADING_CALIBRATING: "正在标定方向",
   READY: "可以启动循迹",
   TRACKING: "循迹运行中",
 };
@@ -186,7 +186,7 @@ export default function VisionPanel() {
   return (
     <section className="vision-card" aria-label="视觉控制">
       <header className="vision-header">
-        <div><span className="eyebrow">RERVISION / WEB VISION</span><h2>视觉工作区</h2></div>
+        <div><span className="eyebrow">FISH VISION</span><h2>视觉工作区</h2></div>
         <div className="vision-header-status"><span className={`status ${running ? "online" : "offline"}`}><i />{running ? "运行中" : "已停止"}</span><span className={`status ${yolo?.ready ? "online" : "offline"}`}><i />{yoloLabel}</span></div>
       </header>
       <div className="vision-layout">
@@ -209,14 +209,10 @@ export default function VisionPanel() {
           </section>
           <div className="tool-grid">{TOOLS.map(([name, label]) => <button key={name} className={tool === name ? "active" : ""} disabled={!editable} onClick={() => selectTool(name)}>{label}</button>)}</div>
           <div className="tool-grid compact">
-            <button disabled={!running || !workflow.canCalibrateHeading} onClick={() => sendAction({ type: "heading.calibrate" })}>{workflow.headingCalibrating ? "方向标定中" : "方向自标定"}</button>
+            <button disabled={!running || !workflow.canCalibrateHeading} onClick={() => sendAction({ type: "heading.calibrate" })}>{workflow.headingCalibrating ? "方向标定中" : "方向标定"}</button>
             <button disabled={!running} onClick={() => sendAction({ type: "path.clear" })}>清除轨迹</button>
-            <button disabled={!running} onClick={() => sendAction({ type: "turn_calibration.toggle" })}>转圈测量</button>
             <button disabled={!running} onClick={() => sendAction({ type: "recording.toggle" })}>录像</button>
             <button disabled={!running} onClick={() => sendAction({ type: "snapshot.capture" })}>截图</button>
-            <button disabled={!editable || status.metrics?.exposure?.supported === false} onClick={() => sendAction({ type: "camera.exposure", value: -1 })}>降低曝光</button>
-            <button disabled={!editable || status.metrics?.exposure?.supported === false} onClick={() => sendAction({ type: "camera.exposure", value: 1 })}>提高曝光</button>
-            <button disabled={!running} onClick={() => sendAction({ type: "camera.clahe" })}>画面增强</button>
           </div>
           <div className="tracking-actions"><button disabled={!running || !workflow.canStart} onClick={() => sendAction({ type: "tracking.start" })}>{workflow.headingCalibrating ? "方向标定中" : workflow.trackingActive ? "循迹运行中" : "启动循迹"}</button><button className="stop" disabled={!running} onClick={() => sendAction({ type: "tracking.stop" })}>停止循迹</button></div>
           <p className="feedback" aria-live="polite">{streamFeedback || feedback || yolo?.error || yolo?.lastInferenceError || (running ? `摄像头 ${status.cameraIndex} 正在处理 · ${yoloLabel}` : "视觉服务未启动")}</p>
