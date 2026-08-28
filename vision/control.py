@@ -25,11 +25,15 @@ class RoboFishComm:
         self._control_session = 0
         self._session_id = ""
         self._motion_enabled = False
+        self._device_id = ""
         self.thread = threading.Thread(target=self._worker_loop, daemon=True)
         self.thread.start()
         print(f"Vision control routed through Go controller -> {self.base_url}")
 
     def _post(self, payload, timeout=0.5):
+        payload = dict(payload)
+        if self._device_id:
+            payload["deviceId"] = self._device_id
         request = urllib.request.Request(
             self.base_url,
             data=json.dumps(payload).encode("utf-8"),
@@ -51,6 +55,9 @@ class RoboFishComm:
             message = result.get("message") or "机器鱼拒绝执行视觉命令"
             raise RuntimeError(f"{code}: {message}")
         return result
+
+    def set_device_id(self, device_id):
+        self._device_id = str(device_id or "").strip()
 
     def _request_vision_pid(
         self,
@@ -196,11 +203,11 @@ class RoboFishComm:
             print(f"[HTTP Vision Ready] Failed: {error}")
             return False
 
-    def start_forward_calibration(self):
+    def start_forward_calibration(self, duration_ms=3200):
         if not self._session_id:
             return False
         try:
-            self._post({"operation": "calibrate-forward", "sessionId": self._session_id}, timeout=1.0)
+            self._post({"operation": "calibrate-forward", "sessionId": self._session_id, "durationMs": int(duration_ms)}, timeout=1.0)
             print("[Vision Calibration] ESP32 forward preset started")
             return True
         except Exception as error:

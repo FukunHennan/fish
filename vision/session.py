@@ -59,17 +59,19 @@ class VisionSession:
     session_id: str
     camera_id: Optional[str]
     camera_index: Optional[int]
+    target_device_id: Optional[str]
     state: VisionState
     error: Optional[dict[str, str]] = None
     metrics: dict[str, Any] = field(default_factory=dict)
     last_action: Optional[dict[str, Any]] = None
 
     @classmethod
-    def new(cls, camera_id: str, camera_index: int) -> "VisionSession":
+    def new(cls, camera_id: str, camera_index: int, target_device_id: Optional[str] = None) -> "VisionSession":
         return cls(
             session_id=secrets.token_urlsafe(24),
             camera_id=camera_id,
             camera_index=camera_index,
+            target_device_id=target_device_id,
             state=VisionState.OPENING,
         )
 
@@ -94,6 +96,7 @@ class VisionSession:
             "sessionId": self.session_id,
             "cameraId": self.camera_id,
             "cameraIndex": self.camera_index,
+            "targetDeviceId": self.target_device_id,
             "error": self.error,
             "metrics": dict(self.metrics),
             "lastAction": self.last_action,

@@ -29,11 +29,38 @@ var frontendFiles embed.FS
 const maxFirmwareSize int64 = 8 << 20
 
 type server struct {
-	hub          *hub.Hub
-	key          []byte
-	firmwarePath string
-	firmwareName string
-	firmwareMu   sync.RWMutex
+	hub             *hub.Hub
+	key             []byte
+	firmwarePath    string
+	firmwareName    string
+	firmwareMu      sync.RWMutex
+	calibrationMu   sync.Mutex
+	calibrationPath string
+}
+
+type motionCalibrationProfile struct {
+	DeviceID                string  `json:"deviceId"`
+	CenterDeg               float64 `json:"centerDeg"`
+	Frequency               float64 `json:"frequency"`
+	Amplitude               float64 `json:"amplitude"`
+	LeftSign                int     `json:"leftSign"`
+	LeftMaxOffset           float64 `json:"leftMaxOffset"`
+	RightSign               int     `json:"rightSign"`
+	RightMaxOffset          float64 `json:"rightMaxOffset"`
+	TurnPercent             float64 `json:"turnPercent"`
+	ServoMin                float64 `json:"servoMin"`
+	ServoMax                float64 `json:"servoMax"`
+	StraightCenter          float64 `json:"straightCenter"`
+	ForwardFrequency        float64 `json:"forwardFrequency"`
+	ForwardAmplitudePercent float64 `json:"forwardAmplitudePercent"`
+	LeftCenterRatio         float64 `json:"leftCenterRatio"`
+	LeftFrequency           float64 `json:"leftFrequency"`
+	LeftAmplitudePercent    float64 `json:"leftAmplitudePercent"`
+	RightCenterRatio        float64 `json:"rightCenterRatio"`
+	RightFrequency          float64 `json:"rightFrequency"`
+	RightAmplitudePercent   float64 `json:"rightAmplitudePercent"`
+	TransitionMs            float64 `json:"transitionMs"`
+	UpdatedAt               string  `json:"updatedAt"`
 }
 
 type deviceConn struct {
@@ -85,8 +112,19 @@ func uploadedFirmwarePath() string {
 	return filepath.Join(base, "fish-controller", "firmware", "current.bin")
 }
 
+func motionCalibrationPath() string {
+	if path := strings.TrimSpace(os.Getenv("FISH_MOTION_CALIBRATIONS")); path != "" {
+		return path
+	}
+	base, err := os.UserConfigDir()
+	if err != nil || base == "" {
+		base = os.TempDir()
+	}
+	return filepath.Join(base, "fish-controller", "motion-calibrations.json")
+}
+
 func newHandler(h *hub.Hub, key []byte, apiAddress, streamAddress, firmwarePath string) http.Handler {
-	s := &server{hub: h, key: append([]byte(nil), key...), firmwarePath: firmwarePath}
+	s := &server{hub: h, key: append([]byte(nil), key...), firmwarePath: firmwarePath, calibrationPath: motionCalibrationPath()}
 	if firmwarePath != "" {
 		s.firmwareName = filepath.Base(firmwarePath)
 	}
@@ -104,6 +142,7 @@ func newHandler(h *hub.Hub, key []byte, apiAddress, streamAddress, firmwarePath 
 	m.HandleFunc("/healthz", s.health)
 	m.HandleFunc("/api/devices", s.devices)
 	m.HandleFunc("/api/command", s.command)
+	m.HandleFunc("/api/motion-calibrations", s.motionCalibrations)
 	m.HandleFunc("/api/rgb", s.rgb)
 	m.HandleFunc("/api/ota", s.ota)
 	m.HandleFunc("/api/firmware", s.firmwareAPI)
@@ -291,7 +330,9 @@ func (s *server) visionDeviceCommand(w http.ResponseWriter, r *http.Request) {
 	}
 	var command struct {
 		Operation        string  `json:"operation"`
+		DeviceID         string  `json:"deviceId"`
 		SessionID        string  `json:"sessionId"`
+		DurationMS       uint32  `json:"durationMs"`
 		Sequence         uint32  `json:"sequence"`
 		CrossTrackError  float64 `json:"crossTrackError"`
 		HeadingErrorDeg  float64 `json:"headingErrorDeg"`
@@ -313,6 +354,13 @@ func (s *server) visionDeviceCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	payload := map[string]any{"sessionId": command.SessionID}
+	if command.Operation == "calibrate-forward" {
+		duration := command.DurationMS
+		if duration < 1500 || duration > 6000 {
+			duration = 3200
+		}
+		payload["durationMs"] = duration
+	}
 	if command.Operation == "update" {
 		payload["sequence"] = command.Sequence
 		payload["crossTrackError"] = command.CrossTrackError
@@ -323,13 +371,17 @@ func (s *server) visionDeviceCommand(w http.ResponseWriter, r *http.Request) {
 		payload["brake"] = command.Brake
 	}
 	requestID := fmt.Sprintf("vision-%d", time.Now().UnixNano())
-	deviceID, unique := s.hub.OnlyDeviceID()
+	deviceID := strings.TrimSpace(command.DeviceID)
+	unique := deviceID != ""
+	if !unique {
+		deviceID, unique = s.hub.OnlyDeviceID()
+	}
 	w.Header().Set("Content-Type", "application/json")
 	if !unique {
 		w.WriteHeader(http.StatusConflict)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"sent": false, "acknowledged": false, "success": false,
-			"requestId": requestID, "message": "vision control requires exactly one online device",
+			"requestId": requestID, "message": "vision control requires a target device ID or exactly one online device",
 		})
 		return
 	}
@@ -373,6 +425,71 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 func (s *server) devices(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(s.hub.List())
+}
+
+func validMotionCalibration(p motionCalibrationProfile) bool {
+	if p.DeviceID == "" {
+		return false
+	}
+	if p.ServoMax != 0 || p.StraightCenter != 0 || p.ForwardFrequency != 0 {
+		return p.ServoMin >= 0 && p.ServoMin < p.ServoMax && p.ServoMax <= 180 &&
+			p.StraightCenter >= p.ServoMin && p.StraightCenter <= p.ServoMax &&
+			p.ForwardFrequency >= 0.3 && p.ForwardFrequency <= 5 &&
+			p.ForwardAmplitudePercent >= 0 && p.ForwardAmplitudePercent <= 1 &&
+			p.LeftCenterRatio >= 0 && p.LeftCenterRatio <= 1 &&
+			p.LeftFrequency >= 0.3 && p.LeftFrequency <= 5 &&
+			p.LeftAmplitudePercent >= 0 && p.LeftAmplitudePercent <= 1 &&
+			p.RightCenterRatio >= 0 && p.RightCenterRatio <= 1 &&
+			p.RightFrequency >= 0.3 && p.RightFrequency <= 5 &&
+			p.RightAmplitudePercent >= 0 && p.RightAmplitudePercent <= 1 &&
+			p.TransitionMs >= 100 && p.TransitionMs <= 1500
+	}
+	return p.CenterDeg >= 45 && p.CenterDeg <= 135 &&
+		p.Frequency >= 0.3 && p.Frequency <= 5 && p.Amplitude >= 0 && p.Amplitude <= 50 &&
+		(p.LeftSign == -1 || p.LeftSign == 1) && (p.RightSign == -1 || p.RightSign == 1) &&
+		p.LeftMaxOffset >= 0 && p.LeftMaxOffset <= 45 && p.RightMaxOffset >= 0 && p.RightMaxOffset <= 45 &&
+		p.TurnPercent >= 0 && p.TurnPercent <= 100
+}
+
+func (s *server) readMotionCalibrations() map[string]motionCalibrationProfile {
+	profiles := map[string]motionCalibrationProfile{}
+	data, err := os.ReadFile(s.calibrationPath)
+	if err == nil {
+		_ = json.Unmarshal(data, &profiles)
+	}
+	return profiles
+}
+
+func (s *server) motionCalibrations(w http.ResponseWriter, r *http.Request) {
+	s.calibrationMu.Lock()
+	defer s.calibrationMu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	profiles := s.readMotionCalibrations()
+	if r.Method == http.MethodGet {
+		_ = json.NewEncoder(w).Encode(profiles)
+		return
+	}
+	if r.Method != http.MethodPut {
+		http.Error(w, "仅支持 GET / PUT", http.StatusMethodNotAllowed)
+		return
+	}
+	var profile motionCalibrationProfile
+	if json.NewDecoder(r.Body).Decode(&profile) != nil || !validMotionCalibration(profile) {
+		http.Error(w, "标定参数无效", http.StatusBadRequest)
+		return
+	}
+	profile.UpdatedAt = time.Now().Format(time.RFC3339)
+	profiles[profile.DeviceID] = profile
+	data, _ := json.MarshalIndent(profiles, "", "  ")
+	if err := os.MkdirAll(filepath.Dir(s.calibrationPath), 0o755); err != nil {
+		http.Error(w, "无法创建标定目录", http.StatusInternalServerError)
+		return
+	}
+	if err := os.WriteFile(s.calibrationPath, data, 0o644); err != nil {
+		http.Error(w, "无法保存标定参数", http.StatusInternalServerError)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(profile)
 }
 
 func (s *server) command(w http.ResponseWriter, r *http.Request) {

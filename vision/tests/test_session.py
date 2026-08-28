@@ -22,12 +22,13 @@ class VisionSessionTests(unittest.TestCase):
             session.transition(VisionState.TRACKING)
 
     def test_snapshot_has_stable_web_contract(self):
-        session = VisionSession.new(camera_id="camera-2", camera_index=2)
+        session = VisionSession.new(camera_id="camera-2", camera_index=2, target_device_id="fish-2")
         snapshot = session.snapshot()
 
         self.assertEqual(snapshot["state"], "opening")
         self.assertEqual(snapshot["cameraId"], "camera-2")
         self.assertEqual(snapshot["cameraIndex"], 2)
+        self.assertEqual(snapshot["targetDeviceId"], "fish-2")
         self.assertGreaterEqual(len(snapshot["sessionId"]), 24)
         self.assertIsNone(snapshot["error"])
 

@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useMemo, useState } from "react";
+import { StrictMode, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 import "./maintenance.css";
@@ -11,6 +11,7 @@ const MODE_LABELS = {
 };
 const ACTIONS = [["left", "左转"], ["forward", "前进"], ["right", "右转"], ["idle", "IDLE"]];
 const ALIAS_STORAGE_KEY = "fish-controller-device-aliases-v1";
+const CALIBRATION_STORAGE_KEY = "fish-controller-motion-calibration-v1";
 const MODE_NAMES = { 0: "stop", 1: "idle", 2: "forward", 3: "left", 4: "right" };
 
 function clamp(value, min, max, fallback) {
@@ -37,15 +38,45 @@ function loadAliases() {
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch { return {}; }
 }
+function loadCalibrationProfiles() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(CALIBRATION_STORAGE_KEY) || "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch { return {}; }
+}
 function normalizeDeviceName(value) { return String(value || "").trim().toLocaleLowerCase(); }
 function batteryLevel(device) {
   const value = Number(device?.batteryPercent);
   return Number.isFinite(value) && Number(device?.batteryVoltage) > 0 ? value : null;
 }
 function batteryTone(percent) { return percent == null ? "unknown" : percent < 20 ? "critical" : percent < 40 ? "low" : "normal"; }
+function motionCenter(profile, mode) {
+  const min = clamp(profile.servoMin, 0, 179, 20);
+  const max = clamp(profile.servoMax, min + 1, 180, 160);
+  const center = clamp(profile.straightCenter, min, max, 90);
+  if (mode === "left") return center + (max - center) * clamp(profile.leftCenterRatio, 0, 1, 0.5);
+  if (mode === "right") return center - (center - min) * clamp(profile.rightCenterRatio, 0, 1, 0.5);
+  return center;
+}
+function motionAmplitude(profile, center, mode) {
+  const min = clamp(profile.servoMin, 0, 179, 20);
+  const max = clamp(profile.servoMax, min + 1, 180, 160);
+  const percent = mode === "left"
+    ? profile.leftAmplitudePercent
+    : mode === "right"
+      ? profile.rightAmplitudePercent
+      : profile.forwardAmplitudePercent;
+  return Math.min(center - min, max - center) * clamp(percent, 0, 1, 0.4);
+}
+function motionRange(profile, mode) {
+  const center = motionCenter(profile, mode);
+  const amplitude = motionAmplitude(profile, center, mode);
+  return { center, amplitude, min: center - amplitude, max: center + amplitude };
+}
+function formatDeg(value, digits = 1) { return `${Number(value).toFixed(digits)}°`; }
 
 function App() {
-  const [page, setPage] = useState("control");
+  const [page, setPage] = useState("visual");
   const [devices, setDevices] = useState([]);
   const [aliases, setAliases] = useState(loadAliases);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
@@ -69,6 +100,23 @@ function App() {
   const [rgbColor, setRgbColor] = useState("#00ff66");
   const [rgbBrightness, setRgbBrightness] = useState(32);
   const [rgbOrder, setRgbOrder] = useState("GRB");
+  const [visionDeviceId, setVisionDeviceId] = useState("");
+  const [calibrationProfiles, setCalibrationProfiles] = useState(loadCalibrationProfiles);
+  const [calibrationDeviceId, setCalibrationDeviceId] = useState("");
+  const [servoMin, setServoMin] = useState(20);
+  const [servoMax, setServoMax] = useState(160);
+  const [straightCenter, setStraightCenter] = useState(90);
+  const [forwardFrequency, setForwardFrequency] = useState(2.5);
+  const [forwardAmplitudePercent, setForwardAmplitudePercent] = useState(45);
+  const [leftCenterRatio, setLeftCenterRatio] = useState(50);
+  const [leftFrequency, setLeftFrequency] = useState(2.3);
+  const [leftAmplitudePercent, setLeftAmplitudePercent] = useState(55);
+  const [rightCenterRatio, setRightCenterRatio] = useState(50);
+  const [rightFrequency, setRightFrequency] = useState(2.3);
+  const [rightAmplitudePercent, setRightAmplitudePercent] = useState(55);
+  const [transitionMs, setTransitionMs] = useState(600);
+  const [calibrationFeedback, setCalibrationFeedback] = useState("选择一条在线机器鱼开始校准");
+  const calibrationCenterTimer = useRef(null);
 
   const onlineDevices = useMemo(() => devices.filter((device) => device.online), [devices]);
   const lowBatteryCount = useMemo(() => onlineDevices.filter((device) => (batteryLevel(device) ?? 101) < 20).length, [onlineDevices]);
@@ -86,6 +134,24 @@ function App() {
     if (!measured.length) return null;
     return measured.reduce((lowest, device) => batteryLevel(device) < batteryLevel(lowest) ? device : lowest);
   }, [selectedDevices]);
+  const calibrationDevice = useMemo(() => devices.find((device) => device.deviceId === calibrationDeviceId) || null, [devices, calibrationDeviceId]);
+  const calibrationProfileDraft = useMemo(() => ({
+    servoMin: Number(servoMin),
+    servoMax: Number(servoMax),
+    straightCenter: Number(straightCenter),
+    forwardFrequency: Number(forwardFrequency),
+    forwardAmplitudePercent: Number(forwardAmplitudePercent) / 100,
+    leftCenterRatio: Number(leftCenterRatio) / 100,
+    leftFrequency: Number(leftFrequency),
+    leftAmplitudePercent: Number(leftAmplitudePercent) / 100,
+    rightCenterRatio: Number(rightCenterRatio) / 100,
+    rightFrequency: Number(rightFrequency),
+    rightAmplitudePercent: Number(rightAmplitudePercent) / 100,
+    transitionMs: Number(transitionMs),
+  }), [servoMin, servoMax, straightCenter, forwardFrequency, forwardAmplitudePercent, leftCenterRatio, leftFrequency, leftAmplitudePercent, rightCenterRatio, rightFrequency, rightAmplitudePercent, transitionMs]);
+  const forwardRange = useMemo(() => motionRange(calibrationProfileDraft, "forward"), [calibrationProfileDraft]);
+  const leftRange = useMemo(() => motionRange(calibrationProfileDraft, "left"), [calibrationProfileDraft]);
+  const rightRange = useMemo(() => motionRange(calibrationProfileDraft, "right"), [calibrationProfileDraft]);
 
   useEffect(() => {
     let active = true;
@@ -112,6 +178,14 @@ function App() {
   }, [aliases]);
 
   useEffect(() => {
+    fetch("/api/motion-calibrations", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error("无法读取标定参数")))
+      .then((profiles) => setCalibrationProfiles(profiles && typeof profiles === "object" ? profiles : {}))
+      .catch(() => { /* retain local fallback for older controllers */ });
+    return () => window.clearTimeout(calibrationCenterTimer.current);
+  }, []);
+
+  useEffect(() => {
     let active = true;
     async function loadFirmware() {
       try {
@@ -132,6 +206,26 @@ function App() {
     setAmplitude(device.amplitude ?? 28);
     setBias(device.bias ?? 0);
   }, [parameterSelectionKey]);
+
+  useEffect(() => {
+    if (!calibrationDevice) return;
+    const saved = calibrationProfiles[calibrationDevice.deviceId];
+    const center = saved?.straightCenter ?? saved?.centerDeg ?? saved?.center ?? 90 + Number(calibrationDevice.bias ?? 0);
+    const forwardAmp = saved?.forwardAmplitudePercent ?? (saved?.amplitude ? saved.amplitude / 70 : 0.45);
+    setServoMin(saved?.servoMin ?? 20);
+    setServoMax(saved?.servoMax ?? 160);
+    setStraightCenter(center);
+    setForwardFrequency(saved?.forwardFrequency ?? saved?.frequency ?? Number(calibrationDevice.frequency ?? 2.5));
+    setForwardAmplitudePercent(Math.round(clamp(forwardAmp, 0, 1, 0.45) * 100));
+    setLeftCenterRatio(Math.round(clamp(saved?.leftCenterRatio, 0, 1, 0.5) * 100));
+    setLeftFrequency(saved?.leftFrequency ?? saved?.frequency ?? 2.3);
+    setLeftAmplitudePercent(Math.round(clamp(saved?.leftAmplitudePercent, 0, 1, 0.55) * 100));
+    setRightCenterRatio(Math.round(clamp(saved?.rightCenterRatio, 0, 1, 0.5) * 100));
+    setRightFrequency(saved?.rightFrequency ?? saved?.frequency ?? 2.3);
+    setRightAmplitudePercent(Math.round(clamp(saved?.rightAmplitudePercent, 0, 1, 0.55) * 100));
+    setTransitionMs(saved?.transitionMs ?? 600);
+    setCalibrationFeedback(saved ? `已载入 ${deviceLabel(calibrationDevice)} 的标定参数` : "请先确认直行中心，再测试前进和转向");
+  }, [calibrationDeviceId]);
 
   function toggleSet(setter, deviceId) {
     setter((current) => {
@@ -235,6 +329,58 @@ function App() {
     setSending(false);
   }
 
+  async function runCalibrationMotion(mode) {
+    if (!calibrationDevice?.online || sending) {
+      setCalibrationFeedback("请选择一条在线机器鱼");
+      return;
+    }
+    setSending(true);
+    setCalibrationFeedback(`正在发送${MODE_LABELS[mode] || mode}，等待设备 ACK…`);
+    try {
+      const range = motionRange(calibrationProfileDraft, mode);
+      const modeFrequency = mode === "left" ? leftFrequency : mode === "right" ? rightFrequency : forwardFrequency;
+      const result = await sendCommand(calibrationDevice, mode, {
+        frequency: mode === "stop" ? forwardFrequency : modeFrequency,
+        amplitude: mode === "stop" ? 0 : range.amplitude,
+        bias: clamp((mode === "stop" ? Number(straightCenter) : range.center) - 90, -45, 45, 0),
+      });
+      setCalibrationFeedback(`设备已确认：${MODE_LABELS[mode] || mode} · 中心 ${formatDeg(mode === "stop" ? straightCenter : range.center)} · 摆幅 ${formatDeg(mode === "stop" ? 0 : range.amplitude)}`);
+    } catch (motionError) {
+      setCalibrationFeedback(`测试失败：${motionError.message}`);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function previewCalibrationCenter(mode = "forward", overrides = {}) {
+    if (!calibrationDevice?.online) return;
+    const target = motionCenter({ ...calibrationProfileDraft, ...overrides }, mode);
+    window.clearTimeout(calibrationCenterTimer.current);
+    calibrationCenterTimer.current = window.setTimeout(async () => {
+      try {
+        const result = await sendCommand(calibrationDevice, "center", { frequency: forwardFrequency, amplitude: 0, bias: target - 90 });
+        setCalibrationFeedback(`${mode === "left" ? "左转中心" : mode === "right" ? "右转中心" : "直行中心"}已静态预览：${formatDeg(target)} · 设备 bias ${Number(result.applied?.bias ?? target - 90).toFixed(1)}°`);
+      } catch (centerError) { setCalibrationFeedback(`中心应用失败：${centerError.message}`); }
+    }, 140);
+  }
+
+  async function saveCalibrationProfile() {
+    if (!calibrationDevice) return;
+    const profile = {
+        deviceId: calibrationDevice.deviceId,
+        ...calibrationProfileDraft,
+    };
+    try {
+      const response = await fetch("/api/motion-calibrations", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(profile) });
+      if (!response.ok) throw new Error((await response.text()).trim() || "保存失败");
+      const saved = await response.json();
+      const next = { ...calibrationProfiles, [calibrationDevice.deviceId]: saved };
+      localStorage.setItem(CALIBRATION_STORAGE_KEY, JSON.stringify(next));
+      setCalibrationProfiles(next);
+      setCalibrationFeedback(`${deviceLabel(calibrationDevice)} 的独立标定参数已保存到 Controller`);
+    } catch (saveError) { setCalibrationFeedback(`保存失败：${saveError.message}`); }
+  }
+
   async function uploadFirmware() {
     if (!firmwareFile || uploading) { setOtaFeedback("请先从电脑选择 firmware.bin"); return; }
     if (!firmwareFile.name.toLowerCase().endsWith(".bin")) { setOtaFeedback("只允许上传 .bin 文件"); return; }
@@ -296,7 +442,8 @@ function App() {
         </div>
         <div className="system-status">
           <nav className="page-tabs" aria-label="页面切换">
-            <button className={page === "control" ? "active" : ""} onClick={() => setPage("control")}>控制台</button>
+            <button className={page === "visual" ? "active" : ""} onClick={() => setPage("visual")}>视觉控制</button>
+            <button className={page === "calibration" ? "active" : ""} onClick={() => setPage("calibration")}>手动控制与校准</button>
             <button className={page === "maintenance" ? "active" : ""} onClick={() => setPage("maintenance")}>OTA / 设置</button>
           </nav>
           <span className="top-metric"><b>{onlineDevices.length}</b><small>在线 / {devices.length}</small></span>
@@ -308,7 +455,7 @@ function App() {
 
       {error && <div className="error-banner" role="alert">{error}，正在自动重试。</div>}
 
-      {page === "control" ? (
+      {page === "visual" ? (
         <div className="workspace">
           <aside className="device-sidebar panel-surface">
             <div className="panel-heading"><div><span className="eyebrow">DEVICES</span><h2>机器鱼</h2></div><span>{onlineDevices.length}/{devices.length}</span></div>
@@ -330,7 +477,7 @@ function App() {
             <div className="sidebar-section"><span className="sidebar-label">快速分组</span><div className="group-grid"><button onClick={() => selectGroup("A")}>A 组</button><button onClick={() => selectGroup("B")}>B 组</button><button onClick={selectOnline}>全部</button></div></div>
           </aside>
 
-          <section className="center-column"><VisionPanel /></section>
+          <section className="center-column"><VisionPanel devices={devices} targetDeviceId={visionDeviceId} onTargetDeviceChange={setVisionDeviceId} /></section>
 
           <aside className="control-sidebar panel-surface">
             <section className="control-section target-section">
@@ -369,6 +516,81 @@ function App() {
               <div className="motion-grid">{ACTIONS.map(([mode, label]) => <button key={mode} className={activeMode === mode ? "active-motion" : ""} disabled={!selectedOnline.length || sending} onClick={() => sendToSelection(mode)}>{label}</button>)}</div>
               <p className="feedback" aria-live="polite">{feedback}</p>
             </section>
+          </aside>
+        </div>
+      ) : page === "calibration" ? (
+        <div className="calibration-page">
+          <aside className="panel-surface calibration-devices">
+            <div className="panel-heading"><div><span className="eyebrow">SELECT FISH</span><h2>选择机器鱼</h2></div><span>单鱼校准</span></div>
+            <div className="device-list">
+              {devices.map((device) => <button key={device.deviceId} className={`device-row ${calibrationDeviceId === device.deviceId ? "selected" : ""}`} disabled={!device.online} onClick={() => setCalibrationDeviceId(device.deviceId)}>
+                <span className="device-check">{calibrationDeviceId === device.deviceId ? "✓" : ""}</span>
+                <span className="device-main"><strong>{deviceLabel(device)}</strong><small>{device.deviceId} · {device.online ? "在线" : "离线"}</small></span>
+                <span className={`signal ${device.online ? "online" : ""}`} />
+              </button>)}
+              {!devices.length && <div className="sidebar-empty">等待设备上线…</div>}
+            </div>
+          </aside>
+
+          <section className="calibration-center">
+            <section className="panel-surface calibration-flow-card">
+              <div className="panel-heading"><div><span className="eyebrow">CALIBRATION FLOW</span><h2>设备运动校准流程</h2></div><span>每个 MAC 独立保存</span></div>
+              <div className="calibration-flow"><div><b>1</b><span><strong>直行中心</strong><small>修正机械安装偏差</small></span></div><div><b>2</b><span><strong>测试动作</strong><small>确认前进和左右转</small></span></div><div><b>3</b><span><strong>保存参数</strong><small>供手动与视觉控制使用</small></span></div></div>
+            </section>
+
+            <section className="panel-surface calibration-workbench">
+              <div className="panel-heading"><div><span className="eyebrow">MOTION CALIBRATION</span><h2>{calibrationDevice ? deviceLabel(calibrationDevice) : "尚未选择设备"}</h2></div><span>{calibrationDevice?.deviceId || "MAC 唯一身份"}</span></div>
+              <div className="calibration-fields">
+                <div className="servo-geometry-grid">
+                  <label className="range-field"><span>安全最小角 <b>{servoMin}°</b></span><input type="range" min="0" max="100" step="1" value={servoMin} disabled={!calibrationDevice || sending} onChange={(event) => setServoMin(event.target.value)} /></label>
+                  <label className="range-field"><span>安全最大角 <b>{servoMax}°</b></span><input type="range" min="80" max="180" step="1" value={servoMax} disabled={!calibrationDevice || sending} onChange={(event) => setServoMax(event.target.value)} /></label>
+                  <label className="range-field"><span>直行中心 <b>{straightCenter}°</b></span><input type="range" min={servoMin} max={servoMax} step="1" value={straightCenter} disabled={!calibrationDevice || sending} onChange={(event) => { setStraightCenter(event.target.value); previewCalibrationCenter("forward", { straightCenter: Number(event.target.value) }); }} /><small>停止和前进都会以这个角度作为鱼尾中心</small></label>
+                  <label className="range-field"><span>过渡时间 <b>{transitionMs} ms</b></span><input type="range" min="100" max="1500" step="50" value={transitionMs} disabled={!calibrationDevice || sending} onChange={(event) => setTransitionMs(event.target.value)} /><small>用于中心预览、前进/转向/停止之间的平滑切换</small></label>
+                </div>
+                <div className="motion-model-grid">
+                  <section>
+                    <header><strong>前进</strong><b>中心 {formatDeg(forwardRange.center)}</b></header>
+                    <label>频率 <input type="number" min="0.3" max="5" step="0.1" value={forwardFrequency} onChange={(event) => setForwardFrequency(event.target.value)} /> Hz</label>
+                    <label>摆幅 <input type="range" min="0" max="100" step="5" value={forwardAmplitudePercent} disabled={!calibrationDevice || sending} onChange={(event) => setForwardAmplitudePercent(event.target.value)} /> <span>{forwardAmplitudePercent}%</span></label>
+                    <small>实际摆幅 {formatDeg(forwardRange.amplitude)} · 范围 {formatDeg(forwardRange.min)} ~ {formatDeg(forwardRange.max)}</small>
+                  </section>
+                  <section>
+                    <header><strong>左转</strong><b>中心 {formatDeg(leftRange.center)}</b></header>
+                    <label>中心比例 <input type="range" min="0" max="100" step="5" value={leftCenterRatio} disabled={!calibrationDevice || sending} onChange={(event) => { setLeftCenterRatio(event.target.value); previewCalibrationCenter("left", { leftCenterRatio: Number(event.target.value) / 100 }); }} /> <span>{leftCenterRatio}%</span></label>
+                    <label>频率 <input type="number" min="0.3" max="5" step="0.1" value={leftFrequency} onChange={(event) => setLeftFrequency(event.target.value)} /> Hz</label>
+                    <label>摆幅 <input type="range" min="0" max="100" step="5" value={leftAmplitudePercent} disabled={!calibrationDevice || sending} onChange={(event) => setLeftAmplitudePercent(event.target.value)} /> <span>{leftAmplitudePercent}%</span></label>
+                    <small>实际摆幅 {formatDeg(leftRange.amplitude)} · 范围 {formatDeg(leftRange.min)} ~ {formatDeg(leftRange.max)}</small>
+                  </section>
+                  <section>
+                    <header><strong>右转</strong><b>中心 {formatDeg(rightRange.center)}</b></header>
+                    <label>中心比例 <input type="range" min="0" max="100" step="5" value={rightCenterRatio} disabled={!calibrationDevice || sending} onChange={(event) => { setRightCenterRatio(event.target.value); previewCalibrationCenter("right", { rightCenterRatio: Number(event.target.value) / 100 }); }} /> <span>{rightCenterRatio}%</span></label>
+                    <label>频率 <input type="number" min="0.3" max="5" step="0.1" value={rightFrequency} onChange={(event) => setRightFrequency(event.target.value)} /> Hz</label>
+                    <label>摆幅 <input type="range" min="0" max="100" step="5" value={rightAmplitudePercent} disabled={!calibrationDevice || sending} onChange={(event) => setRightAmplitudePercent(event.target.value)} /> <span>{rightAmplitudePercent}%</span></label>
+                    <small>实际摆幅 {formatDeg(rightRange.amplitude)} · 范围 {formatDeg(rightRange.min)} ~ {formatDeg(rightRange.max)}</small>
+                  </section>
+                </div>
+              </div>
+              <div className="calibration-preview-grid">
+                <button disabled={!calibrationDevice?.online || sending} onClick={() => previewCalibrationCenter("forward")}>预览直行中心<small>{formatDeg(forwardRange.center)}</small></button>
+                <button disabled={!calibrationDevice?.online || sending} onClick={() => previewCalibrationCenter("left")}>预览左转中心<small>{formatDeg(leftRange.center)}</small></button>
+                <button disabled={!calibrationDevice?.online || sending} onClick={() => previewCalibrationCenter("right")}>预览右转中心<small>{formatDeg(rightRange.center)}</small></button>
+              </div>
+              <div className="calibration-motion-grid">
+                <button disabled={!calibrationDevice?.online || sending} onClick={() => runCalibrationMotion("forward")}>前进测试<small>使用当前中心</small></button>
+                <button disabled={!calibrationDevice?.online || sending} onClick={() => runCalibrationMotion("left")}>左转测试<small>验证方向</small></button>
+                <button disabled={!calibrationDevice?.online || sending} onClick={() => runCalibrationMotion("right")}>右转测试<small>验证方向</small></button>
+                <button className="danger" disabled={!calibrationDevice?.online || sending} onClick={() => runCalibrationMotion("stop")}>立即停止<small>等待设备 ACK</small></button>
+              </div>
+              <p className="feedback calibration-feedback" aria-live="polite">{calibrationFeedback}</p>
+            </section>
+          </section>
+
+          <aside className="panel-surface calibration-summary">
+            <div className="panel-heading"><div><span className="eyebrow">PROFILE</span><h2>当前设备参数</h2></div><span>{calibrationProfiles[calibrationDeviceId] ? "已保存" : "未保存"}</span></div>
+            <dl><dt>设备</dt><dd>{calibrationDevice ? deviceLabel(calibrationDevice) : "—"}</dd><dt>MAC / ID</dt><dd>{calibrationDevice?.deviceId || "—"}</dd><dt>安全范围</dt><dd>{servoMin}° ~ {servoMax}°</dd><dt>直行中心</dt><dd>{formatDeg(forwardRange.center, 0)}</dd><dt>过渡时间</dt><dd>{transitionMs} ms</dd><dt>前进范围</dt><dd>{formatDeg(forwardRange.min)} ~ {formatDeg(forwardRange.max)}</dd><dt>左转中心</dt><dd>{formatDeg(leftRange.center)}</dd><dt>左转范围</dt><dd>{formatDeg(leftRange.min)} ~ {formatDeg(leftRange.max)}</dd><dt>右转中心</dt><dd>{formatDeg(rightRange.center)}</dd><dt>右转范围</dt><dd>{formatDeg(rightRange.min)} ~ {formatDeg(rightRange.max)}</dd></dl>
+            <button className="calibration-save" disabled={!calibrationDevice} onClick={saveCalibrationProfile}>保存独立标定参数</button>
+            <button className="danger-outline calibration-stop" disabled={!calibrationDevice?.online || sending} onClick={() => runCalibrationMotion("stop")}>立即停止</button>
+            <p className="calibration-note">GUI 使用新舵机模型计算中心和摆幅，再兼容下发当前固件可识别的 motion.set / CENTER。下一步需要让固件原生支持过渡时间和停止回直行中心。</p>
           </aside>
         </div>
       ) : (
@@ -432,7 +654,7 @@ function App() {
         </section>
       </div>}
 
-      <footer className="app-footer"><span>{page === "control" ? "页面 1 / 控制台：视觉与运动控制" : "页面 2 / OTA·设置：固件维护与设备信息"}</span><span>{page === "control" ? `控制目标 ${selectedOnline.length} 台` : `OTA 目标 ${otaSelectedDevices.length} 台`}</span></footer>
+      <footer className="app-footer"><span>{page === "visual" ? "视觉控制：识别、方向确认、绘制轨迹与循迹" : page === "calibration" ? "手动控制与校准：每条机器鱼独立参数" : "OTA / 设置：固件维护与设备信息"}</span><span>{page === "visual" ? `控制目标 ${selectedOnline.length} 台` : page === "calibration" ? (calibrationDevice ? deviceLabel(calibrationDevice) : "未选择设备") : `OTA 目标 ${otaSelectedDevices.length} 台`}</span></footer>
     </main>
   );
 }

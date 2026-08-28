@@ -42,12 +42,14 @@ void ControllerClient::handleCommand(JsonDocument& d){
     if(command=="motion.set"){
         if(visual_.active()){sendResult(id,false,"CONTROL_LOCKED","视觉控制运行中");return;}
         float f=d["payload"]["frequency"]|motion_.snapshot().frequency;float a=d["payload"]["amplitude"]|motion_.snapshot().amplitude;float bias=d["payload"]["bias"]|0.0f;String mode=d["payload"]["mode"]|"stop";
-        if(!motion_.setTuning(f,a)||!motion_.setBias(bias)){sendResult(id,false,"INVALID_PARAMETER","运动参数越界");return;}mode.toUpperCase();String result=commands_.process(mode=="FORWARD"?"FWD":mode);lastControlMs_=millis();stopReason_=mode=="STOP"?"MANUAL_STOP":"";sendResult(id,result=="OK",result=="OK"?"OK":"UNKNOWN_COMMAND",result);sendState();return;
+        mode.toUpperCase();if(mode=="CENTER"){bool ok=motion_.centerAtBias(bias);lastControlMs_=millis();stopReason_="CALIBRATION_CENTER";sendResult(id,ok,ok?"OK":"INVALID_PARAMETER",ok?"Servo centered":"Center bias out of range");sendState();return;}
+        if(!motion_.setTuning(f,a)||!motion_.setBias(bias)){sendResult(id,false,"INVALID_PARAMETER","运动参数越界");return;}String result=commands_.process(mode=="FORWARD"?"FWD":mode);lastControlMs_=millis();stopReason_=mode=="STOP"?"MANUAL_STOP":"";sendResult(id,result=="OK",result=="OK"?"OK":"UNKNOWN_COMMAND",result);sendState();return;
     }
     if(command=="vision.start"){String session=d["payload"]["sessionId"]|"";motion_.safeStop();if(!visual_.start(session.c_str(),millis())){sendResult(id,false,"INVALID_SESSION","视觉会话 ID 无效");return;}stopReason_="";lastControlMs_=millis();sendResult(id,true,"OK","视觉会话已启动");sendState();return;}
     if(command=="vision.calibrate.forward"){
         if(!visual_.active()){sendResult(id,false,"VISION_NOT_ACTIVE","Vision session is not active");return;}
-        motion_.setTuning(2.0f,22.0f);commands_.process("FWD");calibrationStopAtMs_=millis()+1200;lastControlMs_=millis();stopReason_="CAL_FORWARD";sendResult(id,true,"OK","Forward calibration started");sendState();return;
+        uint32_t durationMs=d["payload"]["durationMs"]|3200U;if(durationMs<1500U)durationMs=1500U;if(durationMs>6000U)durationMs=6000U;
+        motion_.setTuning(2.0f,22.0f);commands_.process("FWD");calibrationStopAtMs_=millis()+durationMs;lastControlMs_=millis();stopReason_="CAL_FORWARD";sendResult(id,true,"OK","Forward calibration started");sendState();return;
     }
     if(command=="vision.update"){
         VisualInput input{d["payload"]["sequence"]|0U,d["payload"]["crossTrackError"]|0.0f,d["payload"]["headingErrorDeg"]|0.0f,d["payload"]["distanceToTarget"]|0.0f,d["payload"]["speed"]|0.0f,d["payload"]["curvature"]|0.0f,d["payload"]["brake"]|false};String session=d["payload"]["sessionId"]|"";VisualOutput output;

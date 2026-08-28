@@ -67,6 +67,25 @@ from ui import (
 from web_actions import translate_web_action
 
 
+def estimate_motion_heading(points, min_samples=20, min_distance_px=18.0):
+    points = np.asarray(points, dtype=np.float64)
+    if points.ndim != 2 or points.shape[1] != 2 or len(points) < min_samples:
+        raise ValueError(f"有效轨迹帧不足：{len(points) if points.ndim else 0} / {min_samples}")
+    edge = max(3, len(points) // 6)
+    displacement = np.mean(points[-edge:], axis=0) - np.mean(points[:edge], axis=0)
+    distance = float(np.linalg.norm(displacement))
+    path_distance = float(np.sum(np.linalg.norm(np.diff(points, axis=0), axis=1)))
+    consistency = distance / max(path_distance, 1e-6)
+    centered = points - np.mean(points, axis=0)
+    singular = np.linalg.svd(centered, compute_uv=False)
+    linearity = float((singular[0] ** 2) / max(float(np.sum(singular ** 2)), 1e-6))
+    if distance < min_distance_px:
+        raise ValueError(f"运动距离不足：{distance:.1f} px，需要至少 {min_distance_px:.0f} px")
+    if consistency < 0.55 or linearity < 0.75:
+        raise ValueError(f"轨迹方向不稳定：一致性 {consistency:.2f}，线性度 {linearity:.2f}")
+    return {"unit": displacement / distance, "distance": distance, "consistency": consistency, "linearity": linearity}
+
+
 class VisionApplication:
     """Own service lifecycle and coordinate data-only feature snapshots."""
 
@@ -102,6 +121,10 @@ class VisionApplication:
         self._stop_latched_reason = None
         self._last_web_metrics_t = 0.0
         self._forward_calibration = None
+        self._heading_calibration_result = {
+            "status": "idle", "progress": 0.0, "sampleCount": 0,
+            "message": "等待方向标定",
+        }
 
     def run(self):
         os.chdir(WORK_DIR)
@@ -458,6 +481,8 @@ class VisionApplication:
                 web_action = self.action_source()
                 if web_action is None:
                     return
+                if web_action.get("deviceId") and self.fish_comm is not None:
+                    self.fish_comm.set_device_id(web_action.get("deviceId"))
                 frame_size = None
                 if self.cam is not None:
                     frame_size = (self.cam.real_width, self.cam.real_height)
@@ -572,6 +597,16 @@ class VisionApplication:
             or self.runtime.heading.get("pixel_unit_vector") is not None
         )
         calibrating_heading = self._forward_calibration is not None
+        if calibrating_heading:
+            elapsed = time.monotonic() - self._forward_calibration["started"]
+            heading_calibration = {
+                "status": "running",
+                "progress": min(1.0, elapsed / 3.4),
+                "sampleCount": len(self._forward_calibration["samples"]),
+                "message": "持续采集运动轨迹，正在评估方向稳定性",
+            }
+        else:
+            heading_calibration = dict(self._heading_calibration_result)
         tracking_active = bool(self.control.active)
         blockers = []
         if not bool(yolo.get("ready")):
@@ -618,6 +653,7 @@ class VisionApplication:
                     "positionReady": position_ready,
                     "headingCalibrated": heading_ready,
                     "headingCalibrating": calibrating_heading,
+                    "headingCalibration": heading_calibration,
                     "canCalibrateHeading": target_detected and not calibrating_heading and not tracking_active,
                     "trackingActive": tracking_active,
                     "canStart": not blockers and not calibrating_heading,
@@ -710,44 +746,56 @@ class VisionApplication:
         if not self.fish_comm.ensure_hybrid_mode():
             print("Cannot calibrate heading: device did not acknowledge vision session.")
             return
-        if not self.fish_comm.start_forward_calibration():
+        if not self.fish_comm.start_forward_calibration(3200):
             self._safe_stop("CAL_FORWARD_FAILED", force=True)
+            self._heading_calibration_result = {"status": "failed", "progress": 0.0, "sampleCount": 0, "message": "设备未确认前进标定指令"}
             return
         self._forward_calibration = {
             "started": time.monotonic(),
-            "start_pixel": np.asarray(result.pixel, dtype=np.float64),
-            "start_world": (
-                np.asarray(result.control_position, dtype=np.float64)
-                if result.control_position is not None else None
-            ),
+            "samples": [(time.monotonic(), np.asarray(result.pixel, dtype=np.float64), np.asarray(result.control_position, dtype=np.float64) if result.control_position is not None else None)],
+            "lost_frames": 0,
         }
+        self._heading_calibration_result = {"status": "running", "progress": 0.0, "sampleCount": 1, "message": "开始采集运动轨迹"}
         self.status = "CAL_FORWARD"
         print("Automatic forward-heading calibration started from the locked fish.")
 
     def _update_forward_calibration(self, result):
         state = self._forward_calibration
-        if state is None or time.monotonic() - state["started"] < 1.45:
+        if state is None:
+            return
+        now = time.monotonic()
+        detections = result.yolo_result.get("detections", [])
+        if result.pixel is not None and len(detections) == 1:
+            state["samples"].append((now, np.asarray(result.pixel, dtype=np.float64), np.asarray(result.control_position, dtype=np.float64) if result.control_position is not None else None))
+        else:
+            state["lost_frames"] += 1
+        if now - state["started"] < 3.4:
             return
         self._forward_calibration = None
-        if result.pixel is None:
-            self._safe_stop("CAL_FORWARD_FAILED", force=True)
-            print("Automatic heading failed: target position was lost.")
+        samples = state["samples"]
+        if len(samples) < 20:
+            self._fail_heading_calibration(f"有效轨迹帧不足：{len(samples)} / 20", len(samples))
             return
-        pixel_displacement = np.asarray(result.pixel, dtype=np.float64) - state["start_pixel"]
-        pixel_distance = float(np.linalg.norm(pixel_displacement))
-        if pixel_distance < 10.0:
-            self._safe_stop("CAL_FORWARD_FAILED", force=True)
-            print(f"Automatic heading failed: travelled only {pixel_distance:.1f} px.")
+        points = np.asarray([sample[1] for sample in samples], dtype=np.float64)
+        try:
+            estimate = estimate_motion_heading(points)
+        except ValueError as error:
+            self._fail_heading_calibration(str(error), len(samples))
             return
-        pixel_unit = pixel_displacement / pixel_distance
+        pixel_unit = estimate["unit"]
+        pixel_distance = estimate["distance"]
+        consistency = estimate["consistency"]
+        linearity = estimate["linearity"]
         heading = self.runtime.heading
         heading.update({
             "pixel_unit_vector": tuple(float(v) for v in pixel_unit),
             "angle_deg": float((np.degrees(np.arctan2(-pixel_unit[1], pixel_unit[0])) + 360.0) % 360.0),
             "selecting": False,
         })
-        if state["start_world"] is not None and result.control_position is not None:
-            world_displacement = np.asarray(result.control_position, dtype=np.float64) - state["start_world"]
+        world_samples = [sample[2] for sample in samples if sample[2] is not None]
+        if len(world_samples) >= 6:
+            world_edge = max(2, len(world_samples) // 6)
+            world_displacement = np.mean(world_samples[-world_edge:], axis=0) - np.mean(world_samples[:world_edge], axis=0)
             world_distance = float(np.linalg.norm(world_displacement))
             if world_distance >= 0.015:
                 world_unit = world_displacement / world_distance
@@ -757,7 +805,13 @@ class VisionApplication:
                     "control_heading_source": "MOTION",
                 })
         self.status = "HEADING_READY"
-        print(f"Automatic forward heading ready: {heading['angle_deg']:.1f} deg, travel={pixel_distance:.1f} px")
+        self._heading_calibration_result = {"status": "completed", "progress": 1.0, "sampleCount": len(samples), "message": f"方向确认完成：{heading['angle_deg']:.1f}°，位移 {pixel_distance:.1f}px，一致性 {consistency:.2f}", "angleDeg": heading["angle_deg"], "distancePx": pixel_distance, "consistency": consistency, "linearity": linearity}
+        print(f"Automatic forward heading ready: {heading['angle_deg']:.1f} deg, samples={len(samples)}, travel={pixel_distance:.1f} px, consistency={consistency:.2f}, linearity={linearity:.2f}")
+
+    def _fail_heading_calibration(self, message, sample_count):
+        self._safe_stop("CAL_FORWARD_FAILED", force=True)
+        self._heading_calibration_result = {"status": "failed", "progress": 1.0, "sampleCount": sample_count, "message": message}
+        print(f"Automatic heading failed: {message}")
 
     def _promote_pixel_heading(self, homography, pixel):
         heading = self.runtime.heading

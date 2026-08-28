@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -146,6 +147,68 @@ func TestVisionDeviceCommandFailsWhenDeviceDoesNotAcknowledge(t *testing.T) {
 	handler.ServeHTTP(w, r)
 	if w.Code != http.StatusGatewayTimeout || !strings.Contains(w.Body.String(), `"acknowledged":false`) {
 		t.Fatalf("未确认命令应超时: status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestVisionDeviceCommandRoutesToExplicitTargetAmongMultipleFish(t *testing.T) {
+	h := hub.New()
+	first := &captureConn{}
+	second := &captureConn{onWrite: func(value any) {
+		message := value.(map[string]any)
+		h.ResolveCommandResult(map[string]any{"type": "command.result", "requestId": message["requestId"], "success": true, "code": "OK", "message": "applied"})
+	}}
+	h.Register(hub.Device{ID: "fish-1"}, first)
+	h.Register(hub.Device{ID: "fish-2"}, second)
+	handler := NewHandler(h, testKey())
+	r := httptest.NewRequest(http.MethodPost, "/api/vision/device-command", strings.NewReader(
+		`{"operation":"calibrate-forward","deviceId":"fish-2","sessionId":"session-1","durationMs":3600}`,
+	))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+	if w.Code != http.StatusOK || len(first.sent) != 0 || len(second.sent) != 1 {
+		t.Fatalf("explicit target routing failed: status=%d first=%d second=%d body=%s", w.Code, len(first.sent), len(second.sent), w.Body.String())
+	}
+	payload := second.sent[0].(map[string]any)["payload"].(map[string]any)
+	if payload["durationMs"] != uint32(3600) {
+		t.Fatalf("durationMs=%v", payload["durationMs"])
+	}
+}
+
+func TestMotionCalibrationProfilesPersistPerDevice(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "motion-calibrations.json")
+	t.Setenv("FISH_MOTION_CALIBRATIONS", path)
+	handler := NewHandler(hub.New(), testKey())
+	body := `{"deviceId":"fish-2","centerDeg":94,"frequency":2.4,"amplitude":26,"leftSign":-1,"leftMaxOffset":22,"rightSign":1,"rightMaxOffset":19,"turnPercent":65}`
+	put := httptest.NewRequest(http.MethodPut, "/api/motion-calibrations", strings.NewReader(body))
+	putRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(putRecorder, put)
+	if putRecorder.Code != http.StatusOK {
+		t.Fatalf("PUT status=%d body=%s", putRecorder.Code, putRecorder.Body.String())
+	}
+	get := httptest.NewRequest(http.MethodGet, "/api/motion-calibrations", nil)
+	getRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(getRecorder, get)
+	if getRecorder.Code != http.StatusOK || !strings.Contains(getRecorder.Body.String(), `"fish-2"`) || !strings.Contains(getRecorder.Body.String(), `"leftSign":-1`) {
+		t.Fatalf("GET status=%d body=%s", getRecorder.Code, getRecorder.Body.String())
+	}
+}
+
+func TestMotionCalibrationProfilesAcceptServoModel(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "motion-calibrations.json")
+	t.Setenv("FISH_MOTION_CALIBRATIONS", path)
+	handler := NewHandler(hub.New(), testKey())
+	body := `{"deviceId":"fish-2","servoMin":20,"servoMax":160,"straightCenter":96,"forwardFrequency":2.5,"forwardAmplitudePercent":0.45,"leftCenterRatio":0.5,"leftFrequency":2.3,"leftAmplitudePercent":0.55,"rightCenterRatio":0.5,"rightFrequency":2.3,"rightAmplitudePercent":0.55,"transitionMs":600}`
+	put := httptest.NewRequest(http.MethodPut, "/api/motion-calibrations", strings.NewReader(body))
+	putRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(putRecorder, put)
+	if putRecorder.Code != http.StatusOK {
+		t.Fatalf("PUT status=%d body=%s", putRecorder.Code, putRecorder.Body.String())
+	}
+	get := httptest.NewRequest(http.MethodGet, "/api/motion-calibrations", nil)
+	getRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(getRecorder, get)
+	if getRecorder.Code != http.StatusOK || !strings.Contains(getRecorder.Body.String(), `"straightCenter":96`) || !strings.Contains(getRecorder.Body.String(), `"transitionMs":600`) {
+		t.Fatalf("GET status=%d body=%s", getRecorder.Code, getRecorder.Body.String())
 	}
 }
 

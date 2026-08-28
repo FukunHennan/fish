@@ -172,11 +172,11 @@ class VisionService:
         self._actions = SimpleQueue()
         self._session = None
 
-    def create_session(self, camera_id, camera_index):
+    def create_session(self, camera_id, camera_index, target_device_id=None):
         with self._lock:
             if self._stop_runner is not None:
                 return None
-            session = VisionSession.new(camera_id, camera_index)
+            session = VisionSession.new(camera_id, camera_index, target_device_id)
             self._error = ""
             try:
                 stop_runner = self._runner_factory(camera_index, self.publish)
@@ -195,7 +195,7 @@ class VisionService:
             if self._session is None:
                 return {
                     "state": "idle", "sessionId": None,
-                    "cameraId": None, "cameraIndex": None,
+                    "cameraId": None, "cameraIndex": None, "targetDeviceId": None,
                     "error": None, "metrics": {}, "lastAction": None,
                 }
             return self._session.snapshot()
@@ -223,6 +223,9 @@ class VisionService:
                 return False
             if not isinstance(action, dict) or action.get("type") not in self.ACTION_TYPES:
                 return False
+            action = dict(action)
+            if session.target_device_id:
+                action["deviceId"] = session.target_device_id
             self._actions.put(action)
             session.last_action = {"type": action["type"], "accepted": True}
             return True

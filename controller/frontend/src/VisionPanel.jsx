@@ -24,7 +24,7 @@ const STAGE_LABELS = {
   TRACKING: "循迹运行中",
 };
 
-export default function VisionPanel() {
+export default function VisionPanel({ devices = [], targetDeviceId = "", onTargetDeviceChange = () => {} }) {
   const [cameras, setCameras] = useState([]);
   const [cameraIndex, setCameraIndex] = useState("");
   const [status, setStatus] = useState({ state: "stopped", error: "" });
@@ -48,6 +48,7 @@ export default function VisionPanel() {
   const workflowLabel = STAGE_LABELS[workflow.stage] || "等待视觉状态";
   const yoloLabel = yolo?.ready ? "YOLO 就绪" : yolo?.loading ? "YOLO 加载中" : yolo?.error ? "YOLO 异常" : "YOLO 等待启动";
   const coordinateLabel = workflow.controlCoordinateMode === "FIELD" ? "场地坐标" : "画面坐标";
+  const exposure = status.metrics?.exposure || {};
 
   useEffect(() => {
     let active = true;
@@ -106,7 +107,8 @@ export default function VisionPanel() {
   async function start() {
     try {
       if (cameraIndex === "") throw new Error("请选择摄像头");
-      const result = await visionRequest("/sessions", { method: "POST", body: JSON.stringify({ cameraId: `camera-${cameraIndex}`, cameraIndex: Number(cameraIndex) }) });
+      if (!targetDeviceId) throw new Error("请选择视觉控制目标设备");
+      const result = await visionRequest("/sessions", { method: "POST", body: JSON.stringify({ cameraId: `camera-${cameraIndex}`, cameraIndex: Number(cameraIndex), targetDeviceId }) });
       setStatus(result.data);
       setFeedback("摄像头预览已启动");
     } catch (error) { setFeedback(error.message); }
@@ -193,8 +195,10 @@ export default function VisionPanel() {
           {running && <div className="video-badge">{videoWidth} × {videoHeight}</div>}
         </div>
         <aside className="vision-controls">
+          <label className="camera-select">视觉目标设备<select value={targetDeviceId} disabled={running} onChange={(event) => onTargetDeviceChange(event.target.value)}><option value="">请选择一条在线机器鱼</option>{devices.filter((device) => device.online).map((device) => <option key={device.deviceId} value={device.deviceId}>{device.name || device.deviceId} · {device.deviceId}</option>)}</select></label>
           <label className="camera-select">摄像头<select value={cameraIndex} disabled={running} onChange={(event) => setCameraIndex(event.target.value)}><option value="">请选择摄像头</option>{cameras.map((camera) => <option key={camera.index} value={camera.index}>{camera.name} · {camera.width}×{camera.height} @ {camera.fps}FPS</option>)}</select></label>
-          <div className="vision-primary"><button disabled={running || cameraIndex === ""} onClick={start}>开始预览</button><button disabled={!running} onClick={toggleProcessing}>{processing ? "停止视觉处理" : "启动视觉处理"}</button><button className="stop" disabled={!running} onClick={stop}>关闭视频</button></div>
+          <div className="vision-primary"><button disabled={running || cameraIndex === "" || !targetDeviceId} onClick={start}>开始预览</button><button disabled={!running} onClick={toggleProcessing}>{processing ? "停止视觉处理" : "启动视觉处理"}</button><button className="stop" disabled={!running} onClick={stop}>关闭视频</button></div>
+          <section className="exposure-control"><header><strong>摄像头曝光</strong><span>{exposure.actualValue ?? "—"}</span></header><div><button disabled={!running} onClick={() => sendAction({ type: "camera.exposure", value: -1 })}>− 降低曝光</button><button disabled={!running} onClick={() => sendAction({ type: "camera.exposure", value: 1 })}>提高曝光 +</button></div><small>{exposure.errorCode === "exposure_not_applied" ? "驱动未应用曝光值" : exposure.supported === false ? "当前摄像头不支持手动曝光" : "每次调整一级，并读取驱动实际值"}</small></section>
           <section className="vision-targets"><strong>检测目标 · {detections.length}</strong>{detections.length ? detections.map((target) => <div key={target.trackId}><i style={{ background: target.colorHex }} /><span>目标 #{target.trackId}</span><b>{target.color}</b><small>{Math.round(target.confidence * 100)}%</small></div>) : <p>{processing ? "暂未检测到机器鱼" : "启动视觉处理后显示目标"}</p>}</section>
           <section className={`vision-workflow ${workflow.trackingActive ? "active" : ""}`}>
             <header><strong>循迹流程</strong><span>{workflowLabel}</span></header>
@@ -204,6 +208,7 @@ export default function VisionPanel() {
               return <p key={key} className={complete ? "complete" : current ? "current" : "pending"}><i>{complete ? "✓" : index + 1}</i><span>{label}</span><b>{complete ? "完成" : current ? "待处理" : "等待"}</b></p>;
             })}</div>
             {workflow.blockers?.length > 0 && <small>{workflow.blockers[0]}</small>}
+            {workflow.headingCalibration && <div className={`heading-calibration-progress ${workflow.headingCalibration.status || "idle"}`}><span><b>方向采样</b><em>{workflow.headingCalibration.sampleCount || 0} 帧 · {Math.round((workflow.headingCalibration.progress || 0) * 100)}%</em></span><progress max="1" value={workflow.headingCalibration.progress || 0} /><small>{workflow.headingCalibration.message || "等待开始"}</small></div>}
           </section>
           <div className="tool-grid">{TOOLS.map(([name, label]) => <button key={name} className={tool === name ? "active" : ""} disabled={!editable} onClick={() => selectTool(name)}>{label}</button>)}</div>
           <div className="tool-grid compact">

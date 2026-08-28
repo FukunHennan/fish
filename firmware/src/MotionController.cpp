@@ -8,6 +8,7 @@ void MotionController::begin() { servo_.attach(pin_); servo_.write(90); lastUpda
 void MotionController::setMode(MotionMode mode) { state_.setMode(mode); if (mode == MotionMode::Stopped) servo_.write(90); }
 bool MotionController::setTuning(float f, float a) { return state_.setTuning(f, a); }
 bool MotionController::setBias(float bias) { return state_.setBias(bias); }
+bool MotionController::centerAtBias(float bias) { state_.safeStop(); if(!state_.setBias(bias))return false; servo_.write((int)(90.0f+bias)); return true; }
 bool MotionController::applyVisual(float f,float a,float bias){if(!state_.setTuning(f,a)||!state_.setBias(bias))return false;state_.setMode(MotionMode::Forward);return true;}
 void MotionController::safeStop() { state_.safeStop(); servo_.write(90); }
 MotionSnapshot MotionController::snapshot() const { return state_.snapshot(); }

@@ -74,6 +74,7 @@ def create_app(service, camera_provider=None, camera_catalog=None):
         body = request.get_json(silent=True) or {}
         camera_index = body.get("cameraIndex")
         camera_id = body.get("cameraId")
+        target_device_id = body.get("targetDeviceId")
         if not isinstance(camera_index, int) or camera_index < 0 or not camera_id:
             snapshot = service.current_session()
             return envelope(
@@ -81,7 +82,10 @@ def create_app(service, camera_provider=None, camera_catalog=None):
                 error={"code": "invalid_camera", "message": "摄像头参数无效"},
                 status=400,
             )
-        snapshot = service.create_session(str(camera_id), camera_index)
+        if target_device_id is not None and (not isinstance(target_device_id, str) or not target_device_id.strip()):
+            snapshot = service.current_session()
+            return envelope(snapshot, ok=False, error={"code": "invalid_target_device", "message": "目标设备 ID 无效"}, status=400)
+        snapshot = service.create_session(str(camera_id), camera_index, target_device_id.strip() if target_device_id else None)
         if snapshot is None:
             return envelope(
                 service.current_session(), ok=False,

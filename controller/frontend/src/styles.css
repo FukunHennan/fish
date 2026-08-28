@@ -212,3 +212,75 @@ h1 { margin-top: 2px; font-size: 15px; line-height: 1.2; }
   .video-stage { min-height: 340px; }
   .app-footer { align-items: flex-start; flex-direction: column; padding: 8px 12px; }
 }
+
+/* Next GUI: dedicated manual control and per-fish calibration workspace. */
+.calibration-page { display:grid; grid-template-columns:250px minmax(0,1fr) 320px; gap:10px; min-height:0; padding:10px 12px 8px; }
+.calibration-devices,.calibration-summary,.calibration-workbench,.calibration-flow-card { min-height:0; }
+.calibration-devices { overflow:hidden; }
+.calibration-devices .device-list { padding:10px; }
+.calibration-center { display:grid; grid-template-rows:auto minmax(0,1fr); gap:10px; min-width:0; }
+.calibration-flow { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; padding:12px; }
+.calibration-flow > div { display:flex; align-items:center; gap:10px; padding:11px; border:1px solid var(--line); border-radius:10px; background:rgba(14,24,32,.78); }
+.calibration-flow b { width:27px; height:27px; display:grid; place-items:center; flex:0 0 auto; border-radius:50%; color:#061213; background:var(--accent); }
+.calibration-flow span,.calibration-flow strong,.calibration-flow small { display:block; }
+.calibration-flow strong { font-size:12px; }
+.calibration-flow small { margin-top:3px; color:var(--muted); font-size:9px; }
+.calibration-workbench { overflow:auto; }
+.calibration-fields { padding:16px; display:grid; gap:14px; }
+.calibration-fields .range-field { padding:12px; border:1px solid var(--line); border-radius:10px; background:rgba(9,17,24,.58); }
+.calibration-fields .range-field > small { display:block; margin-top:6px; color:var(--muted); }
+.servo-geometry-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+.motion-model-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+.motion-model-grid > section { padding:12px; border:1px solid var(--line); border-radius:10px; background:#0d171e; }
+.motion-model-grid header { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:9px; }
+.motion-model-grid header strong { font-size:11px; }
+.motion-model-grid header b { color:var(--accent); font-size:8.5px; white-space:nowrap; }
+.motion-model-grid label { display:grid; grid-template-columns:70px minmax(0,1fr) auto; align-items:center; gap:8px; margin-top:9px; color:var(--muted); font-size:9px; }
+.motion-model-grid input[type="number"] { width:76px; padding:6px; border:1px solid var(--line); border-radius:6px; background:#091219; color:var(--text); }
+.motion-model-grid input[type="range"] { min-width:0; }
+.motion-model-grid label span { color:var(--text); font-weight:800; }
+.motion-model-grid small { display:block; margin-top:10px; color:#b9cbd2; font-size:8.5px; line-height:1.45; }
+.calibration-preview-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; padding:0 16px 8px; }
+.calibration-preview-grid button { min-height:52px; border:1px solid #36515e; border-radius:10px; background:#111f29; color:var(--text); font-weight:800; }
+.calibration-preview-grid button:hover:not(:disabled) { border-color:#4f8dff; background:#172b3d; }
+.calibration-preview-grid small { display:block; margin-top:4px; color:var(--muted); font-size:9px; font-weight:600; }
+.calibration-motion-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; padding:0 16px 16px; }
+.calibration-motion-grid button { min-height:64px; border:1px solid #36515e; border-radius:10px; background:#162630; color:var(--text); font-weight:800; }
+.calibration-motion-grid button:hover:not(:disabled) { border-color:var(--accent); background:#19343a; }
+.calibration-motion-grid button.danger { border-color:#8d3a4c; background:#3b1c25; color:#ffd0d8; }
+.calibration-motion-grid small { display:block; margin-top:5px; color:var(--muted); font-size:9px; font-weight:500; }
+.calibration-feedback { margin:0 16px 16px; min-height:38px; }
+.calibration-summary { overflow:auto; }
+.calibration-summary dl { display:grid; grid-template-columns:92px minmax(0,1fr); gap:9px; margin:0; padding:15px; font-size:11px; }
+.calibration-summary dt { color:var(--muted); }
+.calibration-summary dd { margin:0; overflow-wrap:anywhere; font-weight:700; }
+.calibration-save,.calibration-stop { width:calc(100% - 30px); min-height:42px; margin:0 15px 9px; border-radius:9px; }
+.calibration-save { border:1px solid #3a8e82; background:#173a36; color:#d8fff7; font-weight:800; }
+.calibration-note { margin:8px 15px 15px; color:var(--muted); font-size:10px; line-height:1.6; }
+.exposure-control { padding:10px; border:1px solid var(--line); border-radius:9px; background:#0e171e; }
+.exposure-control header,.exposure-control header span,.heading-calibration-progress span { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.exposure-control header { margin-bottom:7px; font-size:9px; }
+.exposure-control header span { color:var(--accent); font-weight:800; }
+.exposure-control > div { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+.exposure-control button { min-height:32px; border:1px solid #36515e; border-radius:7px; background:#162630; color:var(--text); font-size:8.5px; }
+.exposure-control small { display:block; margin-top:6px; color:var(--muted); font-size:8px; line-height:1.4; }
+.heading-calibration-progress { margin-top:8px; padding:8px; border:1px solid #665528; border-radius:8px; background:#211d13; }
+.heading-calibration-progress span { font-size:8px; }
+.heading-calibration-progress em { color:#efd078; font-style:normal; }
+.heading-calibration-progress progress { width:100%; height:6px; margin:6px 0; accent-color:var(--accent); }
+.heading-calibration-progress small { display:block; color:var(--muted); font-size:8px; }
+.heading-calibration-progress.completed { border-color:#315d46; background:#13231c; }
+.heading-calibration-progress.failed { border-color:#743846; background:#2b171d; }
+@media (max-width:1180px) {
+  .calibration-page { grid-template-columns:220px minmax(0,1fr); }
+  .calibration-summary { grid-column:1/-1; }
+  .calibration-summary dl { grid-template-columns:repeat(3,92px minmax(0,1fr)); }
+}
+@media (max-width:780px) {
+  .calibration-page { grid-template-columns:1fr; padding:10px; }
+  .calibration-summary { grid-column:auto; }
+  .calibration-flow { grid-template-columns:1fr; }
+  .calibration-motion-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .calibration-summary dl { grid-template-columns:92px minmax(0,1fr); }
+  .servo-geometry-grid,.motion-model-grid,.calibration-preview-grid { grid-template-columns:1fr; }
+}

@@ -11,6 +11,7 @@ public:
     void setMode(MotionMode mode);
     bool setTuning(float frequency, float amplitude);
     bool setBias(float bias);
+    bool centerAtBias(float bias);
     bool applyVisual(float frequency, float amplitude, float bias);
     void safeStop();
     MotionSnapshot snapshot() const;
