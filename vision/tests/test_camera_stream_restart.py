@@ -93,6 +93,9 @@ class RestartSafeCameraStreamTests(unittest.TestCase):
         with patch(
             "camera_stream.cv2.VideoCapture",
             side_effect=[directshow, msmf],
+        ), patch(
+            "camera_stream._backend_candidates",
+            return_value=[("DSHOW", 1), ("MSMF", 2)],
         ):
             stream = RestartSafeCameraStream(1)
 
@@ -107,6 +110,9 @@ class RestartSafeCameraStreamTests(unittest.TestCase):
         with patch(
             "camera_stream.cv2.VideoCapture",
             side_effect=[directshow, msmf],
+        ), patch(
+            "camera_stream._backend_candidates",
+            return_value=[("DSHOW", 1), ("MSMF", 2)],
         ):
             stream = RestartSafeCameraStream(1)
 
@@ -121,7 +127,13 @@ class RestartSafeCameraStreamTests(unittest.TestCase):
             set_error_key=cv2.CAP_PROP_FPS,
         )
 
-        with patch("camera_stream.cv2.VideoCapture", return_value=capture):
+        with patch(
+            "camera_stream.cv2.VideoCapture",
+            return_value=capture,
+        ), patch(
+            "camera_stream._backend_candidates",
+            return_value=[("DSHOW", 1)],
+        ):
             stream = RestartSafeCameraStream(1)
 
         self.assertEqual(stream.backend_name, "DSHOW")

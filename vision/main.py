@@ -269,7 +269,11 @@ class VisionApplication:
                 break
 
             snapshot = self.cam.snapshot()
-            if snapshot["age_s"] > CAMERA_STALE_TIMEOUT_S:
+            stale_timeout = max(
+                CAMERA_STALE_TIMEOUT_S,
+                2.0 / max(float(self.cam.reported_fps), 1.0),
+            )
+            if snapshot["age_s"] > stale_timeout:
                 self._safe_stop(
                     "CAMERA STALE",
                     force=self._stop_latched_reason != "CAMERA STALE",

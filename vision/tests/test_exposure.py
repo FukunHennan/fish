@@ -3,7 +3,11 @@ from unittest.mock import patch
 
 import cv2
 
-from interface import apply_manual_exposure, apply_manual_exposure_for_device
+from interface import (
+    apply_manual_exposure,
+    apply_manual_exposure_for_device,
+    prepare_v4l2_capture,
+)
 
 
 class FakeCapture:
@@ -27,6 +31,32 @@ class FakeCapture:
 
 
 class ExposureTests(unittest.TestCase):
+    def test_v4l2_capture_preparation_restores_auto_exposure_and_fps(self):
+        class Completed:
+            def __init__(self, stdout="", returncode=0):
+                self.stdout = stdout
+                self.returncode = returncode
+
+        controls = (
+            "auto_exposure 0x0 (menu) : min=0 max=3 default=3 value=1\n"
+            "  exposure_dynamic_framerate 0x0 (bool) : default=0 value=1"
+        )
+        calls = []
+
+        def fake_run(args, **_kwargs):
+            calls.append(args)
+            if "--list-ctrls" in args:
+                return Completed(controls)
+            return Completed()
+
+        with patch("interface.shutil.which", return_value="/usr/bin/v4l2-ctl"), patch(
+            "interface.subprocess.run", side_effect=fake_run
+        ):
+            prepared = prepare_v4l2_capture(0)
+
+        self.assertTrue(prepared)
+        self.assertIn("auto_exposure=3,exposure_dynamic_framerate=0", calls[-1][-1])
+
     def test_success_requires_driver_readback_to_change(self):
         result = apply_manual_exposure(FakeCapture(), 1)
         self.assertEqual(result.status, "completed")

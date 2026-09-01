@@ -7,6 +7,7 @@ import math
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
 
@@ -47,19 +48,55 @@ def _run_v4l2_ctl(device, *args):
 
 def _parse_v4l2_int_control(output, name):
     pattern = re.compile(
-        rf"\b{re.escape(name)}\b.*?min=(-?\d+).*?max=(-?\d+).*?step=(-?\d+).*?value=(-?\d+)",
+        rf"\b{re.escape(name)}\b.*?min=(-?\d+).*?max=(-?\d+)"
+        rf"(?:.*?\bstep=(-?\d+))?.*?\bvalue=(-?\d+)",
         re.IGNORECASE,
     )
     match = pattern.search(output or "")
     if not match:
         return None
-    minimum, maximum, step, value = (int(group) for group in match.groups())
+    minimum, maximum, step, value = match.groups()
+    step = int(step) if step is not None else 1
+    minimum, maximum, value = int(minimum), int(maximum), int(value)
     return {
         "min": minimum,
         "max": maximum,
         "step": max(1, abs(step)),
         "value": value,
     }
+
+
+def prepare_v4l2_capture(device_index):
+    """Restore a sane streaming exposure state before OpenCV opens the device."""
+    if device_index is None:
+        return False
+
+    device = f"/dev/video{int(device_index)}"
+    listed = _run_v4l2_ctl(device, "--list-ctrls")
+    if listed is None or listed.returncode != 0:
+        return False
+
+    controls = listed.stdout
+    changes = []
+    for candidate in ("auto_exposure", "exposure_auto"):
+        parsed = _parse_v4l2_int_control(controls, candidate)
+        if parsed is None:
+            continue
+        if parsed["min"] <= 3 <= parsed["max"]:
+            changes.append(f"{candidate}=3")
+        elif parsed["min"] <= parsed["max"]:
+            changes.append(f"{candidate}={parsed['max']}")
+        break
+    if re.search(r"(?m)^\s+exposure_dynamic_framerate\b", controls):
+        changes.append("exposure_dynamic_framerate=0")
+
+    if not changes:
+        return False
+    applied = _run_v4l2_ctl(device, "--set-ctrl", ",".join(changes))
+    if applied is None or applied.returncode != 0:
+        return False
+    print(f"[Camera] Prepared V4L2 controls: {','.join(changes)}")
+    return True
 
 
 def _apply_v4l2_manual_exposure(device_index, delta):
@@ -116,6 +153,11 @@ def _apply_v4l2_manual_exposure(device_index, delta):
 
 
 def apply_manual_exposure_for_device(capture, delta, device_index=None):
+    if sys.platform.startswith("linux") and device_index is not None:
+        fallback = _apply_v4l2_manual_exposure(device_index, delta)
+        if fallback is not None:
+            return fallback
+
     try:
         previous = float(capture.get(cv2.CAP_PROP_EXPOSURE))
         if not math.isfinite(previous):

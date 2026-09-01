@@ -10,16 +10,34 @@ finally OpenCV's automatic backend selection.
 from __future__ import annotations
 
 import math
+import sys
 import threading
 import time
 
 import cv2
 
 from config import TARGET_FPS, TARGET_HEIGHT, TARGET_WIDTH
-from interface import apply_manual_exposure_for_device
+from interface import (
+    apply_manual_exposure_for_device,
+    prepare_v4l2_capture,
+)
 
 
 def _backend_candidates():
+    if sys.platform.startswith("linux"):
+        candidates = []
+        if hasattr(cv2, "CAP_V4L2"):
+            candidates.append(("V4L2", cv2.CAP_V4L2))
+        candidates.append(("ANY", None))
+        return candidates
+
+    if sys.platform == "darwin":
+        candidates = []
+        if hasattr(cv2, "CAP_AVFOUNDATION"):
+            candidates.append(("AVFOUNDATION", cv2.CAP_AVFOUNDATION))
+        candidates.append(("ANY", None))
+        return candidates
+
     candidates = []
     if hasattr(cv2, "CAP_DSHOW"):
         candidates.append(("DSHOW", cv2.CAP_DSHOW))
@@ -73,6 +91,10 @@ def _open_working_capture(src):
     for backend_name, backend in _backend_candidates():
         capture = None
         try:
+            if backend_name == "V4L2":
+                # OpenCV cannot reliably switch V4L2 exposure menu values.
+                # Reset stale long-exposure settings before opening the node.
+                prepare_v4l2_capture(src)
             if backend is None:
                 capture = cv2.VideoCapture(src)
             else:
@@ -87,7 +109,7 @@ def _open_working_capture(src):
             continue
 
         # Do not touch FPS/resolution until the backend proves it can deliver a
-        # frame.  This avoids the OpenCV DSHOW C++ exception seen in field logs.
+        # frame. This avoids backend-specific startup failures.
         try:
             ok, frame = capture.read()
         except (cv2.error, OSError, RuntimeError) as error:
@@ -113,14 +135,20 @@ class RestartSafeCameraStream:
     def __init__(self, src=0):
         self.src = src
         self.lock = threading.Lock()
+        self.capture_lock = threading.Lock()
         self._stop_event = threading.Event()
         self._release_lock = threading.Lock()
         self._released = False
 
         self.cap, self.backend_name, first_frame = _open_working_capture(src)
 
-        # Camera properties are preferences, not startup requirements.  Some
-        # UVC/DirectShow drivers throw from set() even after opening correctly.
+        # Camera properties are preferences, not startup requirements. Some
+        # UVC drivers report a lower default FPS than the requested target;
+        # asking for more can make reads block for hundreds of milliseconds.
+        device_fps = _safe_get(self.cap, cv2.CAP_PROP_FPS, 0.0)
+        self.requested_fps = (
+            min(TARGET_FPS, device_fps) if device_fps > 0 else TARGET_FPS
+        )
         _safe_set(
             self.cap,
             cv2.CAP_PROP_FOURCC,
@@ -129,16 +157,20 @@ class RestartSafeCameraStream:
         )
         _safe_set(self.cap, cv2.CAP_PROP_FRAME_WIDTH, TARGET_WIDTH, "WIDTH")
         _safe_set(self.cap, cv2.CAP_PROP_FRAME_HEIGHT, TARGET_HEIGHT, "HEIGHT")
-        _safe_set(self.cap, cv2.CAP_PROP_FPS, TARGET_FPS, "FPS")
+        _safe_set(self.cap, cv2.CAP_PROP_FPS, self.requested_fps, "FPS")
 
         self.real_width = int(_safe_get(self.cap, cv2.CAP_PROP_FRAME_WIDTH, TARGET_WIDTH))
         self.real_height = int(_safe_get(self.cap, cv2.CAP_PROP_FRAME_HEIGHT, TARGET_HEIGHT))
-        self.reported_fps = _safe_get(self.cap, cv2.CAP_PROP_FPS, TARGET_FPS)
+        self.reported_fps = _safe_get(self.cap, cv2.CAP_PROP_FPS, self.requested_fps)
 
         self.exposure_val = -6
-        _safe_set(self.cap, cv2.CAP_PROP_AUTO_EXPOSURE, 0.25, "AUTO_EXPOSURE")
-        _safe_set(self.cap, cv2.CAP_PROP_EXPOSURE, self.exposure_val, "EXPOSURE")
-        _safe_set(self.cap, cv2.CAP_PROP_GAIN, 100, "GAIN")
+        if self.backend_name != "V4L2":
+            # OpenCV exposure values use a different scale on Linux V4L2.
+            # Writing the Windows-style -6 value can select a multi-second
+            # exposure and reduce a 30 FPS camera to roughly 2 FPS.
+            _safe_set(self.cap, cv2.CAP_PROP_AUTO_EXPOSURE, 0.25, "AUTO_EXPOSURE")
+            _safe_set(self.cap, cv2.CAP_PROP_EXPOSURE, self.exposure_val, "EXPOSURE")
+            _safe_set(self.cap, cv2.CAP_PROP_GAIN, 100, "GAIN")
 
         self.ret = True
         self.frame = first_frame
@@ -146,7 +178,7 @@ class RestartSafeCameraStream:
         self.sequence = 1
         self.last_success_monotonic = time.monotonic()
         self.consecutive_failures = 0
-        self.measured_fps = TARGET_FPS
+        self.measured_fps = max(1.0, self.reported_fps)
         self._last_ts = self.timestamp
         self.thread = threading.Thread(
             target=self.update,
@@ -175,7 +207,7 @@ class RestartSafeCameraStream:
     def adjust_exposure(self, delta):
         if self._stop_event.is_set():
             return apply_manual_exposure_for_device(_ClosedCapture(), delta, self.src)
-        with self.lock:
+        with self.capture_lock:
             result = apply_manual_exposure_for_device(self.cap, delta, self.src)
             if result.status == "completed":
                 self.exposure_val = result.actual_value
@@ -187,7 +219,8 @@ class RestartSafeCameraStream:
     def update(self):
         while not self._stop_event.is_set():
             try:
-                with self.lock:
+                # Keep the shared frame state readable while a driver blocks.
+                with self.capture_lock:
                     ret, frame = self.cap.read()
             except (cv2.error, OSError, RuntimeError) as error:
                 if self._stop_event.is_set():
