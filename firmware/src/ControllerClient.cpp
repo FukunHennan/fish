@@ -54,7 +54,7 @@ void ControllerClient::handleCommand(JsonDocument& d){
         float f=payload["frequency"]|motion_.snapshot().frequency;float a=payload["amplitude"]|motion_.snapshot().amplitude;bool hasBias=!payload["bias"].isNull();float bias=payload["bias"]|motion_.snapshot().bias;String mode=payload["mode"]|"stop";
         mode.toUpperCase();if(mode=="CENTER"){bool ok=motion_.centerAtBias(bias);lastControlMs_=millis();stopReason_="CALIBRATION_CENTER";sendResult(id,ok,ok?"OK":"INVALID_PARAMETER",ok?"Servo centered":"Center bias out of range");sendState();return;}
         if(!motion_.setTuning(f,a)){sendResult(id,false,"INVALID_PARAMETER","运动参数越界");return;}String result=commands_.process(mode=="FORWARD"?"FWD":mode);
-        if(result=="OK"&&hasBias&&mode!="LEFT"&&mode!="RIGHT"&&!motion_.setBias(bias)){sendResult(id,false,"INVALID_PARAMETER","运动参数越界");return;}
+        if(result=="OK"&&hasBias&&mode!="STOP"&&!motion_.setBias(bias)){sendResult(id,false,"INVALID_PARAMETER","运动参数越界");return;}
         lastControlMs_=millis();stopReason_=mode=="STOP"?"MANUAL_STOP":"";sendResult(id,result=="OK",result=="OK"?"OK":"UNKNOWN_COMMAND",result);sendState();return;
     }
     if(command=="vision.start"){String session=d["payload"]["sessionId"]|"";motion_.safeStop();if(!visual_.start(session.c_str(),millis())){sendResult(id,false,"INVALID_SESSION","视觉会话 ID 无效");return;}stopReason_="";lastControlMs_=millis();sendResult(id,true,"OK","视觉会话已启动");sendState();return;}

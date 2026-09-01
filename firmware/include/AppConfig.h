@@ -13,7 +13,7 @@
 
 
 /* Wi-Fi 和控制器配置通过 Fish-Setup-XXXXXX 热点写入 NVS。 */
-#define FIRMWARE_VERSION "1.2.11"
+#define FIRMWARE_VERSION "1.2.12"
 
 /* Allow short Wi-Fi stalls without falsely declaring the controller lost. */
 #define CONTROLLER_HEARTBEAT_TIMEOUT_MS 8000

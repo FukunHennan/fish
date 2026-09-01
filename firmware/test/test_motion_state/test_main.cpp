@@ -14,6 +14,19 @@ void test_direction_preserves_tuning() {
     TEST_ASSERT_FLOAT_WITHIN(0.01f, 15.0f, value.bias);
 }
 
+void test_custom_turn_bias_overrides_default_left_and_right_bias() {
+    MotionState state(2.5f, 28.0f, 15.0f);
+
+    state.setMode(MotionMode::Left);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 15.0f, state.snapshot().bias);
+    TEST_ASSERT_TRUE(state.setBias(32.0f));
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 32.0f, state.snapshot().bias);
+
+    state.setMode(MotionMode::Right);
+    TEST_ASSERT_TRUE(state.setBias(-27.0f));
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, -27.0f, state.snapshot().bias);
+}
+
 void test_stop_centers_tail_without_erasing_tuning() {
     MotionState state(2.5f, 28.0f, 15.0f);
     state.setTuning(3.0f, 30.0f);
@@ -34,6 +47,7 @@ void test_tuning_rejects_invalid_ranges() {
 void runTests() {
     UNITY_BEGIN();
     RUN_TEST(test_direction_preserves_tuning);
+    RUN_TEST(test_custom_turn_bias_overrides_default_left_and_right_bias);
     RUN_TEST(test_stop_centers_tail_without_erasing_tuning);
     RUN_TEST(test_tuning_rejects_invalid_ranges);
     UNITY_END();
