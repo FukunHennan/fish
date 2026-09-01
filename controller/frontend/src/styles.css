@@ -252,6 +252,23 @@ h1 { margin-top: 2px; font-size: 15px; line-height: 1.2; }
 .list-row strong { display:flex; justify-content:space-between; gap:8px; font-size:12px; }
 .list-row span { color:var(--muted); font-size:10px; }
 .settings-actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:12px; }
+.admin-users-card { grid-column:1 / -1; min-height:0; }
+.admin-users-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:12px; }
+.admin-users-heading h2 { margin-top:3px; margin-bottom:0; }
+.admin-users-heading small { display:block; margin-top:5px; color:var(--muted); font-size:10px; }
+.admin-create-form { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)) auto; gap:8px; align-items:end; padding:11px; border:1px solid color-mix(in srgb,var(--accent) 30%,var(--line)); border-radius:12px; background:color-mix(in srgb,var(--accent) 6%,var(--panel-2)); }
+.admin-create-form .setting,.admin-user-row .setting { margin-top:0; }
+.admin-create-form .action { min-height:38px; }
+.admin-user-list { display:grid; gap:8px; margin-top:10px; }
+.admin-user-row { display:grid; grid-template-columns:minmax(180px,1.2fr) minmax(120px,1fr) 110px 110px minmax(150px,1fr) auto; gap:8px; align-items:end; padding:10px; border:1px solid var(--line); border-radius:12px; background:var(--panel-2); }
+.admin-user-identity { min-width:0; align-self:center; }
+.admin-user-identity strong,.admin-user-identity small { display:block; overflow-wrap:anywhere; }
+.admin-user-identity strong { color:var(--text); font-size:11px; }
+.admin-user-identity small { margin-top:5px; color:var(--muted); font-size:8px; line-height:1.4; }
+.admin-user-row .setting input,.admin-user-row .setting select,.admin-create-form .setting input,.admin-create-form .setting select { min-height:36px; font-size:11px; }
+.admin-user-actions { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+.admin-user-actions button { min-height:36px; padding:0 10px; border-radius:9px; font-size:10px; font-weight:900; }
+.admin-users-card > .feedback { margin-bottom:0; }
 .setting { display:grid; gap:6px; margin-top:11px; color:var(--muted); font-size:11px; font-weight:800; }
 .setting b { justify-self:end; color:var(--text); font-size:12px; }
 .setting input,.setting select { min-height:38px; border:1px solid var(--line); border-radius:11px; background:var(--panel-2); color:var(--text); padding:0 10px; }

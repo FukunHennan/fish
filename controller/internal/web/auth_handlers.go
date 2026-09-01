@@ -8,6 +8,12 @@ import (
 	"strings"
 )
 
+func writeAuthError(w http.ResponseWriter, status int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{"success": false, "message": message})
+}
+
 func (s *server) authActive() bool {
 	return !strings.EqualFold(os.Getenv("FISH_AUTH_DISABLED"), "true")
 }
@@ -89,10 +95,12 @@ func (s *server) authRegister(w http.ResponseWriter, r *http.Request) {
 		message := "注册信息无效"
 		if errors.Is(err, os.ErrPermission) {
 			status = http.StatusForbidden
+			message = "账户只能由管理员创建"
+		}
+		if strings.TrimSpace(input.Invite) != "" && strings.TrimSpace(os.Getenv("FISH_INVITE_CODE")) != "" {
 			message = "邀请码无效"
 		}
-		w.WriteHeader(status)
-		_ = json.NewEncoder(w).Encode(map[string]any{"created": false, "message": message})
+		writeAuthError(w, status, message)
 		return
 	}
 	session, err := s.auth.createSession(user)
@@ -153,9 +161,74 @@ func (s *server) authUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !canAdmin(user) {
-		http.Error(w, "需要管理员权限", http.StatusForbidden)
+		writeAuthError(w, http.StatusForbidden, "需要管理员权限")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(s.auth.listUsers())
+	switch r.Method {
+	case http.MethodGet:
+		_ = json.NewEncoder(w).Encode(s.auth.listUsers())
+	case http.MethodPost:
+		var input struct {
+			Name, Email, Password, Role string
+		}
+		if json.NewDecoder(r.Body).Decode(&input) != nil {
+			writeAuthError(w, http.StatusBadRequest, "请求格式错误")
+			return
+		}
+		created, err := s.auth.createUser(input.Name, input.Email, input.Password, input.Role)
+		if err != nil {
+			status, message := http.StatusBadRequest, "账户信息无效，密码至少 8 位"
+			if errors.Is(err, os.ErrExist) {
+				status, message = http.StatusConflict, "该邮箱已经存在"
+			}
+			writeAuthError(w, status, message)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"created": true, "user": publicUser(created)})
+	case http.MethodPatch:
+		var input struct {
+			ID       string `json:"id"`
+			Name     string `json:"name"`
+			Role     string `json:"role"`
+			Status   string `json:"status"`
+			Password string `json:"password"`
+		}
+		if json.NewDecoder(r.Body).Decode(&input) != nil || strings.TrimSpace(input.ID) == "" {
+			writeAuthError(w, http.StatusBadRequest, "账户参数无效")
+			return
+		}
+		updated, err := s.auth.updateUser(input.ID, input.Name, input.Role, input.Status, input.Password, user.ID)
+		if err != nil {
+			status, message := http.StatusBadRequest, "账户参数无效"
+			switch {
+			case errors.Is(err, os.ErrNotExist):
+				status, message = http.StatusNotFound, "账户不存在"
+			case errors.Is(err, os.ErrPermission):
+				status, message = http.StatusConflict, "不能移除最后一个管理员，也不能修改自己的角色或状态"
+			}
+			writeAuthError(w, status, message)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"updated": true, "user": publicUser(updated)})
+	case http.MethodDelete:
+		var input struct {
+			ID string `json:"id"`
+		}
+		if json.NewDecoder(r.Body).Decode(&input) != nil || strings.TrimSpace(input.ID) == "" {
+			writeAuthError(w, http.StatusBadRequest, "账户参数无效")
+			return
+		}
+		if err := s.auth.deleteUser(input.ID, user.ID); err != nil {
+			status, message := http.StatusNotFound, "账户不存在"
+			if errors.Is(err, os.ErrPermission) {
+				status, message = http.StatusConflict, "不能删除自己或最后一个管理员"
+			}
+			writeAuthError(w, status, message)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"deleted": true})
+	default:
+		writeAuthError(w, http.StatusMethodNotAllowed, "仅支持 GET / POST / PATCH / DELETE")
+	}
 }

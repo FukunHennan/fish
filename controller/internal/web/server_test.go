@@ -85,6 +85,123 @@ func TestHealthAndDashboard(t *testing.T) {
 	}
 }
 
+func TestAdminBootstrapAndUserManagement(t *testing.T) {
+	t.Setenv("FISH_AUTH_DISABLED", "false")
+	t.Setenv("FISH_AUTH_USERS", filepath.Join(t.TempDir(), "users.json"))
+	t.Setenv("FISH_INVITE_CODE", "")
+	handler := NewHandler(hub.New(), testKey())
+
+	bootstrapRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(bootstrapRecorder, httptest.NewRequest(http.MethodGet, "/api/auth/me", nil))
+	var bootstrap map[string]any
+	if json.Unmarshal(bootstrapRecorder.Body.Bytes(), &bootstrap) != nil || bootstrap["bootstrap"] != true {
+		t.Fatalf("空用户库应进入管理员初始化: %s", bootstrapRecorder.Body.String())
+	}
+
+	register := httptest.NewRecorder()
+	handler.ServeHTTP(register, httptest.NewRequest(http.MethodPost, "/api/auth/register", strings.NewReader(
+		`{"name":"管理员","email":"admin@example.com","password":"admin-pass-123"}`,
+	)))
+	if register.Code != http.StatusOK || len(register.Result().Cookies()) == 0 {
+		t.Fatalf("初始化管理员失败: %d %s", register.Code, register.Body.String())
+	}
+	var registered map[string]any
+	if json.Unmarshal(register.Body.Bytes(), &registered) != nil || registered["authenticated"] != true {
+		t.Fatalf("初始化管理员未自动登录: %s", register.Body.String())
+	}
+	adminCookie := register.Result().Cookies()[0]
+
+	publicRegister := httptest.NewRecorder()
+	handler.ServeHTTP(publicRegister, httptest.NewRequest(http.MethodPost, "/api/auth/register", strings.NewReader(
+		`{"name":"访客","email":"visitor@example.com","password":"visitor-pass-123"}`,
+	)))
+	if publicRegister.Code != http.StatusForbidden {
+		t.Fatalf("已有管理员后公开注册应被拒绝: %d %s", publicRegister.Code, publicRegister.Body.String())
+	}
+
+	create := httptest.NewRequest(http.MethodPost, "/api/auth/users", strings.NewReader(
+		`{"name":"操作员","email":"operator@example.com","password":"operator-pass-123","role":"Operator"}`,
+	))
+	create.AddCookie(adminCookie)
+	created := httptest.NewRecorder()
+	handler.ServeHTTP(created, create)
+	if created.Code != http.StatusOK || !strings.Contains(created.Body.String(), `"created":true`) {
+		t.Fatalf("管理员创建账户失败: %d %s", created.Code, created.Body.String())
+	}
+
+	loginOperator := httptest.NewRecorder()
+	handler.ServeHTTP(loginOperator, httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(
+		`{"email":"operator@example.com","password":"operator-pass-123"}`,
+	)))
+	if loginOperator.Code != http.StatusOK || len(loginOperator.Result().Cookies()) == 0 {
+		t.Fatalf("管理员创建的操作员无法登录: %d %s", loginOperator.Code, loginOperator.Body.String())
+	}
+	operatorCookie := loginOperator.Result().Cookies()[0]
+
+	operatorUsers := httptest.NewRequest(http.MethodGet, "/api/auth/users", nil)
+	operatorUsers.AddCookie(operatorCookie)
+	operatorUsersRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(operatorUsersRecorder, operatorUsers)
+	if operatorUsersRecorder.Code != http.StatusForbidden {
+		t.Fatalf("普通操作员不应访问账户管理: %d %s", operatorUsersRecorder.Code, operatorUsersRecorder.Body.String())
+	}
+
+	patchOperator := httptest.NewRequest(http.MethodPatch, "/api/auth/users", strings.NewReader(
+		`{"id":"missing","status":"disabled"}`,
+	))
+	patchOperator.AddCookie(operatorCookie)
+	patchOperatorRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(patchOperatorRecorder, patchOperator)
+	if patchOperatorRecorder.Code != http.StatusForbidden {
+		t.Fatalf("普通操作员不应修改账户: %d %s", patchOperatorRecorder.Code, patchOperatorRecorder.Body.String())
+	}
+
+	var createdEnvelope struct {
+		User map[string]any `json:"user"`
+	}
+	if json.Unmarshal(created.Body.Bytes(), &createdEnvelope) != nil || createdEnvelope.User["id"] == nil {
+		t.Fatalf("创建响应缺少账户 ID: %s", created.Body.String())
+	}
+	operatorID := createdEnvelope.User["id"].(string)
+	disable := httptest.NewRequest(http.MethodPatch, "/api/auth/users", strings.NewReader(
+		fmt.Sprintf(`{"id":%q,"status":"disabled"}`, operatorID),
+	))
+	disable.AddCookie(adminCookie)
+	disableRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(disableRecorder, disable)
+	if disableRecorder.Code != http.StatusOK {
+		t.Fatalf("管理员停用账户失败: %d %s", disableRecorder.Code, disableRecorder.Body.String())
+	}
+
+	disabledLogin := httptest.NewRecorder()
+	handler.ServeHTTP(disabledLogin, httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(
+		`{"email":"operator@example.com","password":"operator-pass-123"}`,
+	)))
+	if disabledLogin.Code != http.StatusUnauthorized {
+		t.Fatalf("停用账户仍可登录: %d %s", disabledLogin.Code, disabledLogin.Body.String())
+	}
+
+	selfDelete := httptest.NewRequest(http.MethodDelete, "/api/auth/users", strings.NewReader(
+		`{"id":"`+registered["user"].(map[string]any)["id"].(string)+`"}`,
+	))
+	selfDelete.AddCookie(adminCookie)
+	selfDeleteRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(selfDeleteRecorder, selfDelete)
+	if selfDeleteRecorder.Code != http.StatusConflict {
+		t.Fatalf("管理员不应删除自己: %d %s", selfDeleteRecorder.Code, selfDeleteRecorder.Body.String())
+	}
+
+	selfDemote := httptest.NewRequest(http.MethodPatch, "/api/auth/users", strings.NewReader(
+		`{"id":"`+registered["user"].(map[string]any)["id"].(string)+`","role":"Viewer"}`,
+	))
+	selfDemote.AddCookie(adminCookie)
+	selfDemoteRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(selfDemoteRecorder, selfDemote)
+	if selfDemoteRecorder.Code != http.StatusConflict {
+		t.Fatalf("管理员不应降权自己: %d %s", selfDemoteRecorder.Code, selfDemoteRecorder.Body.String())
+	}
+}
+
 func TestVisionRoutesUseConfiguredProxy(t *testing.T) {
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/status" {

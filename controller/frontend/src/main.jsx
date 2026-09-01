@@ -278,14 +278,12 @@ function ManualVideoPreview() {
   );
 }
 
-function AuthScreen({ onAuthenticated }) {
-  const [mode, setMode] = useState("login");
+function AuthScreen({ onAuthenticated, bootstrap }) {
+  const [mode, setMode] = useState(bootstrap ? "bootstrap" : "login");
   const [name, setName] = useState("陈富坤");
   const [email, setEmail] = useState("chenfukun@example.com");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [invite, setInvite] = useState("");
-  const [role, setRole] = useState("Operator");
   const [remember, setRemember] = useState(true);
   const [feedback, setFeedback] = useState("当前：电脑/平板/手机会自动适配；请使用本地账号登录。");
   const [busy, setBusy] = useState(false);
@@ -293,21 +291,21 @@ function AuthScreen({ onAuthenticated }) {
   async function submitAuth(event) {
     event.preventDefault();
     if (busy) return;
-    if (mode === "register" && password !== confirmPassword) {
+    if (mode === "bootstrap" && password !== confirmPassword) {
       setFeedback("两次密码不一致");
       return;
     }
     setBusy(true);
-    setFeedback(mode === "login" ? "正在登录…" : "正在提交注册…");
+    setFeedback(mode === "login" ? "正在登录…" : "正在创建管理员账户…");
     try {
-      const response = await fetch(`/api/auth/${mode}`, {
+      const response = await fetch(mode === "login" ? "/api/auth/login" : "/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(mode === "login" ? { email, password } : { name, email, password, invite, role }),
+        body: JSON.stringify(mode === "login" ? { email, password } : { name, email, password }),
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || result.authenticated === false) {
-        throw new Error(result.message || (mode === "login" ? "登录失败" : "注册后需要管理员审批"));
+        throw new Error(result.message || (mode === "login" ? "登录失败" : "管理员账户创建失败"));
       }
       onAuthenticated(result.user);
     } catch (authError) {
@@ -353,15 +351,15 @@ function AuthScreen({ onAuthenticated }) {
             </div>
           </section>
 
-          <section className="auth-card" aria-label="登录注册">
-            <div className="auth-tabs" role="tablist" aria-label="Login or register">
+          <section className="auth-card" aria-label={bootstrap ? "登录或初始化管理员" : "登录"}>
+            {bootstrap && <div className="auth-tabs" role="tablist" aria-label="Login or administrator bootstrap">
               <button className={mode === "login" ? "active" : ""} aria-selected={mode === "login"} type="button" onClick={() => setMode("login")}>登录</button>
-              <button className={mode === "register" ? "active" : ""} aria-selected={mode === "register"} type="button" onClick={() => setMode("register")}>注册</button>
-            </div>
+              <button className={mode === "bootstrap" ? "active" : ""} aria-selected={mode === "bootstrap"} type="button" onClick={() => setMode("bootstrap")}>初始化管理员</button>
+            </div>}
 
             <div className="auth-form-head">
-              <h2>{mode === "login" ? "登录账号" : "注册成员"}</h2>
-              <p>{mode === "login" ? "Cloudflare Access 可作为后续入口；当前使用本地账号登录。" : "需要邀请码、密码和管理员审批，避免陌生人直接创建控制账号。"}</p>
+              <h2>{mode === "login" ? "登录账号" : "创建管理员账户"}</h2>
+              <p>{mode === "login" ? (bootstrap ? "系统尚未初始化；也可以先创建首个管理员账户。" : "账户由管理员创建和管理，请使用已有账号登录。") : "首次启动时创建唯一的初始管理员；之后所有账户都必须由管理员建立。"}</p>
             </div>
 
             <form className="auth-form" onSubmit={submitAuth}>
@@ -370,14 +368,12 @@ function AuthScreen({ onAuthenticated }) {
                 <div className="auth-divider">或使用本地账号</div>
               </>}
 
-              {mode === "register" && <label className="auth-field"><span>邀请码</span><input value={invite} onChange={(event) => setInvite(event.target.value)} placeholder="请输入团队邀请码" /></label>}
-
-              {mode === "register" ? <div className="auth-two-col">
+              {mode === "bootstrap" ? <div className="auth-two-col">
                 <label className="auth-field"><span>姓名</span><input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" /></label>
                 <label className="auth-field"><span>邮箱</span><input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" /></label>
               </div> : <label className="auth-field"><span>邮箱</span><input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" /></label>}
 
-              {mode === "register" ? <div className="auth-two-col">
+              {mode === "bootstrap" ? <div className="auth-two-col">
                 <label className="auth-field"><span>设置密码</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" /></label>
                 <label className="auth-field"><span>确认密码</span><input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" /></label>
               </div> : <label className="auth-field"><span>密码</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></label>}
@@ -387,15 +383,143 @@ function AuthScreen({ onAuthenticated }) {
                 <button type="button" onClick={() => setFeedback("当前版本还没有接入找回密码；管理员可以在服务器端重置账号。")}>忘记密码</button>
               </div>}
 
-              {mode === "register" && <label className="auth-field"><span>申请角色</span><select value={role} onChange={(event) => setRole(event.target.value)}><option value="Viewer">Viewer：只能查看</option><option value="Operator">Operator：可以申请控制鱼</option><option value="Admin">Admin：需要管理员批准</option></select></label>}
-
-              <button className={mode === "login" ? "auth-secondary" : "auth-primary"} disabled={busy}>{busy ? "请稍候…" : mode === "login" ? "进入控制台" : "提交注册申请"}</button>
+              <button className={mode === "login" ? "auth-secondary" : "auth-primary"} disabled={busy}>{busy ? "请稍候…" : mode === "login" ? "进入控制台" : "创建管理员并进入"}</button>
               <p className="auth-feedback" aria-live="polite">{feedback}</p>
             </form>
           </section>
         </div>
       </div>
     </main>
+  );
+}
+
+function AdminUsers({ currentUser }) {
+  const [users, setUsers] = useState([]);
+  const [form, setForm] = useState({ name: "", email: "", password: "", role: "Operator" });
+  const [drafts, setDrafts] = useState({});
+  const [feedback, setFeedback] = useState("正在读取账户…");
+  const [busy, setBusy] = useState(false);
+
+  async function loadUsers() {
+    const response = await fetch("/api/auth/users", { cache: "no-store" });
+    const result = await response.json().catch(() => []);
+    if (!response.ok) throw new Error(result.message || "无法读取账户");
+    const next = Array.isArray(result) ? result : [];
+    setUsers(next);
+    setDrafts(Object.fromEntries(next.map((user) => [user.id, { name: user.name, role: user.role || "Viewer", status: user.status || "active", password: "" }])));
+  }
+
+  useEffect(() => {
+    loadUsers().then(() => setFeedback("账户由管理员统一管理")).catch((error) => setFeedback(error.message));
+  }, []);
+
+  function updateDraft(id, key, value) {
+    setDrafts((current) => ({ ...current, [id]: { ...current[id], [key]: value } }));
+  }
+
+  async function createUser(event) {
+    event.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    setFeedback("正在创建账户…");
+    try {
+      const response = await fetch("/api/auth/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.message || "创建账户失败");
+      setForm({ name: "", email: "", password: "", role: "Operator" });
+      await loadUsers();
+      setFeedback(`已创建 ${result.user?.email || "新账户"}`);
+    } catch (error) {
+      setFeedback(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveUser(user) {
+    const draft = drafts[user.id];
+    if (!draft || busy) return;
+    setBusy(true);
+    setFeedback(`正在保存 ${user.email}…`);
+    try {
+      const payload = { id: user.id, name: draft.name };
+      if (user.id !== currentUser?.id) {
+        payload.role = draft.role;
+        payload.status = draft.status;
+      }
+      if (draft.password) payload.password = draft.password;
+      const response = await fetch("/api/auth/users", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.message || "保存账户失败");
+      await loadUsers();
+      setFeedback(`已保存 ${result.user?.email || user.email}`);
+    } catch (error) {
+      setFeedback(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteUser(user) {
+    if (busy || user.id === currentUser?.id) return;
+    if (!window.confirm(`确定删除账户 ${user.email}？该操作不可撤销。`)) return;
+    setBusy(true);
+    setFeedback(`正在删除 ${user.email}…`);
+    try {
+      const response = await fetch("/api/auth/users", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: user.id }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.message || "删除账户失败");
+      await loadUsers();
+      setFeedback(`已删除 ${user.email}`);
+    } catch (error) {
+      setFeedback(error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <article className="settings-card admin-users-card">
+      <div className="admin-users-heading">
+        <div><span className="eyebrow">ADMINISTRATION</span><h2>账户管理</h2><small>只有管理员可以创建、修改和删除账户。</small></div>
+        <span className="status online"><i />{users.length} 个账户</span>
+      </div>
+      <form className="admin-create-form" onSubmit={createUser}>
+        <label className="setting"><span>姓名</span><input value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} placeholder="例如：张三" required /></label>
+        <label className="setting"><span>邮箱</span><input type="email" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} placeholder="name@example.com" required /></label>
+        <label className="setting"><span>初始密码</span><input type="password" minLength="8" value={form.password} onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} placeholder="至少 8 位" required /></label>
+        <label className="setting"><span>角色</span><select value={form.role} onChange={(event) => setForm((current) => ({ ...current, role: event.target.value }))}><option value="Viewer">Viewer：只能查看</option><option value="Operator">Operator：可以控制设备</option><option value="Admin">Admin：可以管理账户</option></select></label>
+        <button className="action" disabled={busy}>创建账户</button>
+      </form>
+      <div className="admin-user-list">
+        {users.map((user) => {
+          const draft = drafts[user.id] || { name: user.name, role: user.role || "Viewer", status: user.status || "active", password: "" };
+          const isSelf = user.id === currentUser?.id;
+          return <div className="admin-user-row" key={user.id}>
+            <div className="admin-user-identity"><strong>{user.email}</strong><small>{user.createdAt ? `创建于 ${formatTime(user.createdAt)}` : "本地账户"}{user.lastLoginAt ? ` · 最近登录 ${formatTime(user.lastLoginAt)}` : ""}</small></div>
+            <label className="setting"><span>姓名</span><input value={draft.name} onChange={(event) => updateDraft(user.id, "name", event.target.value)} /></label>
+            <label className="setting"><span>角色</span><select value={draft.role} disabled={isSelf || busy} onChange={(event) => updateDraft(user.id, "role", event.target.value)}><option value="Viewer">Viewer</option><option value="Operator">Operator</option><option value="Admin">Admin</option></select></label>
+            <label className="setting"><span>状态</span><select value={draft.status} disabled={isSelf || busy} onChange={(event) => updateDraft(user.id, "status", event.target.value)}><option value="active">启用</option><option value="disabled">停用</option></select></label>
+            <label className="setting"><span>重置密码</span><input type="password" minLength="8" value={draft.password} disabled={isSelf || busy} placeholder={isSelf ? "当前账户不可操作" : "留空表示不修改"} onChange={(event) => updateDraft(user.id, "password", event.target.value)} /></label>
+            <div className="admin-user-actions"><button className="action" type="button" disabled={busy} onClick={() => saveUser(user)}>保存</button><button className="danger" type="button" disabled={busy || isSelf} onClick={() => deleteUser(user)}>删除</button></div>
+          </div>;
+        })}
+        {!users.length && <div className="list-row"><strong>暂无账户</strong><span>创建第一个受管理账户。</span></div>}
+      </div>
+      <p className="feedback" aria-live="polite">{feedback}</p>
+    </article>
   );
 }
 
@@ -758,7 +882,7 @@ function App() {
     return <main className="auth-loading">正在载入控制台…</main>;
   }
   if (!auth.authenticated) {
-    return <AuthScreen onAuthenticated={(user) => setAuth({ loading: false, authenticated: true, bootstrap: false, user })} />;
+    return <AuthScreen bootstrap={auth.bootstrap} onAuthenticated={(user) => setAuth({ loading: false, authenticated: true, bootstrap: false, user })} />;
   }
 
   return (
@@ -934,6 +1058,7 @@ function App() {
             {!devices.length && <div className="list-row"><strong>等待设备 <span>ESP32</span></strong><span>机器鱼上线后这里会显示舵机中位和固件状态。</span></div>}
             </div>
           </article>
+          {auth.user?.role === "Admin" && <AdminUsers currentUser={auth.user} />}
         </div>
       )}
 

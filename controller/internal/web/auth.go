@@ -129,12 +129,14 @@ func (a *authStore) userCount() int {
 func (a *authStore) register(name, email, password, role, invite string) (authUser, bool, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if len(a.users) != 0 {
+		return authUser{}, false, os.ErrPermission
+	}
 	email = strings.ToLower(strings.TrimSpace(email))
 	name = strings.TrimSpace(name)
 	if name == "" {
 		name = email
 	}
-	firstUser := len(a.users) == 0
 	configuredInvite := strings.TrimSpace(os.Getenv("FISH_INVITE_CODE"))
 	if configuredInvite != "" && subtle.ConstantTimeCompare([]byte(strings.TrimSpace(invite)), []byte(configuredInvite)) != 1 {
 		return authUser{}, false, os.ErrPermission
@@ -156,18 +158,8 @@ func (a *authStore) register(name, email, password, role, invite string) (authUs
 	if err != nil {
 		return authUser{}, false, err
 	}
-	userRole := "Viewer"
-	status := "active"
-	if firstUser {
-		userRole = "Admin"
-	} else {
-		userRole = normalizeRole(role)
-		if userRole != "Viewer" {
-			status = "pending"
-		}
-	}
 	user := authUser{
-		ID: id, Name: name, Email: email, Role: userRole, Status: status,
+		ID: id, Name: name, Email: email, Role: "Admin", Status: "active",
 		PasswordSalt: salt, PasswordHash: passwordDigest(salt, password), CreatedAt: time.Now(),
 	}
 	a.users[email] = user
@@ -175,6 +167,148 @@ func (a *authStore) register(name, email, password, role, invite string) (authUs
 		return authUser{}, false, err
 	}
 	return user, true, nil
+}
+
+func validateUserInput(name, email, password string) (string, string, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = email
+	}
+	if password == "" || len(password) < 8 {
+		return "", "", os.ErrInvalid
+	}
+	if email == "" || !strings.Contains(email, "@") {
+		return "", "", os.ErrInvalid
+	}
+	return name, email, nil
+}
+
+func (a *authStore) createUser(name, email, password, role string) (authUser, error) {
+	name, email, err := validateUserInput(name, email, password)
+	if err != nil {
+		return authUser{}, err
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if _, exists := a.users[email]; exists {
+		return authUser{}, os.ErrExist
+	}
+	id, err := randomHex(12)
+	if err != nil {
+		return authUser{}, err
+	}
+	salt, err := randomHex(16)
+	if err != nil {
+		return authUser{}, err
+	}
+	user := authUser{
+		ID: id, Name: name, Email: email, Role: normalizeRole(role), Status: "active",
+		PasswordSalt: salt, PasswordHash: passwordDigest(salt, password), CreatedAt: time.Now(),
+	}
+	a.users[email] = user
+	if err := a.saveLocked(); err != nil {
+		delete(a.users, email)
+		return authUser{}, err
+	}
+	return user, nil
+}
+
+func (a *authStore) activeAdminCountLocked() int {
+	count := 0
+	for _, user := range a.users {
+		if user.Role == "Admin" && user.Status == "active" {
+			count++
+		}
+	}
+	return count
+}
+
+func (a *authStore) userByIDLocked(id string) (string, authUser, bool) {
+	for email, user := range a.users {
+		if user.ID == id {
+			return email, user, true
+		}
+	}
+	return "", authUser{}, false
+}
+
+func (a *authStore) updateUser(id, name, role, status, password string, actorID string) (authUser, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	email, user, ok := a.userByIDLocked(id)
+	if !ok {
+		return authUser{}, os.ErrNotExist
+	}
+	if id == actorID && (role != "" || status != "") {
+		return authUser{}, os.ErrPermission
+	}
+	if name != "" {
+		user.Name = strings.TrimSpace(name)
+		if user.Name == "" {
+			return authUser{}, os.ErrInvalid
+		}
+	}
+	if role != "" {
+		user.Role = normalizeRole(role)
+	}
+	if status != "" {
+		status = strings.ToLower(strings.TrimSpace(status))
+		if status != "active" && status != "disabled" {
+			return authUser{}, os.ErrInvalid
+		}
+		user.Status = status
+	}
+	if password != "" {
+		if len(password) < 8 {
+			return authUser{}, os.ErrInvalid
+		}
+		salt, err := randomHex(16)
+		if err != nil {
+			return authUser{}, err
+		}
+		user.PasswordSalt = salt
+		user.PasswordHash = passwordDigest(salt, password)
+	}
+	if user.Role != "Admin" || user.Status != "active" {
+		wasLastAdmin := a.activeAdminCountLocked() == 1
+		if wasLastAdmin {
+			previous, exists := a.users[email]
+			if exists && previous.Role == "Admin" && previous.Status == "active" {
+				return authUser{}, os.ErrPermission
+			}
+		}
+	}
+	a.users[email] = user
+	if err := a.saveLocked(); err != nil {
+		return authUser{}, err
+	}
+	if password != "" {
+		a.clearSessionsLocked(user.ID)
+	}
+	return user, nil
+}
+
+func (a *authStore) deleteUser(id, actorID string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if id == actorID {
+		return os.ErrPermission
+	}
+	email, user, ok := a.userByIDLocked(id)
+	if !ok {
+		return os.ErrNotExist
+	}
+	if user.Role == "Admin" && user.Status == "active" && a.activeAdminCountLocked() <= 1 {
+		return os.ErrPermission
+	}
+	delete(a.users, email)
+	a.clearSessionsLocked(user.ID)
+	if err := a.saveLocked(); err != nil {
+		a.users[email] = user
+		return err
+	}
+	return nil
 }
 
 func (a *authStore) authenticate(email, password string) (authUser, bool) {
@@ -211,6 +345,14 @@ func (a *authStore) clearSession(token string) {
 	a.mu.Lock()
 	delete(a.sessions, token)
 	a.mu.Unlock()
+}
+
+func (a *authStore) clearSessionsLocked(userID string) {
+	for token, session := range a.sessions {
+		if session.UserID == userID {
+			delete(a.sessions, token)
+		}
+	}
 }
 
 func (a *authStore) userBySession(token string) (authUser, bool) {
