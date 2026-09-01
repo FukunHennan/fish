@@ -10,10 +10,10 @@ export function motionCenter(profile, mode) {
   const center = clamp(profile.straightCenter, min, max, 90);
 
   if (mode === "left") {
-    return center + (max - center) * clamp(profile.leftCenterRatio, 0, 1, 0.5);
+    return center - (center - min) * clamp(profile.leftCenterRatio, 0, 1, 0.5);
   }
   if (mode === "right") {
-    return center - (center - min) * clamp(profile.rightCenterRatio, 0, 1, 0.5);
+    return center + (max - center) * clamp(profile.rightCenterRatio, 0, 1, 0.5);
   }
   return center;
 }
@@ -27,7 +27,9 @@ export function motionAmplitude(profile, center, mode) {
       ? profile.rightAmplitudePercent
       : profile.forwardAmplitudePercent;
 
-  return Math.min(center - min, max - center) * clamp(percent, 0, 1, 0.4);
+  const availableSwing = Math.min(center - min, max - center);
+  const safeSwing = mode === "forward" ? availableSwing / 2 : availableSwing;
+  return safeSwing * clamp(percent, 0, 1, 0.4);
 }
 
 export function motionRange(profile, mode) {

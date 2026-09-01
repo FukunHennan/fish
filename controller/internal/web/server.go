@@ -627,10 +627,10 @@ func centerSwingForMode(profile motionCalibrationProfile, mode string) (float64,
 			turnCenter = center
 		} else if mode == "left" {
 			ratio := clampMotionValue(profile.LeftCenterRatio, 0, 1, 0.5)
-			turnCenter = center + (maximum-center)*ratio
+			turnCenter = center - (center-minimum)*ratio
 		} else if mode == "right" {
 			ratio := clampMotionValue(profile.RightCenterRatio, 0, 1, 0.5)
-			turnCenter = center - (center-minimum)*ratio
+			turnCenter = center + (maximum-center)*ratio
 		} else {
 			return 0, 0, false
 		}
@@ -640,6 +640,9 @@ func centerSwingForMode(profile motionCalibrationProfile, mode string) (float64,
 		}
 		if swing < 0 {
 			swing = 0
+		}
+		if mode == "forward" {
+			swing /= 2
 		}
 		return turnCenter, swing, true
 	}
@@ -704,14 +707,17 @@ func (s *server) applyMotionGeometry(deviceID, mode string, frequency, amplitude
 	} else if amplitude > maxSwing {
 		amplitude = maxSwing
 	}
-	bias = center - 90
-	if bias < -45 {
-		bias = -45
+	if !hasBias {
+		bias = center - 90
+		if bias < -45 {
+			bias = -45
+		}
+		if bias > 45 {
+			bias = 45
+		}
+		hasBias = true
 	}
-	if bias > 45 {
-		bias = 45
-	}
-	return frequency, amplitude, bias, true
+	return frequency, amplitude, bias, hasBias
 }
 
 func (s *server) motionCalibrations(w http.ResponseWriter, r *http.Request) {
@@ -768,9 +774,9 @@ func (s *server) command(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var x struct {
-		DeviceID, Mode              string
-		Frequency, Amplitude        float64
-		AmplitudePercent, Bias      *float64
+		DeviceID, Mode         string
+		Frequency, Amplitude   float64
+		AmplitudePercent, Bias *float64
 	}
 	if json.NewDecoder(r.Body).Decode(&x) != nil {
 		http.Error(w, "请求格式错误", http.StatusBadRequest)

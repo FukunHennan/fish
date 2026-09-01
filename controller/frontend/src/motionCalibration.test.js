@@ -23,13 +23,13 @@ test("clamp applies bounds and fallback", () => {
 test("forward motion stays centered on straight trim", () => {
   const range = motionRange(profile, "forward");
   assert.equal(range.center, 90);
-  assert.equal(range.min, 58.5);
-  assert.equal(range.max, 121.5);
+  assert.equal(range.min, 74.25);
+  assert.equal(range.max, 105.75);
 });
 
 test("left and right centers mirror around straight trim for symmetric limits", () => {
-  assert.equal(motionCenter(profile, "left"), 125);
-  assert.equal(motionCenter(profile, "right"), 55);
+  assert.equal(motionCenter(profile, "left"), 55);
+  assert.equal(motionCenter(profile, "right"), 125);
 });
 
 test("turn amplitudes stay inside configured servo limits", () => {
@@ -38,6 +38,37 @@ test("turn amplitudes stay inside configured servo limits", () => {
     assert.ok(range.min >= profile.servoMin);
     assert.ok(range.max <= profile.servoMax);
   }
+});
+
+test("full calibrated ranges use the smaller available side", () => {
+  const fullProfile = {
+    ...profile,
+    servoMin: 0,
+    servoMax: 180,
+    straightCenter: 90,
+    forwardAmplitudePercent: 1,
+    leftAmplitudePercent: 1,
+    rightAmplitudePercent: 1,
+  };
+
+  assert.deepEqual(motionRange(fullProfile, "forward"), {
+    center: 90,
+    amplitude: 45,
+    min: 45,
+    max: 135,
+  });
+  assert.deepEqual(motionRange(fullProfile, "left"), {
+    center: 45,
+    amplitude: 45,
+    min: 0,
+    max: 90,
+  });
+  assert.deepEqual(motionRange(fullProfile, "right"), {
+    center: 135,
+    amplitude: 45,
+    min: 90,
+    max: 180,
+  });
 });
 
 test("asymmetric servo limits are respected", () => {

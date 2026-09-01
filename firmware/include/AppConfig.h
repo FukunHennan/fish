@@ -13,7 +13,7 @@
 
 
 /* Wi-Fi 和控制器配置通过 Fish-Setup-XXXXXX 热点写入 NVS。 */
-#define FIRMWARE_VERSION "1.2.12"
+#define FIRMWARE_VERSION "1.2.13"
 
 /* Allow short Wi-Fi stalls without falsely declaring the controller lost. */
 #define CONTROLLER_HEARTBEAT_TIMEOUT_MS 8000
@@ -67,4 +67,4 @@
 
 #define SWIM_SPEED      2.5     // 摆尾快慢  建议 1.0 ~ 4.0  (越大越快)
 #define SWIM_POWER      28.0    // 摆尾幅度  建议 10  ~ 40   (越大摆得越猛)
-#define TURN_AMOUNT     15.0    // 转弯角度  建议 10  ~ 25   (越大转弯越急)
+#define TURN_AMOUNT     45.0    // 默认左右转中心偏置：左 -45°，右 +45°

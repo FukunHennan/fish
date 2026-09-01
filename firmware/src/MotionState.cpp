@@ -13,7 +13,7 @@ bool MotionState::setTuning(float frequency, float amplitude) {
 
 void MotionState::setMode(MotionMode mode) {
     value_.mode = mode;
-    if (!customBias_) value_.bias = mode == MotionMode::Left ? turnAmount_ : mode == MotionMode::Right ? -turnAmount_ : 0.0f;
+    if (!customBias_) value_.bias = mode == MotionMode::Left ? -turnAmount_ : mode == MotionMode::Right ? turnAmount_ : 0.0f;
     customBias_ = false;
 }
 

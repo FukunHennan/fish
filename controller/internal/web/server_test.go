@@ -293,7 +293,7 @@ func TestMotionCommandIncludesBiasAndRequestID(t *testing.T) {
 	}
 }
 
-func TestTurnCommandWithoutCalibrationOmitsBias(t *testing.T) {
+func TestTurnCommandWithoutCalibrationUsesDefaultGeometry(t *testing.T) {
 	h := hub.New()
 	c := &captureConn{onWrite: func(value any) {
 		message := value.(map[string]any)
@@ -313,8 +313,8 @@ func TestTurnCommandWithoutCalibrationOmitsBias(t *testing.T) {
 		t.Fatalf("命令发送失败: %d %s", w.Code, w.Body.String())
 	}
 	payload := c.sent[0].(map[string]any)["payload"].(map[string]any)
-	if _, exists := payload["bias"]; exists {
-		t.Fatalf("未标定左转不应强制下发偏置，避免覆盖固件默认转弯中心: %#v", payload)
+	if payload["bias"] != -45.0 {
+		t.Fatalf("未标定左转应使用新规则的默认偏置 -45°: %#v", payload)
 	}
 }
 
@@ -351,7 +351,7 @@ func TestMotionCommandUsesCalibratedTurnCenter(t *testing.T) {
 	}}
 	h.Register(hub.Device{ID: "fish-1"}, c)
 	handler := NewHandler(h, testKey())
-	body := `{"deviceId":"fish-1","mode":"left","frequency":2.5,"amplitude":50,"bias":-8}`
+	body := `{"deviceId":"fish-1","mode":"left","frequency":2.5,"amplitude":50}`
 	r := httptest.NewRequest(http.MethodPost, "/api/command", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, r)
@@ -359,7 +359,7 @@ func TestMotionCommandUsesCalibratedTurnCenter(t *testing.T) {
 		t.Fatalf("命令发送失败: %d %s", w.Code, w.Body.String())
 	}
 	payload := c.sent[0].(map[string]any)["payload"].(map[string]any)
-	if payload["bias"] != 35.0 || payload["amplitude"] != 35.0 {
+	if payload["bias"] != -35.0 || payload["amplitude"] != 35.0 {
 		t.Fatalf("左转没有围绕标定中心摆动: %#v", payload)
 	}
 }
