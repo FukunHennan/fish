@@ -27,6 +27,16 @@ class StuckApplication(BlockingApplication):
         threading.Event().wait(timeout=1)
 
 
+class FailingCameraApplication(BlockingApplication):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.cam = None
+        self.last_error = None
+
+    def run(self):
+        self.last_error = RuntimeError("camera_open_failed: index=0")
+
+
 class ApplicationRunnerTests(unittest.TestCase):
     def test_http_server_binds_only_to_loopback(self):
         calls = []
@@ -77,6 +87,15 @@ class ApplicationRunnerTests(unittest.TestCase):
             stop()
 
         self.assertTrue(created[0].exit_requested.is_set())
+
+    def test_start_raises_when_camera_thread_exits_before_opening(self):
+        with self.assertRaisesRegex(RuntimeError, "camera_open_failed"):
+            start_application_runner(
+                camera_index=0,
+                action_source=lambda: None,
+                application_factory=FailingCameraApplication,
+                startup_timeout=0.5,
+            )
 
 
 if __name__ == "__main__":

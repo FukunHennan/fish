@@ -5,8 +5,8 @@ export function clamp(value, min, max, fallback) {
 }
 
 export function motionCenter(profile, mode) {
-  const min = clamp(profile.servoMin, 0, 179, 20);
-  const max = clamp(profile.servoMax, min + 1, 180, 160);
+  const min = clamp(profile.servoMin, 0, 179, 0);
+  const max = clamp(profile.servoMax, min + 1, 180, 180);
   const center = clamp(profile.straightCenter, min, max, 90);
 
   if (mode === "left") {
@@ -19,8 +19,8 @@ export function motionCenter(profile, mode) {
 }
 
 export function motionAmplitude(profile, center, mode) {
-  const min = clamp(profile.servoMin, 0, 179, 20);
-  const max = clamp(profile.servoMax, min + 1, 180, 160);
+  const min = clamp(profile.servoMin, 0, 179, 0);
+  const max = clamp(profile.servoMax, min + 1, 180, 180);
   const percent = mode === "left"
     ? profile.leftAmplitudePercent
     : mode === "right"

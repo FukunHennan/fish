@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from waitress import serve as waitress_serve
 
 import main as vision_main
@@ -24,6 +25,7 @@ def start_application_runner(
     action_result_sink=None,
     application_factory=VisionApplication,
     stop_timeout=5.0,
+    startup_timeout=3.0,
 ):
     application = application_factory(
         camera_index=camera_index,
@@ -37,6 +39,15 @@ def start_application_runner(
         daemon=True,
     )
     thread.start()
+
+    if hasattr(application, "cam"):
+        deadline = time.monotonic() + startup_timeout
+        while application.cam is None and thread.is_alive() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        if application.cam is None and not thread.is_alive():
+            error = getattr(application, "last_error", None)
+            message = str(error) if error else "vision_application_start_failed"
+            raise RuntimeError(message)
 
     def stop():
         application.request_exit()

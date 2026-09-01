@@ -28,7 +28,8 @@ uint32_t bootReleasedAt=0;
 
 void requestProvisioningReset(const char* reason){
     if(provisioningResetPending)return;
-    motion.safeStop();configStore.clear();provisioningResetPending=true;Serial.println(reason);
+    if(reason&&reason[0])Serial.println(reason);
+    motion.safeStop();configStore.clear();provisioningResetPending=true;
 }
 
 void serviceProvisioningReset(uint32_t now){
@@ -39,21 +40,28 @@ void serviceProvisioningReset(uint32_t now){
 }
 
 void setup(){
-    Serial.begin(115200);delay(100);Serial.printf("\n机器鱼中央控制固件 v%s\n",FIRMWARE_VERSION);
+    Serial.begin(115200);delay(100);
     statusLight.begin();bootButton.begin();battery.begin();ambientLight.begin();motion.begin();configStore.load(deviceConfig);network.begin(deviceConfig);controller.begin(deviceConfig);discovery.begin(deviceConfig);
-    Serial.println("串口命令: FWD LEFT RIGHT STOP IDLE FREQ:x AMP:x CLEAR_CONFIG");
 }
 
 void loop(){
     uint32_t now=millis();
     if(provisioningResetPending){serviceProvisioningReset(now);return;}
     battery.update(now);ambientLight.update(now);network.update(now);discovery.update();controller.update(now,network.connected());motion.update(now);
-    StatusLightMode lightMode=!network.connected()?StatusLightMode::Provisioning:(controller.registered()?StatusLightMode::Ready:StatusLightMode::Registering);
+    StatusLightMode lightMode;
+    if(network.provisioning()) lightMode=StatusLightMode::Provisioning;
+    else if(!network.connected()) lightMode=StatusLightMode::WifiConnecting;
+    else if(controller.otaActive()) lightMode=StatusLightMode::Ota;
+    else if(controller.otaFailed()) lightMode=StatusLightMode::Error;
+    else if(visual.active()) lightMode=StatusLightMode::VisionControl;
+    else if(motion.snapshot().mode!=MotionMode::Stopped) lightMode=StatusLightMode::ManualMotion;
+    else if(controller.registered()) lightMode=StatusLightMode::Ready;
+    else lightMode=StatusLightMode::Discovering;
     statusLight.setMode(lightMode);statusLight.update(now);
     if(bootButton.update(now)){requestProvisioningReset("BOOT 长按：配置已清除；松开按键后重启进入配网模式");return;}
     if(Serial.available()){
         String c=Serial.readStringUntil('\n');c.trim();
         if(c.equalsIgnoreCase("CLEAR_CONFIG"))requestProvisioningReset("配置已清除，正在重启进入配网模式");
-        else Serial.println(commands.process(c));
+        else (void)commands.process(c);
     }
 }

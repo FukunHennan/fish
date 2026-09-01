@@ -25,6 +25,7 @@ controller/diagnostics/runs/
 vision/.venv/
 vision/.venv312/
 .venv/
+vision/.cache/
 __pycache__/
 *.py[cod]
 .pytest_cache/

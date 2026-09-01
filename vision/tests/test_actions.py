@@ -48,6 +48,21 @@ class WebActionTranslationTests(unittest.TestCase):
                     runtime_action,
                 )
 
+    def test_overlay_visibility_action_is_translated(self):
+        self.assertEqual(
+            translate_web_action({
+                "type": "overlay.set",
+                "overlays": {"detections": False, "paths": True},
+            }),
+            ("OVERLAY_OPTIONS", {"detections": False, "paths": True}),
+        )
+        self.assertIsNone(
+            translate_web_action({
+                "type": "overlay.set",
+                "overlays": {"detections": "no"},
+            })
+        )
+
     def test_out_of_frame_coordinates_and_bad_paths_are_rejected(self):
         self.assertIsNone(
             translate_web_action(

@@ -10,7 +10,15 @@
 #include <mbedtls/sha256.h>
 
 ControllerClient::ControllerClient(MotionController& m,CommandProcessor& c,VisualController& v,BatteryMonitor& b,AmbientLightMonitor& l,StatusLight& s):motion_(m),commands_(c),visual_(v),battery_(b),ambientLight_(l),statusLight_(s){}
-void ControllerClient::begin(const DeviceConfig& c){config_=c;socket_.onEvent([this](WStype_t t,uint8_t*p,size_t n){onEvent(t,p,n);});socket_.setReconnectInterval(3000);}
+void ControllerClient::begin(const DeviceConfig& c){
+    config_=c;
+    socket_.onEvent([this](WStype_t t,uint8_t*p,size_t n){onEvent(t,p,n);});
+    socket_.setReconnectInterval(3000);
+    endpointReady_=false;
+    started_=false;
+    registered_=false;
+}
+void ControllerClient::clearEndpoint(){endpointReady_=false;started_=false;registered_=false;}
 void ControllerClient::setEndpoint(const IPAddress& host,uint16_t port){
     if(endpointReady_&&controllerIP_==host&&config_.controllerPort==port)return;
     if(started_)socket_.disconnect();controllerIP_=host;config_.controllerPort=port;endpointReady_=true;started_=false;registered_=false;
@@ -39,11 +47,15 @@ void ControllerClient::runOta(const String& id,const String& expectedHash,size_t
 
 void ControllerClient::handleCommand(JsonDocument& d){
     String id=d["requestId"]|"";String command=d["command"]|"";if(id.length()==0){sendResult(id,false,"MISSING_REQUEST_ID","缺少请求 ID");return;}
+    if(command=="emergency.stop"){visual_.stop();motion_.safeStop();stopReason_="EMERGENCY_STOP";lastControlMs_=millis();sendResult(id,true,"OK","紧急停止已执行");sendState();return;}
     if(command=="motion.set"){
         if(visual_.active()){sendResult(id,false,"CONTROL_LOCKED","视觉控制运行中");return;}
-        float f=d["payload"]["frequency"]|motion_.snapshot().frequency;float a=d["payload"]["amplitude"]|motion_.snapshot().amplitude;float bias=d["payload"]["bias"]|0.0f;String mode=d["payload"]["mode"]|"stop";
+        JsonObject payload=d["payload"].as<JsonObject>();
+        float f=payload["frequency"]|motion_.snapshot().frequency;float a=payload["amplitude"]|motion_.snapshot().amplitude;bool hasBias=!payload["bias"].isNull();float bias=payload["bias"]|motion_.snapshot().bias;String mode=payload["mode"]|"stop";
         mode.toUpperCase();if(mode=="CENTER"){bool ok=motion_.centerAtBias(bias);lastControlMs_=millis();stopReason_="CALIBRATION_CENTER";sendResult(id,ok,ok?"OK":"INVALID_PARAMETER",ok?"Servo centered":"Center bias out of range");sendState();return;}
-        if(!motion_.setTuning(f,a)||!motion_.setBias(bias)){sendResult(id,false,"INVALID_PARAMETER","运动参数越界");return;}String result=commands_.process(mode=="FORWARD"?"FWD":mode);lastControlMs_=millis();stopReason_=mode=="STOP"?"MANUAL_STOP":"";sendResult(id,result=="OK",result=="OK"?"OK":"UNKNOWN_COMMAND",result);sendState();return;
+        if(!motion_.setTuning(f,a)){sendResult(id,false,"INVALID_PARAMETER","运动参数越界");return;}String result=commands_.process(mode=="FORWARD"?"FWD":mode);
+        if(result=="OK"&&hasBias&&mode!="LEFT"&&mode!="RIGHT"&&!motion_.setBias(bias)){sendResult(id,false,"INVALID_PARAMETER","运动参数越界");return;}
+        lastControlMs_=millis();stopReason_=mode=="STOP"?"MANUAL_STOP":"";sendResult(id,result=="OK",result=="OK"?"OK":"UNKNOWN_COMMAND",result);sendState();return;
     }
     if(command=="vision.start"){String session=d["payload"]["sessionId"]|"";motion_.safeStop();if(!visual_.start(session.c_str(),millis())){sendResult(id,false,"INVALID_SESSION","视觉会话 ID 无效");return;}stopReason_="";lastControlMs_=millis();sendResult(id,true,"OK","视觉会话已启动");sendState();return;}
     if(command=="vision.calibrate.forward"){
@@ -73,8 +85,13 @@ void ControllerClient::handleCommand(JsonDocument& d){
     sendResult(id,false,"UNKNOWN_COMMAND","未知命令");
 }
 void ControllerClient::onEvent(WStype_t type,uint8_t* payload,size_t length){
-    if(type==WStype_CONNECTED){registered_=false;return;}
-    if(type==WStype_DISCONNECTED){registered_=false;visual_.stop();motion_.safeStop();stopReason_="CONTROLLER_DISCONNECTED";return;}
+    if(type==WStype_CONNECTED){
+        registered_=false;
+        return;
+    }
+    if(type==WStype_DISCONNECTED){
+        clearEndpoint();visual_.stop();motion_.safeStop();stopReason_="CONTROLLER_DISCONNECTED";return;
+    }
     if(type!=WStype_TEXT)return;
     JsonDocument d;if(deserializeJson(d,payload,length))return;String messageType=d["type"]|"";
     String nonce;if(readAuthChallenge(d,nonce)){sendRegistration(nonce);return;}
@@ -84,7 +101,7 @@ void ControllerClient::onEvent(WStype_t type,uint8_t* payload,size_t length){
     if(messageType=="command")handleCommand(d);
 }
 void ControllerClient::update(uint32_t nowMs,bool online){
-    if(!online){if(started_){socket_.disconnect();started_=false;}motion_.safeStop();return;}
+    if(!online){if(started_)socket_.disconnect();clearEndpoint();motion_.safeStop();return;}
     if(!endpointReady_)return;
     if(!started_){socket_.begin(controllerIP_.toString().c_str(),config_.controllerPort,"/ws/device");started_=true;}
     socket_.loop();

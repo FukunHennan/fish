@@ -5,8 +5,13 @@
 
 enum class StatusLightMode {
     Provisioning,
-    Registering,
+    WifiConnecting,
+    Discovering,
     Ready,
+    ManualMotion,
+    VisionControl,
+    Ota,
+    Error,
 };
 
 class StatusLight {
@@ -27,7 +32,7 @@ public:
 
 private:
     void showSolid(uint8_t red, uint8_t green, uint8_t blue, bool enabled);
-    void showChase();
+    void showChase(uint8_t red, uint8_t green, uint8_t blue);
 
     Adafruit_NeoPixel pixels_;
     StatusLightMode mode_ = StatusLightMode::Provisioning;

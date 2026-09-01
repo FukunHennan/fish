@@ -68,4 +68,18 @@ def translate_web_action(action, frame_size=None):
         if delta not in (-1, 1):
             return None
         return "EXP_DOWN" if delta < 0 else "EXP_UP"
+    if action_type == "overlay.set":
+        overlays = action.get("overlays")
+        if not isinstance(overlays, dict):
+            return None
+        payload = {}
+        for key in ("detections", "paths"):
+            if key in overlays:
+                value = overlays.get(key)
+                if not isinstance(value, bool):
+                    return None
+                payload[key] = value
+        if not payload:
+            return None
+        return "OVERLAY_OPTIONS", payload
     return None

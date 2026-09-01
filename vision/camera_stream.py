@@ -16,7 +16,7 @@ import time
 import cv2
 
 from config import TARGET_FPS, TARGET_HEIGHT, TARGET_WIDTH
-from interface import apply_manual_exposure
+from interface import apply_manual_exposure_for_device
 
 
 def _backend_candidates():
@@ -111,6 +111,7 @@ class RestartSafeCameraStream:
     """Camera capture with restart-safe stop/release and backend fallback."""
 
     def __init__(self, src=0):
+        self.src = src
         self.lock = threading.Lock()
         self._stop_event = threading.Event()
         self._release_lock = threading.Lock()
@@ -173,9 +174,9 @@ class RestartSafeCameraStream:
 
     def adjust_exposure(self, delta):
         if self._stop_event.is_set():
-            return apply_manual_exposure(_ClosedCapture(), delta)
+            return apply_manual_exposure_for_device(_ClosedCapture(), delta, self.src)
         with self.lock:
-            result = apply_manual_exposure(self.cap, delta)
+            result = apply_manual_exposure_for_device(self.cap, delta, self.src)
             if result.status == "completed":
                 self.exposure_val = result.actual_value
                 print(f"[Camera] Manual exposure changed to {self.exposure_val}")
@@ -186,7 +187,8 @@ class RestartSafeCameraStream:
     def update(self):
         while not self._stop_event.is_set():
             try:
-                ret, frame = self.cap.read()
+                with self.lock:
+                    ret, frame = self.cap.read()
             except (cv2.error, OSError, RuntimeError) as error:
                 if self._stop_event.is_set():
                     break

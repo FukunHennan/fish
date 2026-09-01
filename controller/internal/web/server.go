@@ -36,6 +36,8 @@ type server struct {
 	firmwareMu      sync.RWMutex
 	calibrationMu   sync.Mutex
 	calibrationPath string
+	auth            *authStore
+	leases          *leaseStore
 }
 
 type motionCalibrationProfile struct {
@@ -124,7 +126,11 @@ func motionCalibrationPath() string {
 }
 
 func newHandler(h *hub.Hub, key []byte, apiAddress, streamAddress, firmwarePath string) http.Handler {
-	s := &server{hub: h, key: append([]byte(nil), key...), firmwarePath: firmwarePath, calibrationPath: motionCalibrationPath()}
+	s := &server{
+		hub: h, key: append([]byte(nil), key...), firmwarePath: firmwarePath,
+		calibrationPath: motionCalibrationPath(), auth: newAuthStore(authStorePath()),
+		leases: newLeaseStore(60 * time.Second),
+	}
 	if firmwarePath != "" {
 		s.firmwareName = filepath.Base(firmwarePath)
 	}
@@ -140,8 +146,15 @@ func newHandler(h *hub.Hub, key []byte, apiAddress, streamAddress, firmwarePath 
 	m.Handle("/assets/", http.FileServer(http.FS(staticFiles)))
 	m.HandleFunc("/", s.dashboard)
 	m.HandleFunc("/healthz", s.health)
+	m.HandleFunc("/api/auth/me", s.authMe)
+	m.HandleFunc("/api/auth/login", s.authLogin)
+	m.HandleFunc("/api/auth/register", s.authRegister)
+	m.HandleFunc("/api/auth/logout", s.authLogout)
+	m.HandleFunc("/api/auth/users", s.authUsers)
 	m.HandleFunc("/api/devices", s.devices)
+	m.HandleFunc("/api/leases", s.leasesAPI)
 	m.HandleFunc("/api/command", s.command)
+	m.HandleFunc("/api/emergency-stop", s.emergencyStop)
 	m.HandleFunc("/api/motion-calibrations", s.motionCalibrations)
 	m.HandleFunc("/api/rgb", s.rgb)
 	m.HandleFunc("/api/ota", s.ota)
@@ -199,6 +212,14 @@ func (s *server) firmwareAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = json.NewEncoder(w).Encode(info)
 	case http.MethodPost:
+		user, ok := s.requireUser(w, r)
+		if !ok {
+			return
+		}
+		if !canAdmin(user) {
+			http.Error(w, "需要管理员权限", http.StatusForbidden)
+			return
+		}
 		s.uploadFirmware(w, r)
 	default:
 		http.Error(w, "仅支持 GET 或 POST", http.StatusMethodNotAllowed)
@@ -275,6 +296,14 @@ func (s *server) firmware(w http.ResponseWriter, r *http.Request) {
 func (s *server) ota(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "仅支持 POST", http.StatusMethodNotAllowed)
+		return
+	}
+	user, ok := s.requireUser(w, r)
+	if !ok {
+		return
+	}
+	if !canAdmin(user) {
+		http.Error(w, "需要管理员权限", http.StatusForbidden)
 		return
 	}
 	var input struct {
@@ -385,6 +414,22 @@ func (s *server) visionDeviceCommand(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if s.authActive() {
+		if command.Operation == "start" || command.Operation == "calibrate-forward" || command.Operation == "update" {
+			if _, acquired := s.leases.acquireBot(deviceID, "vision-bot", "vision"); !acquired {
+				w.WriteHeader(http.StatusConflict)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"sent": false, "acknowledged": false, "success": false,
+					"requestId": requestID, "message": "device is controlled by another user",
+				})
+				return
+			}
+			_ = s.leases.touchBot(deviceID, "vision-bot")
+		}
+		if command.Operation == "stop" {
+			s.leases.releaseBot(deviceID, "vision-bot")
+		}
+	}
 	message := map[string]any{
 		"type": "command", "requestId": requestID,
 		"command": "vision." + strings.ReplaceAll(command.Operation, "-", "."), "payload": payload,
@@ -423,8 +468,108 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) devices(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireUser(w, r); !ok {
+		return
+	}
+	type deviceView struct {
+		hub.Device
+		Lease *controlLease `json:"lease,omitempty"`
+	}
+	leases := s.leases.snapshot()
+	devices := s.hub.List()
+	out := make([]deviceView, 0, len(devices))
+	for _, device := range devices {
+		view := deviceView{Device: device}
+		if lease, ok := leases[device.ID]; ok {
+			view.Lease = &lease
+		}
+		out = append(out, view)
+	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(s.hub.List())
+	_ = json.NewEncoder(w).Encode(out)
+}
+
+func (s *server) leasesAPI(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.requireUser(w, r)
+	if !ok {
+		return
+	}
+	if !canControl(user) {
+		http.Error(w, "需要操作员权限", http.StatusForbidden)
+		return
+	}
+	var input struct {
+		DeviceID string `json:"deviceId"`
+		Mode     string `json:"mode"`
+		Force    bool   `json:"force"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&input)
+	}
+	input.DeviceID = strings.TrimSpace(input.DeviceID)
+	if input.DeviceID == "" {
+		http.Error(w, "设备参数无效", http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	switch r.Method {
+	case http.MethodPost:
+		lease, acquired := s.leases.acquire(input.DeviceID, user, input.Mode, input.Force && canAdmin(user))
+		if !acquired {
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]any{"acquired": false, "lease": lease, "message": "这条鱼正在被其他用户控制"})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"acquired": true, "lease": lease})
+	case http.MethodDelete:
+		released := s.leases.release(input.DeviceID, user, input.Force && canAdmin(user))
+		if !released {
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]any{"released": false, "message": "只能释放自己的控制权，管理员可强制释放"})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"released": true})
+	default:
+		http.Error(w, "仅支持 POST / DELETE", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *server) emergencyStop(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "仅支持 POST", http.StatusMethodNotAllowed)
+		return
+	}
+	user, ok := s.requireUser(w, r)
+	if !ok {
+		return
+	}
+	if !canAdmin(user) {
+		http.Error(w, "需要管理员权限", http.StatusForbidden)
+		return
+	}
+	devices := s.hub.List()
+	type result struct {
+		DeviceID     string `json:"deviceId"`
+		Sent         bool   `json:"sent"`
+		Acknowledged bool   `json:"acknowledged"`
+		Success      bool   `json:"success"`
+		Message      string `json:"message,omitempty"`
+	}
+	results := make([]result, 0, len(devices))
+	for _, device := range devices {
+		requestID := fmt.Sprintf("emergency-%d", time.Now().UnixNano())
+		message := map[string]any{"type": "command", "requestId": requestID, "command": "emergency.stop", "payload": map[string]any{"operator": user.Email}}
+		ack, sent, acknowledged := s.hub.SendAndWait(device.ID, requestID, message, 1200*time.Millisecond)
+		item := result{DeviceID: device.ID, Sent: sent, Acknowledged: acknowledged}
+		if acknowledged {
+			item.Success, _ = ack["success"].(bool)
+			item.Message, _ = ack["message"].(string)
+		}
+		results = append(results, item)
+		_ = s.leases.release(device.ID, user, true)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"results": results})
 }
 
 func validMotionCalibration(p motionCalibrationProfile) bool {
@@ -460,13 +605,130 @@ func (s *server) readMotionCalibrations() map[string]motionCalibrationProfile {
 	return profiles
 }
 
+func clampMotionValue(value, min, max, fallback float64) float64 {
+	if value < min || value > max {
+		return fallback
+	}
+	return value
+}
+
+func profileServoRange(profile motionCalibrationProfile) (float64, float64, float64) {
+	minimum := clampMotionValue(profile.ServoMin, 0, 179, 0)
+	maximum := clampMotionValue(profile.ServoMax, minimum+1, 180, 180)
+	center := clampMotionValue(profile.StraightCenter, minimum, maximum, 90)
+	return minimum, maximum, center
+}
+
+func centerSwingForMode(profile motionCalibrationProfile, mode string) (float64, float64, bool) {
+	if profile.ServoMax != 0 || profile.StraightCenter != 0 || profile.ForwardFrequency != 0 {
+		minimum, maximum, center := profileServoRange(profile)
+		var turnCenter float64
+		if mode == "forward" || mode == "idle" || mode == "stop" {
+			turnCenter = center
+		} else if mode == "left" {
+			ratio := clampMotionValue(profile.LeftCenterRatio, 0, 1, 0.5)
+			turnCenter = center + (maximum-center)*ratio
+		} else if mode == "right" {
+			ratio := clampMotionValue(profile.RightCenterRatio, 0, 1, 0.5)
+			turnCenter = center - (center-minimum)*ratio
+		} else {
+			return 0, 0, false
+		}
+		swing := turnCenter - minimum
+		if maximum-turnCenter < swing {
+			swing = maximum - turnCenter
+		}
+		if swing < 0 {
+			swing = 0
+		}
+		return turnCenter, swing, true
+	}
+
+	center := clampMotionValue(profile.CenterDeg, 45, 135, 90)
+	if mode == "left" && (profile.LeftSign == -1 || profile.LeftSign == 1) {
+		offset := clampMotionValue(profile.LeftMaxOffset, 0, 45, 15) * clampMotionValue(profile.TurnPercent, 0, 100, 60) / 100
+		turnCenter := center + float64(profile.LeftSign)*offset
+		return turnCenter, 50 - offset, true
+	}
+	if mode == "right" && (profile.RightSign == -1 || profile.RightSign == 1) {
+		offset := clampMotionValue(profile.RightMaxOffset, 0, 45, 15) * clampMotionValue(profile.TurnPercent, 0, 100, 60) / 100
+		turnCenter := center + float64(profile.RightSign)*offset
+		return turnCenter, 50 - offset, true
+	}
+	return 0, 0, false
+}
+
+func defaultMotionProfile() motionCalibrationProfile {
+	return motionCalibrationProfile{
+		ServoMin:                0,
+		ServoMax:                180,
+		StraightCenter:          90,
+		ForwardFrequency:        2.5,
+		ForwardAmplitudePercent: 0.4,
+		LeftCenterRatio:         0.5,
+		LeftFrequency:           2.3,
+		LeftAmplitudePercent:    0.4,
+		RightCenterRatio:        0.5,
+		RightFrequency:          2.3,
+		RightAmplitudePercent:   0.4,
+		TransitionMs:            600,
+	}
+}
+
+func (s *server) motionProfileForDevice(deviceID string) motionCalibrationProfile {
+	profile := defaultMotionProfile()
+	s.calibrationMu.Lock()
+	profiles := s.readMotionCalibrations()
+	saved, ok := profiles[deviceID]
+	s.calibrationMu.Unlock()
+	if ok && validMotionCalibration(saved) {
+		profile = saved
+	}
+	return profile
+}
+
+func (s *server) applyMotionGeometry(deviceID, mode string, frequency, amplitude, bias float64, hasBias bool, amplitudePercent *float64) (float64, float64, float64, bool) {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode != "forward" && mode != "left" && mode != "right" && mode != "idle" && mode != "stop" {
+		return frequency, amplitude, bias, hasBias
+	}
+	profile := s.motionProfileForDevice(deviceID)
+	center, maxSwing, ok := centerSwingForMode(profile, mode)
+	if !ok {
+		return frequency, amplitude, bias, hasBias
+	}
+
+	if amplitudePercent != nil {
+		percent := clampMotionValue(*amplitudePercent, 0, 100, 40)
+		amplitude = maxSwing * percent / 100.0
+	} else if amplitude > maxSwing {
+		amplitude = maxSwing
+	}
+	bias = center - 90
+	if bias < -45 {
+		bias = -45
+	}
+	if bias > 45 {
+		bias = 45
+	}
+	return frequency, amplitude, bias, true
+}
+
 func (s *server) motionCalibrations(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.requireUser(w, r)
+	if !ok {
+		return
+	}
 	s.calibrationMu.Lock()
 	defer s.calibrationMu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
 	profiles := s.readMotionCalibrations()
 	if r.Method == http.MethodGet {
 		_ = json.NewEncoder(w).Encode(profiles)
+		return
+	}
+	if !canControl(user) {
+		http.Error(w, "需要操作员权限", http.StatusForbidden)
 		return
 	}
 	if r.Method != http.MethodPut {
@@ -497,26 +759,50 @@ func (s *server) command(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "仅支持 POST", http.StatusMethodNotAllowed)
 		return
 	}
+	user, ok := s.requireUser(w, r)
+	if !ok {
+		return
+	}
+	if !canControl(user) {
+		http.Error(w, "需要操作员权限", http.StatusForbidden)
+		return
+	}
 	var x struct {
-		DeviceID, Mode       string
-		Frequency, Amplitude float64
-		Bias                 float64
+		DeviceID, Mode              string
+		Frequency, Amplitude        float64
+		AmplitudePercent, Bias      *float64
 	}
 	if json.NewDecoder(r.Body).Decode(&x) != nil {
 		http.Error(w, "请求格式错误", http.StatusBadRequest)
 		return
 	}
-	if x.DeviceID == "" || x.Frequency < 0.3 || x.Frequency > 5 || x.Amplitude < 0 || x.Amplitude > 50 || x.Bias < -45 || x.Bias > 45 {
+	if x.DeviceID == "" || x.Frequency < 0.3 || x.Frequency > 5 || x.Amplitude < 0 || x.Amplitude > 90 || (x.AmplitudePercent != nil && (*x.AmplitudePercent < 0 || *x.AmplitudePercent > 100)) || (x.Bias != nil && (*x.Bias < -45 || *x.Bias > 45)) {
 		http.Error(w, "参数无效", http.StatusBadRequest)
 		return
 	}
+	if s.authActive() && !s.leases.touch(x.DeviceID, user) && !canAdmin(user) {
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(map[string]any{"sent": false, "acknowledged": false, "success": false, "message": "请先获取这条鱼的控制权"})
+		return
+	}
+	mode := strings.ToLower(x.Mode)
+	var bias float64
+	hasBias := x.Bias != nil
+	if hasBias {
+		bias = *x.Bias
+	}
+	x.Frequency, x.Amplitude, bias, hasBias = s.applyMotionGeometry(x.DeviceID, mode, x.Frequency, x.Amplitude, bias, hasBias, x.AmplitudePercent)
 	requestID := fmt.Sprintf("%d", time.Now().UnixNano())
+	payload := map[string]any{
+		"mode": mode, "frequency": x.Frequency,
+		"amplitude": x.Amplitude,
+	}
+	if hasBias {
+		payload["bias"] = bias
+	}
 	msg := map[string]any{
 		"type": "command", "requestId": requestID, "command": "motion.set",
-		"payload": map[string]any{
-			"mode": strings.ToLower(x.Mode), "frequency": x.Frequency,
-			"amplitude": x.Amplitude, "bias": x.Bias,
-		},
+		"payload": payload,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	ack, sent, acknowledged := s.hub.SendAndWait(x.DeviceID, requestID, msg, 2500*time.Millisecond)
@@ -541,6 +827,14 @@ func (s *server) command(w http.ResponseWriter, r *http.Request) {
 func (s *server) rgb(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	user, ok := s.requireUser(w, r)
+	if !ok {
+		return
+	}
+	if !canAdmin(user) {
+		http.Error(w, "需要管理员权限", http.StatusForbidden)
 		return
 	}
 	var input struct {

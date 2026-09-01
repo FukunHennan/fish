@@ -18,6 +18,14 @@
 /* Allow short Wi-Fi stalls without falsely declaring the controller lost. */
 #define CONTROLLER_HEARTBEAT_TIMEOUT_MS 8000
 
+/* If Wi-Fi is connected but the controller is not registered, keep announcing
+ * the fish on the LAN. The controller replies with its current WebSocket port,
+ * so users do not have to type a controller IP during normal setup. */
+#define CONTROLLER_DISCOVERY_ANNOUNCE_INTERVAL_MS 2500
+#define CONTROLLER_DISCOVERY_SCAN_INTERVAL_MS 220
+#define CONTROLLER_DISCOVERY_SCAN_TIMEOUT_MS 260
+#define CONTROLLER_DISCOVERY_NEAR_SCAN_RADIUS 96
+
 /* Four WS2812 status LEDs connected to XIAO ESP32-C3 D3 / GPIO5. */
 #define STATUS_LED_PIN   D3
 #define STATUS_LED_COUNT 4

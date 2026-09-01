@@ -4,25 +4,32 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
 func TestHandlerRoutesAPIsAndStreamToSeparateLoopbackServices(t *testing.T) {
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/status" { t.Fatalf("API path = %q", r.URL.Path) }
+		if r.URL.Path != "/status" {
+			t.Fatalf("API path = %q", r.URL.Path)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"state":"running"}`)
 	}))
 	defer api.Close()
 	stream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/video.mjpg" { t.Fatalf("stream path = %q", r.URL.Path) }
+		if r.URL.Path != "/video.mjpg" {
+			t.Fatalf("stream path = %q", r.URL.Path)
+		}
 		w.Header().Set("Content-Type", "multipart/x-mixed-replace; boundary=frame")
 		_, _ = io.WriteString(w, "frame-data")
 	}))
 	defer stream.Close()
 
 	handler, err := New(api.URL, stream.URL)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	apiRequest := httptest.NewRequest(http.MethodGet, "/api/vision/status", nil)
 	apiResponse := httptest.NewRecorder()
@@ -36,6 +43,10 @@ func TestHandlerRoutesAPIsAndStreamToSeparateLoopbackServices(t *testing.T) {
 	handler.ServeHTTP(streamResponse, streamRequest)
 	if streamResponse.Code != http.StatusOK || streamResponse.Body.String() != "frame-data" {
 		t.Fatalf("stream response = %d %q", streamResponse.Code, streamResponse.Body.String())
+	}
+	if streamResponse.Header().Get("X-Accel-Buffering") != "no" ||
+		!strings.Contains(streamResponse.Header().Get("Cache-Control"), "no-store") {
+		t.Fatalf("stream response missing no-buffer headers: %#v", streamResponse.Header())
 	}
 
 	sessionStreamRequest := httptest.NewRequest(http.MethodGet, "/api/vision/sessions/abc/stream.mjpg", nil)

@@ -14,8 +14,11 @@ public:
     ControllerClient(MotionController& motion, CommandProcessor& commands, VisualController& visual, BatteryMonitor& battery, AmbientLightMonitor& ambientLight, StatusLight& statusLight);
     void begin(const DeviceConfig& config);
     void setEndpoint(const IPAddress& host, uint16_t port);
+    void clearEndpoint();
     bool endpointReady() const { return endpointReady_; }
     bool registered() const { return registered_; }
+    bool otaActive() const { return otaState_ == "DOWNLOADING" || otaState_ == "REBOOTING"; }
+    bool otaFailed() const { return otaState_ == "FAILED"; }
     void update(uint32_t nowMs, bool networkConnected);
 private:
     void onEvent(WStype_t type, uint8_t* payload, size_t length);

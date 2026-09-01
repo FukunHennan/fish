@@ -1,6 +1,8 @@
 import unittest
 
-from interface import has_viewer_capacity
+import numpy as np
+
+from interface import MJPEGServer, has_viewer_capacity
 
 
 class MjpegCapacityTests(unittest.TestCase):
@@ -8,6 +10,12 @@ class MjpegCapacityTests(unittest.TestCase):
         self.assertTrue(has_viewer_capacity(current=0, maximum=8))
         self.assertTrue(has_viewer_capacity(current=1, maximum=8))
         self.assertFalse(has_viewer_capacity(current=8, maximum=8))
+
+    def test_stream_resize_preserves_camera_aspect_ratio(self):
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        resized = MJPEGServer._resize_for_stream(frame)
+
+        self.assertEqual(resized.shape[:2], (540, 720))
 
 
 if __name__ == "__main__":

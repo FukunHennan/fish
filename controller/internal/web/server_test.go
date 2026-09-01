@@ -17,6 +17,11 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+func TestMain(m *testing.M) {
+	_ = os.Setenv("FISH_AUTH_DISABLED", "true")
+	os.Exit(m.Run())
+}
+
 func TestOtaEndpointServesFirmwareAndSendsVerifiedMetadata(t *testing.T) {
 	firmware := []byte{0xE9, 0x01, 0x02, 0x03}
 	path := t.TempDir() + "/firmware.bin"
@@ -285,5 +290,119 @@ func TestMotionCommandIncludesBiasAndRequestID(t *testing.T) {
 	var response map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil || response["requestId"] == "" || response["sent"] != true || response["acknowledged"] != true {
 		t.Fatalf("响应缺少发送结果: %s", w.Body.String())
+	}
+}
+
+func TestTurnCommandWithoutCalibrationOmitsBias(t *testing.T) {
+	h := hub.New()
+	c := &captureConn{onWrite: func(value any) {
+		message := value.(map[string]any)
+		h.ResolveCommandResult(map[string]any{
+			"type": "command.result", "requestId": message["requestId"], "success": true,
+			"code": "OK", "message": "applied",
+			"applied": map[string]any{"mode": 3.0, "frequency": 2.5, "amplitude": 28.0, "bias": 15.0},
+		})
+	}}
+	h.Register(hub.Device{ID: "fish-1"}, c)
+	handler := NewHandler(h, testKey())
+	body := `{"deviceId":"fish-1","mode":"left","frequency":2.5,"amplitude":28}`
+	r := httptest.NewRequest("POST", "/api/command", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+	if w.Code != 200 || len(c.sent) != 1 {
+		t.Fatalf("命令发送失败: %d %s", w.Code, w.Body.String())
+	}
+	payload := c.sent[0].(map[string]any)["payload"].(map[string]any)
+	if _, exists := payload["bias"]; exists {
+		t.Fatalf("未标定左转不应强制下发偏置，避免覆盖固件默认转弯中心: %#v", payload)
+	}
+}
+
+func TestMotionCommandUsesCalibratedTurnCenter(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "motion-calibrations.json")
+	t.Setenv("FISH_MOTION_CALIBRATIONS", path)
+	if err := os.WriteFile(path, []byte(`{
+		"fish-1": {
+			"deviceId": "fish-1",
+			"servoMin": 20,
+			"servoMax": 160,
+			"straightCenter": 90,
+			"forwardFrequency": 2.5,
+			"forwardAmplitudePercent": 0.45,
+			"leftCenterRatio": 0.5,
+			"leftFrequency": 2.3,
+			"leftAmplitudePercent": 0.55,
+			"rightCenterRatio": 0.5,
+			"rightFrequency": 2.3,
+			"rightAmplitudePercent": 0.55,
+			"transitionMs": 600
+		}
+	}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	h := hub.New()
+	c := &captureConn{onWrite: func(value any) {
+		message := value.(map[string]any)
+		h.ResolveCommandResult(map[string]any{
+			"type": "command.result", "requestId": message["requestId"], "success": true,
+			"code": "OK", "message": "applied",
+		})
+	}}
+	h.Register(hub.Device{ID: "fish-1"}, c)
+	handler := NewHandler(h, testKey())
+	body := `{"deviceId":"fish-1","mode":"left","frequency":2.5,"amplitude":50,"bias":-8}`
+	r := httptest.NewRequest(http.MethodPost, "/api/command", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+	if w.Code != 200 || len(c.sent) != 1 {
+		t.Fatalf("命令发送失败: %d %s", w.Code, w.Body.String())
+	}
+	payload := c.sent[0].(map[string]any)["payload"].(map[string]any)
+	if payload["bias"] != 35.0 || payload["amplitude"] != 35.0 {
+		t.Fatalf("左转没有围绕标定中心摆动: %#v", payload)
+	}
+}
+
+func TestAuthAndLeaseProtectMotionCommand(t *testing.T) {
+	t.Setenv("FISH_AUTH_DISABLED", "false")
+	t.Setenv("FISH_AUTH_USERS", filepath.Join(t.TempDir(), "users.json"))
+	h := hub.New()
+	c := &captureConn{onWrite: func(value any) {
+		message := value.(map[string]any)
+		h.ResolveCommandResult(map[string]any{
+			"type": "command.result", "requestId": message["requestId"], "success": true,
+			"code": "OK", "message": "applied",
+		})
+	}}
+	h.Register(hub.Device{ID: "fish-1"}, c)
+	handler := NewHandler(h, testKey())
+	commandBody := `{"deviceId":"fish-1","mode":"left","frequency":2.5,"amplitude":28,"bias":-8}`
+	unauth := httptest.NewRecorder()
+	handler.ServeHTTP(unauth, httptest.NewRequest(http.MethodPost, "/api/command", strings.NewReader(commandBody)))
+	if unauth.Code != http.StatusUnauthorized {
+		t.Fatalf("未登录命令应被拒绝: %d %s", unauth.Code, unauth.Body.String())
+	}
+
+	register := httptest.NewRecorder()
+	handler.ServeHTTP(register, httptest.NewRequest(http.MethodPost, "/api/auth/register", strings.NewReader(`{"name":"Admin","email":"admin@example.com","password":"password-123456"}`)))
+	if register.Code != http.StatusOK {
+		t.Fatalf("注册失败: %d %s", register.Code, register.Body.String())
+	}
+	cookie := register.Result().Cookies()[0]
+	acquire := httptest.NewRecorder()
+	acquireReq := httptest.NewRequest(http.MethodPost, "/api/leases", strings.NewReader(`{"deviceId":"fish-1","mode":"manual"}`))
+	acquireReq.AddCookie(cookie)
+	handler.ServeHTTP(acquire, acquireReq)
+	if acquire.Code != http.StatusOK {
+		t.Fatalf("获取控制权失败: %d %s", acquire.Code, acquire.Body.String())
+	}
+
+	authed := httptest.NewRecorder()
+	commandReq := httptest.NewRequest(http.MethodPost, "/api/command", strings.NewReader(commandBody))
+	commandReq.AddCookie(cookie)
+	handler.ServeHTTP(authed, commandReq)
+	if authed.Code != http.StatusOK {
+		t.Fatalf("已登录且持有控制权应可控制: %d %s", authed.Code, authed.Body.String())
 	}
 }

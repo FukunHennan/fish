@@ -97,6 +97,7 @@ class VisionApplication:
         self.action_source = action_source
         self.action_result_sink = action_result_sink
         self.cam = None
+        self.last_error = None
         self.tablet = None
         self.mjpeg = None
         self.fish_comm = None
@@ -121,6 +122,7 @@ class VisionApplication:
         self._stop_latched_reason = None
         self._last_web_metrics_t = 0.0
         self._forward_calibration = None
+        self.processing_enabled = False
         self._heading_calibration_result = {
             "status": "idle", "progress": 0.0, "sampleCount": 0,
             "message": "等待方向标定",
@@ -135,6 +137,7 @@ class VisionApplication:
             self._loop()
             return 0
         except Exception as error:
+            self.last_error = error
             print(f"Unhandled runtime error: {error}")
             traceback.print_exc()
             self._safe_stop("FAULT", force=True)
@@ -224,8 +227,7 @@ class VisionApplication:
             if startup["frame"] is not None:
                 cv2.imshow(self.WINDOW_NAME, startup["frame"])
                 cv2.waitKey(1)
-        self.detector.start()
-        print("Vision service started.")
+        print("Vision preview started; YOLO processing is disabled by default.")
         return True
 
     def _create_path_guidance(self):
@@ -287,6 +289,21 @@ class VisionApplication:
                 self.control.status = "READY"
                 print("Camera stream recovered; tracking remains stopped.")
             self._stop_latched_reason = None
+
+            if not self.processing_enabled:
+                self._update_loop_fps()
+                image = self.presentation.render_preview(
+                    snapshot["frame"],
+                    snapshot["timestamp"],
+                    camera_fps=self.cam.measured_fps,
+                    loop_fps=self._loop_fps,
+                )
+                self.mjpeg.update(image)
+                self._publish_preview_metrics(snapshot["frame"], snapshot["timestamp"])
+                self._display(image)
+                self._queue_input_actions()
+                self._handle_pending_actions(None, image)
+                continue
 
             result = self.pipeline.process(
                 snapshot["frame"],
@@ -418,7 +435,8 @@ class VisionApplication:
             mcu_hz=mcu_hz,
             clahe_enabled=self.pipeline.use_clahe,
         )
-        self._draw_tablet_trajectory(image)
+        if self.presentation.overlay_options.get("paths", True):
+            self._draw_tablet_trajectory(image)
         telemetry = self.presentation.telemetry(
             result,
             calibration=self.runtime.calibration,
@@ -559,6 +577,19 @@ class VisionApplication:
                 self._publish_exposure(self.cam.adjust_exposure(-1), payload)
             elif action == "EXP_UP":
                 self._publish_exposure(self.cam.adjust_exposure(1), payload)
+            elif action == "OVERLAY_OPTIONS":
+                self.presentation.set_overlay_options(payload)
+            elif action == "PROCESSING_START":
+                self.processing_enabled = True
+                self.pipeline.reset_motion()
+                self.detector.start()
+                print("YOLO processing started.")
+            elif action == "PROCESSING_STOP":
+                self.processing_enabled = False
+                self._safe_stop("PROCESSING STOPPED", force=True)
+                self.pipeline.reset_motion()
+                self.detector.close()
+                print("YOLO processing stopped; preview remains available.")
 
     def _publish_exposure(self, result, metadata):
         if self.action_result_sink is None:
@@ -639,7 +670,9 @@ class VisionApplication:
             "type": "system.metrics",
             "metrics": {
                 "frame": {"width": int(width), "height": int(height)},
+                "frameLatencyMs": max(0.0, (time.time() - result.frame_time) * 1000.0),
                 "yolo": yolo,
+                "overlays": dict(self.presentation.overlay_options),
                 "cameraFps": self.cam.measured_fps,
                 "visionFps": self._loop_fps,
                 "workflow": {
@@ -658,6 +691,45 @@ class VisionApplication:
                     "trackingActive": tracking_active,
                     "canStart": not blockers and not calibrating_heading,
                     "blockers": blockers,
+                },
+            },
+        })
+
+    def _publish_preview_metrics(self, frame, frame_time):
+        if self.action_result_sink is None:
+            return
+        now = time.monotonic()
+        if now - self._last_web_metrics_t < 0.5:
+            return
+        self._last_web_metrics_t = now
+        height, width = frame.shape[:2]
+        self.action_result_sink({
+            "type": "system.metrics",
+            "metrics": {
+                "frame": {"width": int(width), "height": int(height)},
+                "frameLatencyMs": max(0.0, (time.time() - frame_time) * 1000.0),
+                "yolo": {
+                    "enabled": False,
+                    "loading": False,
+                    "ready": False,
+                    "error": None,
+                    "lastInferenceError": None,
+                    "loadSeconds": None,
+                    "inferFps": 0.0,
+                    "detections": [],
+                    "detectionCount": 0,
+                },
+                "overlays": dict(self.presentation.overlay_options),
+                "cameraFps": self.cam.measured_fps,
+                "visionFps": self._loop_fps,
+                "workflow": {
+                    "stage": "PREVIEW",
+                    "status": self.status,
+                    "targetDetected": False,
+                    "targetCount": 0,
+                    "trackingActive": False,
+                    "canStart": False,
+                    "blockers": ["视觉识别未启动"],
                 },
             },
         })

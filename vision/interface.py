@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+import re
+import shutil
+import subprocess
 import threading
 import time
 
@@ -23,23 +26,121 @@ class ExposureResult:
 
 
 def apply_manual_exposure(capture, delta):
+    return apply_manual_exposure_for_device(capture, delta, None)
+
+
+def _run_v4l2_ctl(device, *args):
+    binary = shutil.which("v4l2-ctl")
+    if binary is None:
+        return None
+    try:
+        return subprocess.run(
+            [binary, "-d", device, *args],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=1.5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _parse_v4l2_int_control(output, name):
+    pattern = re.compile(
+        rf"\b{re.escape(name)}\b.*?min=(-?\d+).*?max=(-?\d+).*?step=(-?\d+).*?value=(-?\d+)",
+        re.IGNORECASE,
+    )
+    match = pattern.search(output or "")
+    if not match:
+        return None
+    minimum, maximum, step, value = (int(group) for group in match.groups())
+    return {
+        "min": minimum,
+        "max": maximum,
+        "step": max(1, abs(step)),
+        "value": value,
+    }
+
+
+def _apply_v4l2_manual_exposure(device_index, delta):
+    if device_index is None:
+        return None
+    device = f"/dev/video{int(device_index)}"
+    listed = _run_v4l2_ctl(device, "--list-ctrls")
+    if listed is None:
+        return None
+    if listed.returncode != 0:
+        return ExposureResult(
+            "failed", False, delta, None, None, "exposure_unsupported",
+        )
+    controls = listed.stdout
+    if "exposure_auto" in controls:
+        _run_v4l2_ctl(device, "--set-ctrl", "exposure_auto=1")
+    if "auto_exposure" in controls:
+        _run_v4l2_ctl(device, "--set-ctrl", "auto_exposure=1")
+    control_name = None
+    exposure = None
+    for candidate in ("exposure_time_absolute", "exposure_absolute", "exposure"):
+        exposure = _parse_v4l2_int_control(controls, candidate)
+        if exposure is not None:
+            control_name = candidate
+            break
+    if exposure is None:
+        return ExposureResult(
+            "failed", False, delta, None, None, "exposure_unsupported",
+        )
+    span = max(1, exposure["max"] - exposure["min"])
+    step = max(exposure["step"], int(round(span * 0.05)))
+    previous = exposure["value"]
+    target = max(exposure["min"], min(exposure["max"], previous + int(delta) * step))
+    if target == previous:
+        target = max(exposure["min"], min(exposure["max"], previous + int(delta) * exposure["step"]))
+    applied = _run_v4l2_ctl(device, "--set-ctrl", f"{control_name}={target}")
+    if applied is None or applied.returncode != 0:
+        return ExposureResult(
+            "failed", True, delta, float(previous), float(previous),
+            "exposure_not_applied",
+        )
+    refreshed = _run_v4l2_ctl(device, "--list-ctrls")
+    actual = target
+    if refreshed is not None and refreshed.returncode == 0:
+        refreshed_exposure = _parse_v4l2_int_control(refreshed.stdout, control_name)
+        if refreshed_exposure is not None:
+            actual = refreshed_exposure["value"]
+    if actual == previous:
+        return ExposureResult(
+            "failed", True, delta, float(previous), float(actual),
+            "exposure_not_applied",
+        )
+    return ExposureResult("completed", True, delta, float(previous), float(actual))
+
+
+def apply_manual_exposure_for_device(capture, delta, device_index=None):
     try:
         previous = float(capture.get(cv2.CAP_PROP_EXPOSURE))
         if not math.isfinite(previous):
             previous = None
-        capture.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
-        target = (previous if previous is not None else 0.0) + delta
-        capture.set(cv2.CAP_PROP_EXPOSURE, target)
-        actual = float(capture.get(cv2.CAP_PROP_EXPOSURE))
-        if not math.isfinite(actual):
-            actual = None
-        if actual is None or previous is None or math.isclose(actual, previous, abs_tol=1e-6):
-            return ExposureResult(
-                "failed", True, delta, previous, actual,
-                "exposure_not_applied",
-            )
-        return ExposureResult("completed", True, delta, previous, actual)
+        for manual_value in (0.25, 1.0):
+            capture.set(cv2.CAP_PROP_AUTO_EXPOSURE, manual_value)
+            target = (previous if previous is not None else -6.0) + delta
+            capture.set(cv2.CAP_PROP_EXPOSURE, target)
+            actual = float(capture.get(cv2.CAP_PROP_EXPOSURE))
+            if not math.isfinite(actual):
+                actual = None
+            if actual is not None and previous is not None and not math.isclose(actual, previous, abs_tol=1e-6):
+                return ExposureResult("completed", True, delta, previous, actual)
+            previous = actual if actual is not None else previous
+        fallback = _apply_v4l2_manual_exposure(device_index, delta)
+        if fallback is not None:
+            return fallback
+        return ExposureResult(
+            "failed", True, delta, previous, previous,
+            "exposure_not_applied",
+        )
     except (cv2.error, OSError, RuntimeError, TypeError, ValueError):
+        fallback = _apply_v4l2_manual_exposure(device_index, delta)
+        if fallback is not None:
+            return fallback
         return ExposureResult(
             "failed", False, delta, None, None, "exposure_unsupported",
         )
@@ -47,6 +148,7 @@ def apply_manual_exposure(capture, delta):
 
 class CameraStream:
     def __init__(self, src=0):
+        self.src = src
         self.cap = cv2.VideoCapture(src, cv2.CAP_DSHOW)
         self.lock = threading.Lock()
 
@@ -80,7 +182,7 @@ class CameraStream:
 
     def adjust_exposure(self, delta):
         with self.lock:
-            result = apply_manual_exposure(self.cap, delta)
+            result = apply_manual_exposure_for_device(self.cap, delta, self.src)
             if result.status == "completed":
                 self.exposure_val = result.actual_value
                 print(f"[Camera] Manual exposure changed to {self.exposure_val}")
@@ -90,7 +192,8 @@ class CameraStream:
 
     def update(self):
         while not self.stopped:
-            ret, frame = self.cap.read()
+            with self.lock:
+                ret, frame = self.cap.read()
             if ret:
                 now = time.time()
                 now_monotonic = time.monotonic()
@@ -376,8 +479,11 @@ class MJPEGServer:
     def __init__(self, host="0.0.0.0", port=MJPEG_PORT, max_viewers=8):
         self.host = host
         self.port = port
-        self.frame = None
         self.lock = threading.Lock()
+        self.condition = threading.Condition(self.lock)
+        self.encoded_frame = None
+        self.frame_sequence = 0
+        self.frame_timestamp = 0.0
         self.max_viewers = max_viewers
         self._viewer_count = 0
         self._viewer_lock = threading.Lock()
@@ -395,7 +501,27 @@ class MJPEGServer:
             return Response(
                 self.generate(),
                 mimetype="multipart/x-mixed-replace; boundary=frame",
+                headers={
+                    "Cache-Control": "no-store, no-cache, must-revalidate, private, max-age=0, no-transform",
+                    "Pragma": "no-cache",
+                    "Expires": "0",
+                    "X-Accel-Buffering": "no",
+                },
+                direct_passthrough=True,
             )
+
+    @staticmethod
+    def _resize_for_stream(frame):
+        height, width = frame.shape[:2]
+        if width <= 0 or height <= 0:
+            return frame
+        scale = min(MJPEG_STREAM_WIDTH / width, MJPEG_STREAM_HEIGHT / height)
+        target = (
+            max(1, int(round(width * scale))),
+            max(1, int(round(height * scale))),
+        )
+        interpolation = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
+        return cv2.resize(frame, target, interpolation=interpolation)
 
     def update(self, frame):
         if frame is None:
@@ -404,40 +530,46 @@ class MJPEGServer:
         if now - self.last_update_t < (1.0 / MJPEG_MAX_FPS):
             return
         self.last_update_t = now
-        small_frame = cv2.resize(frame, (MJPEG_STREAM_WIDTH, MJPEG_STREAM_HEIGHT))
+        stream_frame = self._resize_for_stream(frame)
+        ok, jpg = cv2.imencode(
+            ".jpg",
+            stream_frame,
+            [int(cv2.IMWRITE_JPEG_QUALITY), MJPEG_JPEG_QUALITY],
+        )
+        if not ok:
+            return
         with self.lock:
-            self.frame = small_frame
+            self.encoded_frame = jpg.tobytes()
+            self.frame_sequence += 1
+            self.frame_timestamp = now
+            self.condition.notify_all()
 
     def generate(self):
         with self._viewer_lock:
             self._viewer_count += 1
             print(f"[MJPEG] Viewer connected; total={self._viewer_count}")
 
-        last_send_t = 0.0
-        min_interval = 1.0 / MJPEG_MAX_FPS
+        last_sequence = -1
         try:
             while True:
-                now = time.time()
-                wait = min_interval - (now - last_send_t)
-                if wait > 0:
-                    time.sleep(wait)
                 with self.lock:
-                    frame = None if self.frame is None else self.frame.copy()
-                if frame is None:
-                    time.sleep(0.01)
+                    self.condition.wait_for(
+                        lambda: self.encoded_frame is not None and self.frame_sequence != last_sequence,
+                        timeout=1.0,
+                    )
+                    frame = self.encoded_frame
+                    sequence = self.frame_sequence
+                    timestamp = self.frame_timestamp
+                if frame is None or sequence == last_sequence:
                     continue
-                ok, jpg = cv2.imencode(
-                    ".jpg",
-                    frame,
-                    [int(cv2.IMWRITE_JPEG_QUALITY), MJPEG_JPEG_QUALITY],
-                )
-                if not ok:
-                    continue
-                last_send_t = time.time()
+                last_sequence = sequence
                 yield (
                     b"--frame\r\n"
-                    b"Content-Type: image/jpeg\r\n\r\n"
-                    + jpg.tobytes()
+                    b"Content-Type: image/jpeg\r\n"
+                    + f"Content-Length: {len(frame)}\r\n".encode("ascii")
+                    + f"X-Fish-Frame-Seq: {sequence}\r\n".encode("ascii")
+                    + f"X-Fish-Frame-Time: {timestamp:.6f}\r\n\r\n".encode("ascii")
+                    + frame
                     + b"\r\n"
                 )
         except GeneratorExit:

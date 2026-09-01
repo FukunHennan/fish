@@ -1,8 +1,9 @@
 import unittest
+from unittest.mock import patch
 
 import cv2
 
-from interface import apply_manual_exposure
+from interface import apply_manual_exposure, apply_manual_exposure_for_device
 
 
 class FakeCapture:
@@ -48,6 +49,31 @@ class ExposureTests(unittest.TestCase):
         result = apply_manual_exposure(FakeCapture(apply=False), -1)
         self.assertEqual(result.status, "failed")
         self.assertEqual(result.error_code, "exposure_not_applied")
+
+    def test_v4l2_fallback_is_used_when_opencv_readback_does_not_change(self):
+        calls = []
+
+        class Completed:
+            def __init__(self, stdout="", returncode=0):
+                self.stdout = stdout
+                self.returncode = returncode
+
+        control_before = "exposure_auto 0x0 (menu) : min=0 max=3 default=3 value=3\nexposure_absolute 0x0 (int) : min=3 max=2031 step=1 default=250 value=100"
+        control_after = "exposure_auto 0x0 (menu) : min=0 max=3 default=3 value=1\nexposure_absolute 0x0 (int) : min=3 max=2031 step=1 default=250 value=201"
+
+        def fake_run(args, **_kwargs):
+            calls.append(args)
+            if "--list-ctrls" in args:
+                return Completed(control_after if len([c for c in calls if "--list-ctrls" in c]) > 1 else control_before)
+            return Completed()
+
+        with patch("interface.shutil.which", return_value="/usr/bin/v4l2-ctl"), patch("interface.subprocess.run", side_effect=fake_run):
+            result = apply_manual_exposure_for_device(FakeCapture(apply=False), 1, 0)
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.previous_value, 100)
+        self.assertEqual(result.actual_value, 201)
+        self.assertTrue(any("exposure_auto=1" in call for call in calls))
 
 
 if __name__ == "__main__":

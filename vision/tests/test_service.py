@@ -1,6 +1,14 @@
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 
-from service import CameraCatalog, CameraInfo, VisionService, enumerate_cameras
+from service import (
+    CameraCatalog,
+    CameraInfo,
+    VisionService,
+    _linux_v4l2_camera_names,
+    enumerate_cameras,
+)
 
 
 class FakeCapture:
@@ -30,6 +38,26 @@ class FakeCapture:
 
 
 class CameraEnumerationTests(unittest.TestCase):
+    def test_linux_v4l2_names_are_read_from_sysfs(self):
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            (root / "video0").mkdir()
+            (root / "video0" / "name").write_text(
+                "USB2.0 FHD UVC WebCam: USB2.0 F\n",
+                encoding="utf-8",
+            )
+            (root / "video1").mkdir()
+            (root / "video1" / "name").write_text("RERVISION\n", encoding="utf-8")
+
+            self.assertEqual(
+                _linux_v4l2_camera_names(max_index=3, root=root),
+                [
+                    "USB2.0 FHD UVC WebCam: USB2.0 F",
+                    "RERVISION",
+                    "摄像头 2",
+                ],
+            )
+
     def test_directshow_names_bound_the_number_of_indexes_probed(self):
         opened = []
 
@@ -89,6 +117,24 @@ class CameraEnumerationTests(unittest.TestCase):
 
         self.assertEqual(cameras, [])
         self.assertTrue(capture.released)
+
+    def test_duplicate_linux_uvc_nodes_are_collapsed(self):
+        captures = {
+            0: FakeCapture(True, 640, 480, 30),
+            1: FakeCapture(True, 640, 480, 30),
+        }
+
+        cameras = enumerate_cameras(
+            max_index=2,
+            open_capture=lambda index: captures[index],
+            name_provider=lambda: ["USB2.0 FHD UVC WebCam", "USB2.0 FHD UVC WebCam"],
+        )
+
+        self.assertEqual(
+            cameras,
+            [CameraInfo(index=0, name="USB2.0 FHD UVC WebCam", width=640, height=480, fps=30)],
+        )
+        self.assertTrue(all(capture.released for capture in captures.values()))
 
     def test_camera_catalog_reuses_expensive_enumeration_within_ttl(self):
         calls = []
@@ -180,6 +226,46 @@ class VisionServiceLifecycleTests(unittest.TestCase):
         for action_type in ("marker.select", "heading.select", "calibration.toggle"):
             with self.subTest(action_type=action_type):
                 self.assertTrue(service.handle_action({"type": action_type}))
+
+    def test_overlay_options_are_accepted_during_preview(self):
+        service = VisionService(runner_factory=lambda _index, _publish: lambda: None)
+        snapshot = service.create_session("camera-1", 1)
+
+        accepted = service.handle_session_action(
+            snapshot["sessionId"],
+            {"type": "overlay.set", "overlays": {"detections": False}},
+        )
+
+        self.assertTrue(accepted)
+        self.assertEqual(
+            service.next_action(),
+            {"type": "overlay.set", "overlays": {"detections": False}},
+        )
+
+    def test_processing_lifecycle_enqueues_runtime_switches(self):
+        service = VisionService(runner_factory=lambda _index, _publish: lambda: None)
+        snapshot = service.create_session("camera-1", 1)
+
+        service.start_processing(snapshot["sessionId"])
+        self.assertEqual(service.next_action(), "PROCESSING_START")
+
+        service.stop_processing(snapshot["sessionId"])
+        self.assertEqual(service.next_action(), "PROCESSING_STOP")
+
+    def test_exposure_is_accepted_during_preview(self):
+        service = VisionService(runner_factory=lambda _index, _publish: lambda: None)
+        snapshot = service.create_session("camera-1", 1)
+
+        accepted = service.handle_session_action(
+            snapshot["sessionId"],
+            {"type": "camera.exposure", "value": 1},
+        )
+
+        self.assertTrue(accepted)
+        self.assertEqual(
+            service.next_action(),
+            {"type": "camera.exposure", "value": 1},
+        )
 
     def test_stop_discards_pending_canvas_actions_before_restart(self):
         service = VisionService(runner_factory=lambda _index, _publish: lambda: None)

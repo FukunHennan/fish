@@ -3,7 +3,11 @@
 
 namespace {
 constexpr uint32_t kBlinkIntervalMs = 500;
-constexpr uint32_t kChaseIntervalMs = 160;
+constexpr uint32_t kConnectBlinkIntervalMs = 700;
+constexpr uint32_t kDiscoveryIntervalMs = 180;
+constexpr uint32_t kVisionIntervalMs = 130;
+constexpr uint32_t kOtaIntervalMs = 90;
+constexpr uint32_t kErrorBlinkIntervalMs = 140;
 uint8_t scaleChannel(uint8_t value, uint8_t brightness) {
     return (uint8_t)(((uint16_t)value * brightness + 127U) / 255U);
 }
@@ -59,10 +63,17 @@ void StatusLight::showSolid(uint8_t red, uint8_t green, uint8_t blue, bool enabl
     pixels_.show();
 }
 
-void StatusLight::showChase() {
+void StatusLight::showChase(uint8_t red, uint8_t green, uint8_t blue) {
     pixels_.clear();
     if (pixels_.numPixels() > 0) {
-        pixels_.setPixelColor(chaseIndex_ % pixels_.numPixels(), pixels_.Color(0, scaleChannel(255, brightness_), 0));
+        pixels_.setPixelColor(
+            chaseIndex_ % pixels_.numPixels(),
+            pixels_.Color(
+                scaleChannel(red, brightness_),
+                scaleChannel(green, brightness_),
+                scaleChannel(blue, brightness_)
+            )
+        );
         chaseIndex_ = (chaseIndex_ + 1) % pixels_.numPixels();
     }
     pixels_.show();
@@ -70,16 +81,42 @@ void StatusLight::showChase() {
 
 void StatusLight::update(uint32_t nowMs) {
     if (manual_) return;
-    const uint32_t interval = mode_ == StatusLightMode::Ready ? kChaseIntervalMs : kBlinkIntervalMs;
+    uint32_t interval = kBlinkIntervalMs;
+    if (mode_ == StatusLightMode::WifiConnecting) interval = kConnectBlinkIntervalMs;
+    else if (mode_ == StatusLightMode::Discovering) interval = kDiscoveryIntervalMs;
+    else if (mode_ == StatusLightMode::VisionControl) interval = kVisionIntervalMs;
+    else if (mode_ == StatusLightMode::Ota) interval = kOtaIntervalMs;
+    else if (mode_ == StatusLightMode::Error) interval = kErrorBlinkIntervalMs;
     if (lastUpdateMs_ != 0 && nowMs - lastUpdateMs_ < interval) return;
     lastUpdateMs_ = nowMs;
 
-    if (mode_ == StatusLightMode::Ready) {
-        showChase();
-        return;
+    switch (mode_) {
+        case StatusLightMode::Provisioning:
+            blinkOn_ = !blinkOn_;
+            showSolid(255, 0, 0, blinkOn_);
+            break;
+        case StatusLightMode::WifiConnecting:
+            blinkOn_ = !blinkOn_;
+            showSolid(0, 80, 255, blinkOn_);
+            break;
+        case StatusLightMode::Discovering:
+            showChase(255, 120, 0);
+            break;
+        case StatusLightMode::Ready:
+            showSolid(0, 220, 40, true);
+            break;
+        case StatusLightMode::ManualMotion:
+            showSolid(0, 90, 255, true);
+            break;
+        case StatusLightMode::VisionControl:
+            showChase(0, 220, 220);
+            break;
+        case StatusLightMode::Ota:
+            showChase(180, 0, 255);
+            break;
+        case StatusLightMode::Error:
+            blinkOn_ = !blinkOn_;
+            showSolid(255, 0, 0, blinkOn_);
+            break;
     }
-
-    blinkOn_ = !blinkOn_;
-    if (mode_ == StatusLightMode::Provisioning) showSolid(255, 0, 0, blinkOn_);
-    else showSolid(255, 160, 0, blinkOn_);
 }

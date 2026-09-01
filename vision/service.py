@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from queue import Empty, SimpleQueue
 from threading import RLock
 import math
@@ -59,6 +60,33 @@ def _directshow_camera_names():
         return []
 
 
+def _linux_v4l2_camera_names(max_index=8, root=Path("/sys/class/video4linux")):
+    names = []
+    for index in range(max_index):
+        name = ""
+        try:
+            name = (root / f"video{index}" / "name").read_text(encoding="utf-8").strip()
+        except OSError:
+            pass
+        names.append(name or f"摄像头 {index}")
+    return names
+
+
+def _linux_v4l2_camera_indexes(max_index=8, root=Path("/sys/class/video4linux")):
+    indexes = []
+    try:
+        candidates = list(root.glob("video*"))
+    except OSError:
+        return indexes
+    for candidate in candidates:
+        suffix = candidate.name.removeprefix("video")
+        if suffix.isdigit():
+            index = int(suffix)
+            if 0 <= index < max_index:
+                indexes.append(index)
+    return sorted(set(indexes))
+
+
 def _camera_info(index, name, capture):
     reported_fps = _safe_get(capture, cv2.CAP_PROP_FPS, 0.0)
     return CameraInfo(
@@ -80,14 +108,29 @@ def enumerate_cameras(
     name_provider=None,
     probe_attempts=5,
 ):
-    names = (name_provider or _directshow_camera_names)()
+    names_are_complete_device_list = False
+    if name_provider is not None:
+        names = name_provider()
+        names_are_complete_device_list = bool(names)
+    else:
+        names = _directshow_camera_names()
+        names_are_complete_device_list = bool(names)
+        if not names:
+            names = _linux_v4l2_camera_names(max_index=max_index)
+            linux_indexes = _linux_v4l2_camera_indexes(max_index=max_index)
+        else:
+            linux_indexes = []
     cameras = []
     # DirectShow already gives us the complete ordered device list on Windows.
     # Do not probe indexes beyond it: OpenCV emits scary "index out of range"
     # errors for every missing slot and makes an otherwise healthy scan noisy.
-    probe_count = min(max_index, len(names)) if names else max_index
+    probe_count = min(max_index, len(names)) if names_are_complete_device_list else max_index
+    probe_indexes = range(probe_count)
+    if not names_are_complete_device_list and "linux_indexes" in locals() and linux_indexes:
+        probe_indexes = linux_indexes
+    seen_capture_signatures = set()
 
-    for index in range(probe_count):
+    for index in probe_indexes:
         name = names[index] if index < len(names) else f"摄像头 {index}"
 
         if open_capture is None:
@@ -100,6 +143,10 @@ def enumerate_cameras(
                 continue
             try:
                 info = _camera_info(index, name, capture)
+                signature = (info.name, info.width, info.height, info.fps)
+                if signature in seen_capture_signatures:
+                    continue
+                seen_capture_signatures.add(signature)
                 cameras.append(info)
                 print(
                     f"[CameraCatalog] Found {name}: index={index}, "
@@ -135,7 +182,12 @@ def enumerate_cameras(
             if not readable:
                 continue
 
-            cameras.append(_camera_info(index, name, capture))
+            info = _camera_info(index, name, capture)
+            signature = (info.name, info.width, info.height, info.fps)
+            if signature in seen_capture_signatures:
+                continue
+            seen_capture_signatures.add(signature)
+            cameras.append(info)
         finally:
             _safe_release(capture)
 
@@ -160,6 +212,7 @@ class VisionService:
         "snapshot.capture",
         "camera.exposure",
         "camera.clahe",
+        "overlay.set",
         "system.stop",
     })
 
@@ -205,23 +258,32 @@ class VisionService:
             session = self._require_session(session_id)
             if session.state == VisionState.PREVIEWING:
                 session.transition(VisionState.PROCESSING)
+                self._actions.put("PROCESSING_START")
             return session.snapshot()
 
     def stop_processing(self, session_id):
         with self._lock:
             session = self._require_session(session_id)
+            was_tracking = session.state == VisionState.TRACKING
             if session.state == VisionState.TRACKING:
                 session.transition(VisionState.PROCESSING)
             if session.state == VisionState.PROCESSING:
                 session.transition(VisionState.PREVIEWING)
+            if was_tracking:
+                self._actions.put("STOP")
+            self._actions.put("PROCESSING_STOP")
             return session.snapshot()
 
     def handle_session_action(self, session_id, action):
         with self._lock:
             session = self._require_session(session_id)
-            if session.state not in (VisionState.PROCESSING, VisionState.TRACKING):
-                return False
             if not isinstance(action, dict) or action.get("type") not in self.ACTION_TYPES:
+                return False
+            if action.get("type") in ("overlay.set", "camera.exposure"):
+                allowed_states = (VisionState.PREVIEWING, VisionState.PROCESSING, VisionState.TRACKING)
+            else:
+                allowed_states = (VisionState.PROCESSING, VisionState.TRACKING)
+            if session.state not in allowed_states:
                 return False
             action = dict(action)
             if session.target_device_id:

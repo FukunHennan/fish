@@ -77,6 +77,8 @@ def create_runtime_state(
 from dataclasses import dataclass
 from functools import lru_cache
 import os
+import time
+from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 import cv2
@@ -915,6 +917,17 @@ class VisionPresentation:
         self.hud = hud
         self.trajectory = trajectory
         self.web_clean = web_clean
+        self.overlay_options = {
+            "detections": False,
+            "paths": False,
+        }
+
+    def set_overlay_options(self, options):
+        if not isinstance(options, dict):
+            return
+        for key in ("detections", "paths"):
+            if key in options:
+                self.overlay_options[key] = bool(options[key])
 
     def render(
         self,
@@ -938,11 +951,18 @@ class VisionPresentation:
     ):
         image = result.frame.copy()
         self._draw_selection(image, marker_roi, heading, result)
-        self._draw_paths(image, drawn_path)
+        if self.overlay_options.get("paths", True):
+            self._draw_paths(image, drawn_path)
         self._draw_calibration(image, calibration, result.corner_pixels)
-        self._draw_detection(image, result)
-        self._draw_reference(image, result)
-        self._draw_guidance(image, result, calibration.get("H"), decision)
+        if self.overlay_options.get("detections", True):
+            self._draw_detection(image, result)
+        self._draw_reference(
+            image,
+            result,
+            draw=self.overlay_options.get("detections", True),
+        )
+        if self.overlay_options.get("paths", True):
+            self._draw_guidance(image, result, calibration.get("H"), decision)
 
         prompt = self._prompt(
             result, calibration, marker_roi, heading, turn_session
@@ -989,7 +1009,47 @@ class VisionPresentation:
                 "RECORD": recording,
                 "CLAHE": clahe_enabled,
             })
+        self._draw_video_timing(image, result.frame_time)
         return image
+
+    def render_preview(
+        self,
+        image: np.ndarray,
+        frame_time: float,
+        *,
+        camera_fps: float,
+        loop_fps: float,
+    ) -> np.ndarray:
+        del camera_fps, loop_fps
+        preview = image.copy()
+        self._draw_video_timing(preview, frame_time)
+        return preview
+
+    @staticmethod
+    def _draw_video_timing(image: np.ndarray, frame_time: float) -> None:
+        captured = datetime.fromtimestamp(frame_time).strftime("%H:%M:%S.%f")[:-3]
+        latency_ms = max(0.0, (time.time() - frame_time) * 1000.0)
+        label = f"采集 {captured} · 延时 {latency_ms:.0f} ms"
+        text_width, text_height = measure_unicode_text(label, 12, bold=True)
+        height, width = image.shape[:2]
+        panel_width = min(max(1, width - 16), text_width + 18)
+        left = max(8, width - panel_width - 8)
+        top = 8
+        draw_translucent_panel(
+            image,
+            (left, top, left + panel_width, top + text_height + 12),
+            color=UiPalette.PANEL,
+            alpha=0.72,
+            radius=5,
+        )
+        draw_unicode_text(
+            image,
+            label,
+            (left + 9, top + 6),
+            12,
+            UiPalette.TEXT,
+            bold=True,
+        )
 
     def _draw_selection(self, image, marker_roi, heading, result):
         if marker_roi["selecting"] and marker_roi["start"] is not None:
@@ -1067,27 +1127,28 @@ class VisionPresentation:
             label = f"#{detection.get('trackId', '-')} {detection.get('color', 'UNKNOWN')} {float(detection.get('confidence', 0))*100:.0f}%"
             draw_unicode_text(image, label, (x1, max(3, y1 - 20)), 13, colour, bold=True, stroke_width=1)
 
-    def _draw_reference(self, image, result):
+    def _draw_reference(self, image, result, draw=True):
         if result.display_pixel is None:
             return
         cx, cy = result.display_pixel
-        colours = {
-            "RIGID_BODY": UiPalette.SUCCESS,
-            "MARKER": UiPalette.SUCCESS,
-            "PREDICTED": UiPalette.WARNING,
-            "ESTIMATED_FALLBACK": UiPalette.WARNING,
-        }
-        colour = colours.get(result.reference.source, UiPalette.DANGER)
-        cv2.rectangle(image, (cx - 15, cy - 15), (cx + 15, cy + 15), colour, 2)
-        cv2.circle(image, (cx, cy), 4, colour, -1)
-        text = (
-            f"{self.hud.SOURCE_NAMES.get(result.reference.source, result.reference.source)}　"
-            f"质量 {result.reference.quality * 100:.0f}%"
-        )
-        draw_unicode_text(
-            image, text, (cx + 20, max(3, cy - 24)),
-            13, colour, bold=True, stroke_width=1,
-        )
+        if draw:
+            colours = {
+                "RIGID_BODY": UiPalette.SUCCESS,
+                "MARKER": UiPalette.SUCCESS,
+                "PREDICTED": UiPalette.WARNING,
+                "ESTIMATED_FALLBACK": UiPalette.WARNING,
+            }
+            colour = colours.get(result.reference.source, UiPalette.DANGER)
+            cv2.rectangle(image, (cx - 15, cy - 15), (cx + 15, cy + 15), colour, 2)
+            cv2.circle(image, (cx, cy), 4, colour, -1)
+            text = (
+                f"{self.hud.SOURCE_NAMES.get(result.reference.source, result.reference.source)}　"
+                f"质量 {result.reference.quality * 100:.0f}%"
+            )
+            draw_unicode_text(
+                image, text, (cx + 20, max(3, cy - 24)),
+                13, colour, bold=True, stroke_width=1,
+            )
         if not self.trajectory:
             self.trajectory.append((cx, cy))
         else:
