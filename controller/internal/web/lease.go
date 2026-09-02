@@ -27,20 +27,26 @@ func newLeaseStore(ttl time.Duration) *leaseStore {
 	return &leaseStore{ttl: ttl, leases: map[string]controlLease{}}
 }
 
-func (l *leaseStore) cleanupLocked(now time.Time) {
+func (l *leaseStore) cleanupLocked(now time.Time) []string {
+	var expired []string
 	for id, lease := range l.leases {
 		if now.After(lease.ExpiresAt) {
 			delete(l.leases, id)
+			expired = append(expired, id)
 		}
 	}
+	return expired
 }
 
 func (l *leaseStore) snapshot() map[string]controlLease {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.cleanupLocked(time.Now())
+	now := time.Now()
 	out := make(map[string]controlLease, len(l.leases))
 	for id, lease := range l.leases {
+		if now.After(lease.ExpiresAt) {
+			continue
+		}
 		out[id] = lease
 	}
 	return out
@@ -64,6 +70,34 @@ func (l *leaseStore) acquire(deviceID string, user authUser, mode string, force 
 	}
 	l.leases[deviceID] = lease
 	return lease, true
+}
+
+func (l *leaseStore) acquireExclusive(deviceID string, user authUser, mode string, force bool) (controlLease, []string, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := time.Now()
+	l.cleanupLocked(now)
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode == "" {
+		mode = "manual"
+	}
+	if current, ok := l.leases[deviceID]; ok && current.OwnerID != user.ID && !force {
+		return current, nil, false
+	}
+	released := make([]string, 0, 1)
+	for id, lease := range l.leases {
+		if id == deviceID || lease.OwnerID != user.ID {
+			continue
+		}
+		delete(l.leases, id)
+		released = append(released, id)
+	}
+	lease := controlLease{
+		DeviceID: deviceID, OwnerID: user.ID, OwnerName: user.Name, OwnerEmail: user.Email,
+		Mode: mode, AcquiredAt: now, ExpiresAt: now.Add(l.ttl), LastCommandAt: now,
+	}
+	l.leases[deviceID] = lease
+	return lease, released, true
 }
 
 func (l *leaseStore) acquireBot(deviceID, botName, mode string) (controlLease, bool) {
@@ -106,6 +140,12 @@ func (l *leaseStore) touch(deviceID string, user authUser) bool {
 	current.ExpiresAt = now.Add(l.ttl)
 	l.leases[deviceID] = current
 	return true
+}
+
+func (l *leaseStore) expire() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.cleanupLocked(time.Now())
 }
 
 func (l *leaseStore) touchBot(deviceID, botName string) bool {
