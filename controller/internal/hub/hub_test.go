@@ -1,14 +1,28 @@
 package hub
 
 import (
+	"sync"
 	"testing"
 	"time"
 )
 
-type fakeConn struct{ sent []any }
+type fakeConn struct {
+	mu   sync.Mutex
+	sent []any
+}
 
-func (f *fakeConn) WriteJSON(v any) error { f.sent = append(f.sent, v); return nil }
-func (f *fakeConn) Close() error          { return nil }
+func (f *fakeConn) WriteJSON(v any) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.sent = append(f.sent, v)
+	return nil
+}
+func (f *fakeConn) Close() error { return nil }
+func (f *fakeConn) count() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.sent)
+}
 
 func TestRegisterAndRouteCommand(t *testing.T) {
 	h := New()
@@ -55,6 +69,46 @@ func TestDeviceCanRegisterAgainAfterDisconnect(t *testing.T) {
 	}
 }
 
+func TestHubKeepsRegistrationOrderAcrossStateUpdatesAndReconnect(t *testing.T) {
+	h := New()
+	first := &fakeConn{}
+	second := &fakeConn{}
+	h.Register(Device{ID: "fish-b"}, first)
+	h.Register(Device{ID: "fish-a"}, second)
+	h.Update("fish-b", map[string]any{
+		"uptimeMs": 100.0, "lastControlMs": 80.0, "batterySampleAgeMs": 10.0, "rssi": -45.0,
+	})
+	if devices := h.List(); len(devices) != 2 || devices[0].ID != "fish-b" || devices[1].ID != "fish-a" {
+		t.Fatalf("设备状态更新不应改变列表顺序: %+v", devices)
+	}
+	h.Remove("fish-b", first)
+	h.Register(Device{ID: "fish-b"}, &fakeConn{})
+	if devices := h.List(); len(devices) != 2 || devices[0].ID != "fish-b" || devices[1].ID != "fish-a" {
+		t.Fatalf("设备重新上线后的顺序异常: %+v", devices)
+	}
+}
+
+func TestHeartbeatOnlyUpdateDoesNotNotifyDashboard(t *testing.T) {
+	h := New()
+	h.Register(Device{ID: "fish-1"}, &fakeConn{})
+	updates, unsubscribe := h.Subscribe()
+	defer unsubscribe()
+	h.Update("fish-1", map[string]any{
+		"uptimeMs": 100.0, "lastControlMs": 80.0, "batterySampleAgeMs": 10.0, "rssi": -45.0,
+	})
+	select {
+	case <-updates:
+		t.Fatal("只有心跳字段变化时不应推送设备事件")
+	default:
+	}
+	h.Update("fish-1", map[string]any{"mode": 2.0})
+	select {
+	case <-updates:
+	case <-time.After(time.Second):
+		t.Fatal("可见设备状态变化没有推送设备事件")
+	}
+}
+
 func TestSendOnlyRequiresExactlyOneConnectedDevice(t *testing.T) {
 	h := New()
 	first := &fakeConn{}
@@ -76,7 +130,7 @@ func TestSendAndWaitClosesCommandLoop(t *testing.T) {
 	c := &fakeConn{}
 	h.Register(Device{ID: "fish-1"}, c)
 	go func() {
-		for len(c.sent) == 0 {
+		for c.count() == 0 {
 			time.Sleep(time.Millisecond)
 		}
 		h.ResolveCommandResult(map[string]any{"type": "command.result", "requestId": "req-1", "success": true})
@@ -84,5 +138,74 @@ func TestSendAndWaitClosesCommandLoop(t *testing.T) {
 	ack, sent, acknowledged := h.SendAndWait("fish-1", "req-1", map[string]any{"type": "command"}, time.Second)
 	if !sent || !acknowledged || ack["success"] != true {
 		t.Fatalf("command loop did not close: sent=%v acknowledged=%v ack=%#v", sent, acknowledged, ack)
+	}
+}
+
+type blockingConn struct {
+	mu      sync.Mutex
+	sent    []any
+	started chan struct{}
+	release chan struct{}
+	first   bool
+}
+
+func (c *blockingConn) WriteJSON(v any) error {
+	c.mu.Lock()
+	first := c.first
+	if first {
+		c.first = false
+		close(c.started)
+	}
+	c.mu.Unlock()
+	if first {
+		<-c.release
+	}
+	c.mu.Lock()
+	c.sent = append(c.sent, v)
+	c.mu.Unlock()
+	return nil
+}
+func (c *blockingConn) Close() error { return nil }
+
+func TestSendLatestKeepsOnlyNewestPendingCommand(t *testing.T) {
+	h := New()
+	c := &blockingConn{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+		first:   true,
+	}
+	h.Register(Device{ID: "fish-1"}, c)
+
+	if !h.SendLatest("fish-1", map[string]any{"sequence": 1}) {
+		t.Fatal("首个实时命令没有进入队列")
+	}
+	select {
+	case <-c.started:
+	case <-time.After(time.Second):
+		t.Fatal("实时写入循环没有启动")
+	}
+	if !h.SendLatest("fish-1", map[string]any{"sequence": 2}) ||
+		!h.SendLatest("fish-1", map[string]any{"sequence": 3}) {
+		t.Fatal("后续实时命令没有进入队列")
+	}
+	close(c.release)
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		c.mu.Lock()
+		count := len(c.sent)
+		var last map[string]any
+		if count > 0 {
+			last, _ = c.sent[count-1].(map[string]any)
+		}
+		snapshot := append([]any(nil), c.sent...)
+		c.mu.Unlock()
+		if count == 2 && last["sequence"] == 3 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("实时命令没有只保留最新待发送状态: %#v", snapshot)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }

@@ -1,14 +1,63 @@
-"""RoboFish transport and the data-only tracking control session."""
+"""RoboFish transport and the server-side tracking control session."""
 
 from __future__ import annotations
 
 import json
+import os
 import queue
 import threading
 import time
 import urllib.request
+from dataclasses import dataclass
 
-import numpy as np
+
+@dataclass
+class MotionPidController:
+    cross_kp: float = 8.0
+    cross_ki: float = 0.4
+    cross_kd: float = 1.2
+    heading_kp: float = 0.12
+    curve_feed_forward: float = 5.0
+    cruise_frequency: float = 2.5
+    cruise_amplitude: float = 28.0
+    slow_distance: float = 0.50
+    stop_distance: float = 0.10
+
+    def __post_init__(self):
+        self.reset()
+
+    def reset(self):
+        self.integral = 0.0
+        self.previous_error = 0.0
+        self.last_update = None
+
+    def update(self, *, cross_track_error, heading_error_deg, distance_to_target,
+               curvature, brake, now):
+        if self.last_update is None:
+            dt = 0.1
+        else:
+            dt = now - self.last_update
+            if dt <= 0.0:
+                dt = 0.1
+        self.last_update = now
+        self.integral += cross_track_error * dt
+        derivative = (cross_track_error - self.previous_error) / dt
+        self.previous_error = cross_track_error
+        steering = (
+            self.cross_kp * cross_track_error
+            + self.cross_ki * self.integral
+            + self.cross_kd * derivative
+            + self.heading_kp * heading_error_deg
+            + self.curve_feed_forward * curvature
+        )
+        scale = distance_to_target / self.slow_distance
+        stopped = brake and distance_to_target <= self.stop_distance
+        return {
+            "mode": "stop" if stopped else "forward",
+            "frequency": 0.0 if stopped else self.cruise_frequency * scale,
+            "amplitude": 0.0 if stopped else self.cruise_amplitude * scale,
+            "bias": 0.0 if stopped else -steering,
+        }
 
 class RoboFishComm:
     def __init__(self, controller_url="http://127.0.0.1:8081/api/vision/device-command"):
@@ -26,9 +75,10 @@ class RoboFishComm:
         self._session_id = ""
         self._motion_enabled = False
         self._device_id = ""
+        self._motion_pid = MotionPidController()
         self.thread = threading.Thread(target=self._worker_loop, daemon=True)
         self.thread.start()
-        print(f"Vision control routed through Go controller -> {self.base_url}")
+        print(f"Vision motion routed through Go controller -> {self.base_url}")
 
     def _post(self, payload, timeout=0.5):
         payload = dict(payload)
@@ -44,42 +94,32 @@ class RoboFishComm:
             },
             method="POST",
         )
+        internal_token = os.environ.get("FISH_VISION_INTERNAL_TOKEN", "").strip()
+        if internal_token:
+            request.add_header("X-Fish-Vision-Internal", internal_token)
         with urllib.request.urlopen(request, timeout=timeout) as response:
             result = json.loads(response.read().decode("utf-8"))
         if not result.get("sent"):
-            raise RuntimeError("没有唯一在线机器鱼可接收视觉命令")
+            raise RuntimeError("没有唯一在线机器鱼可接收运动命令")
         if not result.get("acknowledged"):
             raise RuntimeError(result.get("message") or "机器鱼响应超时")
         if not result.get("success"):
             code = result.get("code") or "DEVICE_REJECTED"
-            message = result.get("message") or "机器鱼拒绝执行视觉命令"
+            message = result.get("message") or "机器鱼拒绝执行运动命令"
             raise RuntimeError(f"{code}: {message}")
         return result
 
     def set_device_id(self, device_id):
         self._device_id = str(device_id or "").strip()
 
-    def _request_vision_pid(
-        self,
-        sequence,
-        x_error_m,
-        y_error_m,
-        speed_mps,
-        heading_error_deg,
-        path_curvature_per_m,
-        brake_request,
-        timeout=0.3,
-    ):
+    def _request_motion(self, mode, frequency, amplitude, bias, timeout=0.3):
         return self._post({
-            "operation": "update",
+            "operation": "motion",
             "sessionId": self._session_id,
-            "sequence": int(sequence),
-            "crossTrackError": float(x_error_m),
-            "headingErrorDeg": float(heading_error_deg),
-            "distanceToTarget": float(y_error_m),
-            "speed": float(speed_mps),
-            "curvature": float(path_curvature_per_m),
-            "brake": bool(brake_request),
+            "mode": str(mode),
+            "frequency": float(frequency),
+            "amplitude": float(amplitude),
+            "bias": float(bias),
         }, timeout=timeout)
 
     def _worker_loop(self):
@@ -92,21 +132,18 @@ class RoboFishComm:
                 with self._request_lock:
                     if not self._command_is_current(params):
                         continue
-                    if params.get("kind") == "vision_pid":
+                    if params.get("kind") == "motion":
                         request_started = time.perf_counter()
-                        payload = self._request_vision_pid(
-                            params["seq"],
-                            params["x_error"],
-                            params["y_error"],
-                            params["speed"],
-                            params["heading_error"],
-                            params["path_curvature"],
-                            params["brake"],
+                        payload = self._request_motion(
+                            params["mode"],
+                            params["frequency"],
+                            params["amplitude"],
+                            params["bias"],
                             timeout=0.3,
                         )
                         latency_ms = (time.perf_counter() - request_started) * 1000.0
                         print(
-                            f"[VISION Forwarded] seq={params['seq']} "
+                            f"[MOTION Forwarded] seq={params['seq']} "
                             f"RTT={latency_ms:.1f}ms"
                         )
                     else:
@@ -118,11 +155,10 @@ class RoboFishComm:
                     self.mcu_hz = 0.9 * self.mcu_hz + 0.1 * (1.0 / dt)
                 self._last_send_t = now
             except Exception as error:
-                if params.get("kind") == "vision_pid":
+                if params.get("kind") == "motion":
                     print(
-                        f"[VISION ACK Failed] seq={params.get('seq', '-')} "
-                        f"x={float(params.get('x_error', 0.0)):+.4f}m "
-                        f"y={float(params.get('y_error', 0.0)):.4f}m "
+                        f"[MOTION ACK Failed] seq={params.get('seq', '-')} "
+                        f"mode={params.get('mode', '-')} "
                         f"error={error}"
                     )
                 else:
@@ -134,7 +170,7 @@ class RoboFishComm:
         return round(self.mcu_hz, 1)
 
     def _command_is_current(self, params):
-        if params.get("kind") != "vision_pid":
+        if params.get("kind") != "motion":
             return True
         with self._state_lock:
             return (
@@ -151,11 +187,13 @@ class RoboFishComm:
 
     def _send_async(self, params):
         now = time.time()
-        is_stop = params.get("action") == "stop"
+        is_stop = params.get("action") == "stop" or (
+            params.get("kind") == "motion" and params.get("mode") == "stop"
+        )
         if not is_stop and (now - self._last_cmd_t < 0.1):
             return False
         self._last_cmd_t = now
-        if params.get("kind") == "vision_pid":
+        if params.get("kind") == "motion":
             with self._state_lock:
                 if not self._motion_enabled:
                     return False
@@ -185,6 +223,7 @@ class RoboFishComm:
             self._control_session += 1
             session = self._control_session
             self._motion_enabled = False
+        self._motion_pid.reset()
         self._clear_queue()
         try:
             with self._request_lock:
@@ -208,7 +247,7 @@ class RoboFishComm:
             return False
         try:
             self._post({"operation": "calibrate-forward", "sessionId": self._session_id, "durationMs": int(duration_ms)}, timeout=1.0)
-            print("[Vision Calibration] ESP32 forward preset started")
+            print("[Vision Calibration] Server forward preset started")
             return True
         except Exception as error:
             print(f"[Vision Calibration] Forward preset failed: {error}")
@@ -224,6 +263,7 @@ class RoboFishComm:
         with self._state_lock:
             self._control_session += 1
             self._motion_enabled = False
+        self._motion_pid.reset()
         self._last_params = None
         self._clear_queue()
         try:
@@ -248,26 +288,26 @@ class RoboFishComm:
         path_curvature_per_m=0.0,
         steering_demand=0.0,
     ):
-        """Send calibrated errors; the ESP32 calculates both X and Y PID."""
+        """Calculate motion on the server and send final servo parameters."""
         self.vision_seq = (self.vision_seq + 1) & 0x7FFFFFFF
+        motion = self._motion_pid.update(
+            cross_track_error=float(cross_m),
+            heading_error_deg=float(heading_error_deg),
+            distance_to_target=float(dist_m),
+            curvature=float(path_curvature_per_m),
+            brake=bool(brake_request),
+            now=time.monotonic(),
+        )
         queued = self._send_async({
-            "kind": "vision_pid",
+            "kind": "motion",
             "seq": self.vision_seq,
-            "x_error": float(np.clip(cross_m, -5.0, 5.0)),
-            "y_error": float(np.clip(dist_m, 0.0, 5.0)),
-            "speed": float(np.clip(speed_mps, 0.0, 5.0)),
-            "heading_error": float(np.clip(heading_error_deg, -180.0, 180.0)),
-            "path_curvature": float(np.clip(path_curvature_per_m, -10.0, 10.0)),
-            "brake": bool(brake_request),
+            **motion,
         })
         if queued:
             print(
-                f"[VISION Queued] seq={self.vision_seq} "
-                f"x={cross_m:+.3f}m y={dist_m:.3f}m "
-                f"v={speed_mps:.2f}m/s cross={cross_track_m:.2f}m "
-                f"heading={heading_error_deg:+.0f}deg "
-                f"curvature={path_curvature_per_m:+.2f}/m "
-                f"steering={steering_demand:+.2f} "
+                f"[MOTION Queued] seq={self.vision_seq} "
+                f"mode={motion['mode']} frequency={motion['frequency']:.3f} "
+                f"amplitude={motion['amplitude']:.3f} bias={motion['bias']:+.3f} "
                 f"brake={'yes' if brake_request else 'no'}"
             )
         return queued

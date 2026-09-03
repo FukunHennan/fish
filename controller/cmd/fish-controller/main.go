@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"fish-controller/internal/config"
 	"fish-controller/internal/diagnostics"
 	"fish-controller/internal/discovery"
@@ -73,6 +74,10 @@ func main() {
 	}
 	log.Printf("vision Python: %s (%s)", python.Executable, python.Source)
 	diag.Logger.Info("python_resolved", "executable", python.Executable, "source", python.Source)
+	token := sha256.Sum256(append([]byte("fish-vision-internal-v1\n"), cfg.DeploymentKey...))
+	if os.Getenv("FISH_VISION_INTERNAL_TOKEN") == "" {
+		_ = os.Setenv("FISH_VISION_INTERNAL_TOKEN", fmt.Sprintf("%x", token))
+	}
 
 	visionStart := time.Now()
 	visionManager, err := visionprocess.Ensure(

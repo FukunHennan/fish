@@ -333,6 +333,7 @@ func (s *server) ota(w http.ResponseWriter, r *http.Request) {
 	}
 	var input struct {
 		DeviceID string `json:"deviceId"`
+		Name     string `json:"name"`
 	}
 	if json.NewDecoder(r.Body).Decode(&input) != nil || input.DeviceID == "" {
 		http.Error(w, "设备参数无效", http.StatusBadRequest)
@@ -353,6 +354,17 @@ func (s *server) ota(w http.ResponseWriter, r *http.Request) {
 			"sha256": info["sha256"],
 			"size":   info["size"],
 		},
+	}
+	if strings.TrimSpace(input.Name) == "" {
+		for _, device := range s.hub.List() {
+			if device.ID == input.DeviceID {
+				input.Name = device.Name
+				break
+			}
+		}
+	}
+	if name := strings.TrimSpace(input.Name); name != "" {
+		message["payload"].(map[string]any)["name"] = name
 	}
 	ack, sent, acknowledged := s.hub.SendAndWait(input.DeviceID, requestID, message, 30*time.Second)
 	w.Header().Set("Content-Type", "application/json")
@@ -438,6 +450,25 @@ func (s *server) visionDeviceCommand(w http.ResponseWriter, r *http.Request) {
 			"requestId": requestID, "message": "vision control requires a target device ID or exactly one online device",
 		})
 		return
+	}
+	if command.Operation == "motion" {
+		command.Mode = strings.ToLower(strings.TrimSpace(command.Mode))
+		if !isMotionMode(command.Mode) || command.Mode == "stop" {
+			http.Error(w, "视觉运动模式无效", http.StatusBadRequest)
+			return
+		}
+		if command.Frequency < 0.3 || command.Frequency > 5 || command.Amplitude < 0 || command.Amplitude > 90 || command.Bias < -90 || command.Bias > 90 {
+			http.Error(w, "视觉运动参数无效", http.StatusBadRequest)
+			return
+		}
+		// Vision may request a direction, but the controller owns the final
+		// center and amplitude geometry for every control path.
+		command.Frequency, command.Amplitude, command.Bias, _ =
+			s.applyMotionGeometry(deviceID, command.Mode, command.Frequency, command.Amplitude, 0, false, nil)
+		payload["mode"] = command.Mode
+		payload["frequency"] = command.Frequency
+		payload["amplitude"] = command.Amplitude
+		payload["bias"] = command.Bias
 	}
 	if s.authActive() {
 		if command.Operation == "start" || command.Operation == "calibrate-forward" || command.Operation == "motion" {
@@ -716,7 +747,7 @@ func (s *server) stopDevice(deviceID string) bool {
 		"command": "motion.set",
 		"payload": map[string]any{
 			"deviceId": deviceID, "controlSource": "lease",
-			"mode": "stop", "frequency": 0.3, "amplitude": 0.0,
+			"mode": "stop", "frequency": 0.3, "amplitude": 0.0, "bias": 0.0,
 		},
 	}
 	_, sent, _ := s.hub.SendAndWait(deviceID, requestID, message, 700*time.Millisecond)
@@ -738,6 +769,15 @@ func motionModeNumber(mode string) float64 {
 		return 4
 	default:
 		return 0
+	}
+}
+
+func isMotionMode(mode string) bool {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "stop", "idle", "forward", "left", "right":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -791,6 +831,11 @@ func centerSwingForMode(profile motionCalibrationProfile, mode string) (float64,
 		}
 		if mode == "forward" {
 			swing /= 2
+		} else if mode == "left" || mode == "right" {
+			// Both turns use half of the smaller straight-side offset. Computing
+			// available swing around each turn center made left/right asymmetric
+			// when the calibrated straight center was not 90 degrees.
+			swing = balancedTurnOffset
 		}
 		return turnCenter, swing, true
 	}
@@ -807,6 +852,14 @@ func centerSwingForMode(profile motionCalibrationProfile, mode string) (float64,
 		return turnCenter, 50 - offset, true
 	}
 	return 0, 0, false
+}
+
+func motionStraightCenter(profile motionCalibrationProfile) float64 {
+	if profile.ServoMax != 0 || profile.StraightCenter != 0 || profile.ForwardFrequency != 0 {
+		_, _, center := profileServoRange(profile)
+		return center
+	}
+	return clampMotionValue(profile.CenterDeg, 0, 180, 90)
 }
 
 func defaultMotionProfile() motionCalibrationProfile {
@@ -858,7 +911,9 @@ func (s *server) applyMotionGeometry(deviceID, mode string, frequency, amplitude
 		amplitude = maxSwing
 	}
 	if !hasBias {
-		bias = center - 90
+		// The firmware stores the straight center as its neutral position.
+		// Motion bias is therefore relative to that calibrated center, not 90°.
+		bias = center - motionStraightCenter(profile)
 		if bias < -90 {
 			bias = -90
 		}
@@ -937,6 +992,10 @@ func (s *server) command(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	mode := strings.ToLower(x.Mode)
+	if mode != "center" && !isMotionMode(mode) {
+		http.Error(w, "运动模式无效", http.StatusBadRequest)
+		return
+	}
 	if mode != "stop" && s.authActive() && !s.leases.touch(x.DeviceID, user) && !canAdmin(user) {
 		w.WriteHeader(http.StatusConflict)
 		_ = json.NewEncoder(w).Encode(map[string]any{"sent": false, "acknowledged": false, "success": false, "message": "请先获取这条鱼的控制权"})
@@ -953,6 +1012,15 @@ func (s *server) command(w http.ResponseWriter, r *http.Request) {
 		"deviceId": x.DeviceID, "controlSource": user.Email,
 		"mode": mode, "frequency": x.Frequency,
 		"amplitude": x.Amplitude,
+	}
+	if mode == "stop" {
+		// A stop is an explicit neutral command. Never inherit the previous turn bias.
+		x.Frequency = 0.3
+		x.Amplitude = 0
+		bias = 0
+		hasBias = true
+		payload["frequency"] = x.Frequency
+		payload["amplitude"] = x.Amplitude
 	}
 	if hasBias {
 		payload["bias"] = bias
@@ -1003,6 +1071,7 @@ func (s *server) realtimeCommand(w http.ResponseWriter, r *http.Request) {
 		DeviceID, Mode         string
 		Frequency, Amplitude   float64
 		AmplitudePercent, Bias *float64
+		Sequence               uint64
 	}
 	if json.NewDecoder(r.Body).Decode(&x) != nil {
 		http.Error(w, "请求格式错误", http.StatusBadRequest)
@@ -1016,6 +1085,10 @@ func (s *server) realtimeCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	mode := strings.ToLower(x.Mode)
+	if !isMotionMode(mode) {
+		http.Error(w, "运动模式无效", http.StatusBadRequest)
+		return
+	}
 	if mode != "stop" && s.authActive() &&
 		!s.leases.touch(x.DeviceID, user) && !canAdmin(user) {
 		w.WriteHeader(http.StatusConflict)
@@ -1029,6 +1102,13 @@ func (s *server) realtimeCommand(w http.ResponseWriter, r *http.Request) {
 	hasBias := x.Bias != nil
 	if hasBias {
 		bias = *x.Bias
+	}
+	if mode == "stop" {
+		// Stop is always an explicit neutral command; never inherit a turn bias.
+		x.Frequency = 0.3
+		x.Amplitude = 0
+		bias = 0
+		hasBias = true
 	}
 	x.Frequency, x.Amplitude, bias, hasBias =
 		s.applyMotionGeometry(x.DeviceID, mode, x.Frequency, x.Amplitude, bias, hasBias, x.AmplitudePercent)
@@ -1045,11 +1125,11 @@ func (s *server) realtimeCommand(w http.ResponseWriter, r *http.Request) {
 		"type": "command", "requestId": requestID, "deviceId": x.DeviceID,
 		"command": "motion.set", "payload": payload,
 	}
-	if !s.hub.SendLatest(x.DeviceID, message) {
+	if !s.hub.SendLatestOrdered(x.DeviceID, x.Sequence, message) {
 		w.WriteHeader(http.StatusConflict)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"sent": false, "queued": false, "success": false,
-			"requestId": requestID, "message": "device offline",
+			"requestId": requestID, "message": "实时命令已过期或设备离线",
 		})
 		return
 	}

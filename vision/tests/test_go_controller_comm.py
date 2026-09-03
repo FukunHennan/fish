@@ -62,12 +62,12 @@ class GoControllerCommTests(unittest.TestCase):
         comm.stopped = True
         comm.thread.join(timeout=1)
 
-        self.assertEqual([item["operation"] for item in CaptureHandler.messages], ["start", "update", "stop"])
-        update = CaptureHandler.messages[1]
-        self.assertEqual(update["sequence"], 1)
-        self.assertEqual(update["crossTrackError"], 0.2)
-        self.assertEqual(update["headingErrorDeg"], -12.0)
-        self.assertEqual(update["curvature"], 0.4)
+        self.assertEqual([item["operation"] for item in CaptureHandler.messages], ["start", "motion", "stop"])
+        motion = CaptureHandler.messages[1]
+        self.assertEqual(motion["mode"], "forward")
+        self.assertAlmostEqual(motion["frequency"], 4.0)
+        self.assertAlmostEqual(motion["amplitude"], 44.8)
+        self.assertAlmostEqual(motion["bias"], -4.568)
 
     def test_device_rejection_does_not_enable_vision_motion(self):
         CaptureHandler.response = {

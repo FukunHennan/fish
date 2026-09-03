@@ -9,6 +9,7 @@ controller/frontend/node_modules
 controller/internal/web/dist
 controller/.runtime/
 config/deployment.json
+config/frpc.toml
 .superpowers/
 
 # Local runtime output and generated binaries

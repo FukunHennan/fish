@@ -1,0 +1,13 @@
+serverAddr = "your-frp-server.example.com"
+serverPort = 7000
+
+[auth]
+method = "token"
+token = "change-me"
+
+[[proxies]]
+name = "fish-controller-web"
+type = "http"
+localIP = "127.0.0.1"
+localPort = 8081
+customDomains = ["fish.example.com"]

@@ -12,14 +12,14 @@ struct MotionSnapshot {
 class MotionState {
 public:
     MotionState(float frequency, float amplitude, float turnAmount);
-    bool setTuning(float frequency, float amplitude);
+    void setTuning(float frequency, float amplitude);
+    void setNeutralCenter(float center);
     void setMode(MotionMode mode);
-    bool setBias(float bias);
+    void setBias(float bias);
     void safeStop();
     MotionSnapshot snapshot() const;
     float angleAt(float phase) const;
 private:
     MotionSnapshot value_;
-    float turnAmount_;
-    bool customBias_ = false;
+    float neutralCenter_ = 90.0f;
 };

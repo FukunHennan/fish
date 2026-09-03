@@ -74,6 +74,27 @@ class WebActionTranslationTests(unittest.TestCase):
             translate_web_action({"type": "path.draw", "points": [[1, 2]]})
         )
 
+    def test_exposure_keeps_increment_buttons_and_accepts_absolute_slider_values(self):
+        self.assertEqual(
+            translate_web_action({"type": "camera.exposure", "value": -1}),
+            "EXP_DOWN",
+        )
+        self.assertEqual(
+            translate_web_action({
+                "type": "camera.exposure",
+                "mode": "absolute",
+                "value": 501,
+            }),
+            ("SET_EXPOSURE", 501.0),
+        )
+        self.assertIsNone(
+            translate_web_action({
+                "type": "camera.exposure",
+                "mode": "absolute",
+                "value": "501",
+            })
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

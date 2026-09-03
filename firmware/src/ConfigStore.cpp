@@ -6,7 +6,9 @@
 bool ConfigStore::load(DeviceConfig& c) {
     Preferences p; if (!p.begin("fishcfg", true)) return false;
     c.ssid=p.getString("ssid"); c.password=p.getString("pass"); c.controllerHost=p.getString("host");
-    c.controllerPort=p.getUShort("port",8081); c.displayName=p.getString("name","机器鱼"); p.end();
+    c.controllerPort=p.getUShort("port",8081); c.displayName=p.getString("name","");
+    if(c.displayName.length()==0)c.displayName="机器鱼";
+    c.servoCenter=p.getFloat("center",90.0f); p.end();
     applyFactoryWifiDefaults(c);
     return c.valid();
 }

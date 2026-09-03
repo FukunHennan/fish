@@ -22,7 +22,7 @@ proof = HMAC-SHA256(
 然后注册：
 
 ```json
-{"type":"register","protocolVersion":1,"deviceId":"A4:CF:12:34:56:78","proof":"64位十六进制HMAC","name":"机器鱼1号","firmwareVersion":"1.1.0","ip":"192.168.1.31","capabilities":["motion","vision","ota"]}
+{"type":"register","protocolVersion":1,"deviceId":"A4:CF:12:34:56:78","proof":"64位十六进制HMAC","name":"机器鱼1号","firmwareVersion":"1.3.0","ip":"192.168.1.31","capabilities":["motion","ota"]}
 ```
 
 控制器返回 `{"type":"register.result","success":true}`。nonce 只用于当前连接，不能重放；注册失败或版本不支持时关闭连接，设备在注册成功前不得执行命令。部署密钥不得出现在浏览器、日志或 WebSocket 消息中。
@@ -40,21 +40,21 @@ proof = HMAC-SHA256(
 ## 运动命令
 
 ```json
-{"type":"command","requestId":"请求唯一编号","command":"motion.set","payload":{"mode":"forward","frequency":2.5,"amplitude":28.0,"bias":0.0}}
+{"type":"command","requestId":"请求唯一编号","deviceId":"A4:CF:12:34:56:78","command":"motion.set","payload":{"deviceId":"A4:CF:12:34:56:78","controlSource":"用户或 vision-bot","mode":"forward","frequency":2.5,"amplitude":28.0,"bias":0.0}}
 ```
 
 `mode` 可取 `forward`、`left`、`right`、`stop`、`idle`。频率范围 `0.3–5.0`，幅度范围 `0–50`。
 
-设备返回：
+设备直接应用运动参数并返回：
 
 ```json
 {"type":"command.result","requestId":"请求唯一编号","success":true,"message":"OK"}
 ```
 
-请求 ID 必须原样返回。无效参数返回失败，不能修改原有运动状态。连接断开时设备立即停止；重连后必须重新注册。
+请求 ID 必须原样返回。运动参数由控制器负责整理，设备不再因为频率、幅度、偏置或舵机角度超出预设范围而拒绝命令。连接断开时设备立即停止；重连后必须重新注册。
 
-## 视觉会话
+## 视觉控制
 
-视觉控制使用 `vision.start`、`vision.update` 和 `vision.stop`。同一时刻只允许一个视觉会话；`vision.update` 带递增序号，设备拒绝旧会话或倒退序号。相机失帧、目标丢失、视觉进程退出、网页停止或视觉超时都必须触发安全停止。
+视觉识别、路径计算和 PID 全部在服务器端完成。服务器把最终的 `frequency`、`amplitude` 和 `bias` 作为普通 `motion.set` 下发，开发板不接收视频、视觉误差或 PID 参数。
 
-视频本身不通过设备 WebSocket 传输。Python 生成 MJPEG，浏览器只能通过 Go 的 `/api/vision/stream.mjpg` 访问；画布坐标和工具事件通过独立 HTTP 接口发送，不能从视频帧推断控制状态。
+视频本身不通过设备 WebSocket 传输。Python 优先生成 WebRTC 视频，无法完成公网 ICE 连接时回退到 MJPEG；浏览器只能通过 Go 的视觉接口访问。画布坐标和工具事件通过独立 HTTP 接口发送，不能从视频帧推断控制状态。

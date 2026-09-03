@@ -5,3 +5,5 @@ ultralytics==8.4.118
 Pillow>=10.0,<13
 pygrabber==0.2
 waitress==3.0.2
+aiortc>=1.9,<2
+av>=14,<19

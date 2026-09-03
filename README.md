@@ -2,50 +2,62 @@
 
 ESP32-C3 机器鱼固件正在升级为局域网中央控制架构。当前固件位于 `firmware/`。
 
-## Windows 日常操作
+## 启动
 
-Windows 端统一只使用 3 个 BAT 文件：
-
-```text
-scripts/
-├─ start.bat   启动项目
-├─ stop.bat    关闭项目
-└─ upload.bat  提交并推送代码到 GitHub
-```
-
-启动项目：
+Windows 直接运行：
 
 ```bat
 scripts\start.bat
 ```
 
-启动后访问：
+Linux / macOS 直接运行：
+
+```bash
+bash scripts/start.sh
+```
+
+如果你要公网访问，再额外放一个 `config/frpc.toml`，启动脚本检测到它后会自动拉起 `frpc`。模板可从 `config/frpc.example.toml` 复制后修改。
+
+打开：
 
 ```text
 http://localhost:8081
 ```
 
-关闭项目：
+关闭：
 
 ```bat
 scripts\stop.bat
 ```
 
-提交并推送当前代码：
+Linux / macOS：
+
+```bash
+bash scripts/stop.sh
+```
+
+提交代码：
 
 ```bat
 scripts\upload.bat
 ```
 
-`upload.bat` 会显示当前改动、询问 commit message，然后自动执行 `git add -A`、`git commit` 和 `git push`。如果没有新的文件改动，会直接尝试推送已有本地提交。
+`start.bat` 会自动补齐 `config/deployment.json`，再安装前端依赖、构建前端、编译控制器并启动服务。Go Controller 会自动选择 Python 解释器并启动 `vision/server.py`。Python 选择优先级为：`FISH_PYTHON` → `vision/.venv` → 仓库 `.venv` → PATH 中的 `python/python3` → Windows `py -3`。
 
-`start.bat` 会自动安装缺失的前端 npm 依赖、构建 React 前端、编译固定的 `controller/.runtime/fish-controller.exe`，然后启动 Go Controller。Go Controller 会读取 `config/deployment.json`、自动选择 Python 解释器并启动 `vision/server.py`。Python 选择优先级为：`FISH_PYTHON` → `vision/.venv` → 仓库 `.venv` → PATH 中的 `python/python3` → Windows `py -3`。
+如果存在 `config/frpc.toml`，启动脚本会顺手启动 `frpc`，把同一个控制台暴露到公网；没有这个文件就只启动本地服务。
 
-如果你已经有验证过 CUDA / YOLO 的 Python 环境，可在 CMD 中启动前设置：
+如果你有自己的 Python 环境，可在启动前设置：
 
 ```bat
 set FISH_PYTHON=D:\path\to\python.exe
 scripts\start.bat
+```
+
+Linux / macOS：
+
+```bash
+export FISH_PYTHON=/path/to/python
+bash scripts/start.sh
 ```
 
 ## 默认目标
@@ -58,13 +70,9 @@ scripts\start.bat
 
 ## 本地配置与敏感信息
 
-仓库只包含示例配置。启动前需要本机存在：
+仓库提供默认配置；首次启动时，`scripts/start.bat` 会确保 `config/deployment.json` 可用。`config/deployment.json` 已被 Git 忽略，不会通过 `upload.bat` 提交。
 
-```text
-config/deployment.json
-```
-
-可从 `config/deployment.example.json` 复制后填写本机部署密钥。`config/deployment.json` 已被 Git 忽略，不会通过 `upload.bat` 提交。
+公网转发配置是可选的，`config/frpc.toml` 也已被 Git 忽略。
 
 如需出厂配网热点，复制 `firmware/include/FactoryWifi.local.example.h` 为 `firmware/include/FactoryWifi.local.h`，填写仅用于本地设备的 SSID 和密码。`FactoryWifi.local.h` 已被 Git 忽略。
 
@@ -111,7 +119,7 @@ ESP32 联网后每 3 秒向所在子网广播带 HMAC 证明的 `device.announce
 
 ## 视频与视觉功能
 
-中央控制器启动后，网页中的“启动视觉”会打开所选摄像头、视觉处理线程和 MJPEG 视频流。“停止视觉”会先发送安全停止，再依次停止循迹和视觉线程、关闭视频流、释放摄像头及录像文件。停止后，标定、划线、截图、录像和循迹按钮全部禁用，页面也会移除视频连接。
+中央控制器启动后，网页中的“启动视觉”会打开所选摄像头、视觉处理线程和视频服务。浏览器优先通过 WebRTC 接收 `640×480 / 30 FPS` 画面，信令由 Go 代理；WebRTC 无法建立时自动回退到 MJPEG。“停止视觉”会先发送安全停止，再依次停止循迹和视觉线程、关闭视频连接、释放摄像头及录像文件。停止后，标定、划线、截图、录像和循迹按钮全部禁用，页面也会移除视频连接。
 
 划线、标定等画布操作只在本次视觉运行会话内有效。停止视觉时，尚未处理的画布事件会被丢弃，不会在下次启动后继续执行。已保存的标定模型或输出文件不因此删除。
 
@@ -125,4 +133,4 @@ ESP32 联网后每 3 秒向所在子网广播带 HMAC 证明的 `device.announce
 4. 观察网页显示的处理 FPS、摄像头实际 FPS 和目标识别状态。
 5. 必要时降低 `vision/config.py` 中的 `MJPEG_STREAM_WIDTH`、`MJPEG_STREAM_HEIGHT`、`MJPEG_MAX_FPS` 或 JPEG 质量。
 
-当前默认视频为 960×540、最高 30 FPS、JPEG 质量 50。MJPEG 简单且延迟可控，但每一帧都是完整 JPEG；通过无线网络或 FRP 时，带宽和抖动通常比局域网更明显。正式远程使用前应实测带宽与端到端延迟，不能只以本机画面流畅度作为结论。
+当前采集与浏览器视频参数为 `640×480 / 30 FPS`。MJPEG 仍使用 JPEG 质量 50 作为兼容回退；公网 WebRTC 需要配置 STUN/TURN，并实测带宽与端到端延迟，不能只以本机画面流畅度作为结论。

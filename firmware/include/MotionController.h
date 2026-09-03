@@ -8,11 +8,11 @@ public:
     MotionController(int pin, float frequency, float amplitude, float turnAmount);
     void begin();
     void update(uint32_t nowMs);
+    void setNeutralCenter(float center);
     void setMode(MotionMode mode);
-    bool setTuning(float frequency, float amplitude);
-    bool setBias(float bias);
-    bool centerAtBias(float bias);
-    bool applyVisual(float frequency, float amplitude, float bias);
+    void setTuning(float frequency, float amplitude);
+    void setBias(float bias);
+    void centerAtBias(float bias);
     void safeStop();
     MotionSnapshot snapshot() const;
 private:
@@ -21,4 +21,5 @@ private:
     MotionState state_;
     uint32_t lastUpdate_ = 0;
     float phase_ = 0.0f;
+    float outputAngle_ = 90.0f;
 };

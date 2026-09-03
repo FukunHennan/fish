@@ -15,7 +15,13 @@ func writeAuthError(w http.ResponseWriter, status int, message string) {
 }
 
 func (s *server) authActive() bool {
-	return !strings.EqualFold(os.Getenv("FISH_AUTH_DISABLED"), "true")
+	// Authentication is temporarily disabled while the project is being
+	// commissioned. Set FISH_AUTH_DISABLED=false to re-enable it later.
+	value, configured := os.LookupEnv("FISH_AUTH_DISABLED")
+	if !configured || strings.TrimSpace(value) == "" {
+		return false
+	}
+	return !strings.EqualFold(strings.TrimSpace(value), "true")
 }
 
 func (s *server) anonymousAdmin() authUser {
@@ -61,6 +67,14 @@ func (s *server) requireUser(w http.ResponseWriter, r *http.Request) (authUser, 
 
 func (s *server) authMe(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	if !s.authActive() {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"authenticated": true,
+			"bootstrap":     false,
+			"user":          publicUser(s.anonymousAdmin()),
+		})
+		return
+	}
 	cookie, cookieErr := r.Cookie(sessionCookieName)
 	if cookieErr == nil && cookie.Value != "" {
 		if user, ok := s.auth.userBySession(cookie.Value); ok {

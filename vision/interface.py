@@ -20,14 +20,55 @@ from config import TARGET_FPS, TARGET_HEIGHT, TARGET_WIDTH
 class ExposureResult:
     status: str
     supported: bool
-    requested_delta: int
+    requested_delta: int | None
     previous_value: float | None
     actual_value: float | None
+    error_code: str | None = None
+    requested_value: float | None = None
+    minimum: float | None = None
+    maximum: float | None = None
+    step: float | None = None
+
+
+@dataclass(frozen=True)
+class ExposureInfo:
+    supported: bool
+    actual_value: float | None
+    minimum: float | None
+    maximum: float | None
+    step: float | None
     error_code: str | None = None
 
 
 def apply_manual_exposure(capture, delta):
     return apply_manual_exposure_for_device(capture, delta, None)
+
+
+def get_manual_exposure_for_device(capture, device_index=None):
+    """Read the current manual-exposure value and driver range."""
+    if sys.platform.startswith("linux") and device_index is not None:
+        device = f"/dev/video{int(device_index)}"
+        listed = _run_v4l2_ctl(device, "--list-ctrls")
+        if listed is not None and listed.returncode == 0:
+            for candidate in ("exposure_time_absolute", "exposure_absolute", "exposure"):
+                exposure = _parse_v4l2_int_control(listed.stdout, candidate)
+                if exposure is not None:
+                    return ExposureInfo(
+                        True,
+                        float(exposure["value"]),
+                        float(exposure["min"]),
+                        float(exposure["max"]),
+                        float(exposure["step"]),
+                    )
+            return ExposureInfo(False, None, None, None, None, "exposure_unsupported")
+
+    try:
+        actual = float(capture.get(cv2.CAP_PROP_EXPOSURE))
+        if math.isfinite(actual):
+            return ExposureInfo(True, actual, None, None, None)
+    except (cv2.error, OSError, RuntimeError, TypeError, ValueError):
+        pass
+    return ExposureInfo(False, None, None, None, None, "exposure_unsupported")
 
 
 def _run_v4l2_ctl(device, *args):
@@ -136,7 +177,8 @@ def _apply_v4l2_manual_exposure(device_index, delta):
     if applied is None or applied.returncode != 0:
         return ExposureResult(
             "failed", True, delta, float(previous), float(previous),
-            "exposure_not_applied",
+            "exposure_not_applied", None, float(exposure["min"]),
+            float(exposure["max"]), float(exposure["step"]),
         )
     refreshed = _run_v4l2_ctl(device, "--list-ctrls")
     actual = target
@@ -147,9 +189,83 @@ def _apply_v4l2_manual_exposure(device_index, delta):
     if actual == previous:
         return ExposureResult(
             "failed", True, delta, float(previous), float(actual),
-            "exposure_not_applied",
+            "exposure_not_applied", None, float(exposure["min"]),
+            float(exposure["max"]), float(exposure["step"]),
         )
-    return ExposureResult("completed", True, delta, float(previous), float(actual))
+    return ExposureResult(
+        "completed", True, delta, float(previous), float(actual),
+        None, None, float(exposure["min"]), float(exposure["max"]),
+        float(exposure["step"]),
+    )
+
+
+def _set_v4l2_manual_exposure(device_index, value):
+    if device_index is None:
+        return None
+    device = f"/dev/video{int(device_index)}"
+    listed = _run_v4l2_ctl(device, "--list-ctrls")
+    if listed is None:
+        return None
+    if listed.returncode != 0:
+        return ExposureResult(
+            "failed", False, None, None, None, "exposure_unsupported",
+        )
+    controls = listed.stdout
+    control_name = None
+    exposure = None
+    for candidate in ("exposure_time_absolute", "exposure_absolute", "exposure"):
+        exposure = _parse_v4l2_int_control(controls, candidate)
+        if exposure is not None:
+            control_name = candidate
+            break
+    if exposure is None:
+        return ExposureResult(
+            "failed", False, None, None, None, "exposure_unsupported",
+        )
+
+    if "exposure_auto" in controls:
+        _run_v4l2_ctl(device, "--set-ctrl", "exposure_auto=1")
+    if "auto_exposure" in controls:
+        _run_v4l2_ctl(device, "--set-ctrl", "auto_exposure=1")
+
+    minimum = exposure["min"]
+    maximum = exposure["max"]
+    step = exposure["step"]
+    previous = exposure["value"]
+    requested = float(value)
+    target = max(minimum, min(maximum, requested))
+    target = minimum + round((target - minimum) / step) * step
+    target = max(minimum, min(maximum, target))
+    if target == previous:
+        return ExposureResult(
+            "completed", True, None, float(previous), float(previous), None,
+            requested, float(minimum), float(maximum), float(step),
+        )
+
+    applied = _run_v4l2_ctl(device, "--set-ctrl", f"{control_name}={target}")
+    if applied is None or applied.returncode != 0:
+        return ExposureResult(
+            "failed", True, None, float(previous), float(previous),
+            "exposure_not_applied", requested, float(minimum),
+            float(maximum), float(step),
+        )
+
+    refreshed = _run_v4l2_ctl(device, "--list-ctrls")
+    actual = target
+    if refreshed is not None and refreshed.returncode == 0:
+        refreshed_exposure = _parse_v4l2_int_control(refreshed.stdout, control_name)
+        if refreshed_exposure is not None:
+            actual = refreshed_exposure["value"]
+    if actual == previous:
+        return ExposureResult(
+            "failed", True, None, float(previous), float(actual),
+            "exposure_not_applied", requested, float(minimum),
+            float(maximum), float(step),
+        )
+    return ExposureResult(
+        "completed", True, None, float(previous), float(actual), None,
+        requested, float(minimum), float(maximum), float(step),
+    )
 
 
 def apply_manual_exposure_for_device(capture, delta, device_index=None):
@@ -188,6 +304,60 @@ def apply_manual_exposure_for_device(capture, delta, device_index=None):
         )
 
 
+def set_manual_exposure_for_device(capture, value, device_index=None):
+    """Set an absolute exposure value and verify it with driver readback."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return ExposureResult(
+            "failed", False, None, None, None, "invalid_exposure_value",
+        )
+    if not math.isfinite(float(value)):
+        return ExposureResult(
+            "failed", False, None, None, None, "invalid_exposure_value",
+        )
+
+    if sys.platform.startswith("linux") and device_index is not None:
+        fallback = _set_v4l2_manual_exposure(device_index, value)
+        if fallback is not None:
+            return fallback
+
+    try:
+        previous = float(capture.get(cv2.CAP_PROP_EXPOSURE))
+        if not math.isfinite(previous):
+            previous = None
+        requested = float(value)
+        for manual_value in (0.25, 1.0):
+            capture.set(cv2.CAP_PROP_AUTO_EXPOSURE, manual_value)
+            accepted = capture.set(cv2.CAP_PROP_EXPOSURE, requested)
+            actual = float(capture.get(cv2.CAP_PROP_EXPOSURE))
+            if not math.isfinite(actual):
+                actual = None
+            if actual is not None and (
+                previous is None
+                or math.isclose(actual, requested, abs_tol=1e-6)
+                or not math.isclose(actual, previous, abs_tol=1e-6)
+            ):
+                return ExposureResult(
+                    "completed", True, None, previous, actual, None,
+                    requested,
+                )
+            if accepted and previous is not None and math.isclose(
+                actual or previous, previous, abs_tol=1e-6
+            ) and math.isclose(requested, previous, abs_tol=1e-6):
+                return ExposureResult(
+                    "completed", True, None, previous, actual, None,
+                    requested,
+                )
+        return ExposureResult(
+            "failed", True, None, previous, previous,
+            "exposure_not_applied", requested,
+        )
+    except (cv2.error, OSError, RuntimeError, TypeError, ValueError):
+        return ExposureResult(
+            "failed", False, None, None, None, "exposure_unsupported",
+            float(value),
+        )
+
+
 class CameraStream:
     def __init__(self, src=0):
         self.src = src
@@ -207,6 +377,14 @@ class CameraStream:
         self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
         self.cap.set(cv2.CAP_PROP_EXPOSURE, self.exposure_val)
         self.cap.set(cv2.CAP_PROP_GAIN, 100)
+        info = get_manual_exposure_for_device(self.cap, self.src)
+        self.exposure_supported = info.supported
+        self.exposure_min = info.minimum
+        self.exposure_max = info.maximum
+        self.exposure_step = info.step
+        self.exposure_error_code = info.error_code
+        if info.actual_value is not None:
+            self.exposure_val = info.actual_value
 
         self.ret, self.frame = self.cap.read()
         self.timestamp = time.time()
@@ -225,12 +403,26 @@ class CameraStream:
     def adjust_exposure(self, delta):
         with self.lock:
             result = apply_manual_exposure_for_device(self.cap, delta, self.src)
-            if result.status == "completed":
-                self.exposure_val = result.actual_value
-                print(f"[Camera] Manual exposure changed to {self.exposure_val}")
-            else:
-                print(f"[Camera] Exposure adjustment failed: {result.error_code}")
+            self._apply_exposure_result(result)
             return result
+
+    def set_exposure(self, value):
+        with self.lock:
+            result = set_manual_exposure_for_device(self.cap, value, self.src)
+            self._apply_exposure_result(result)
+            return result
+
+    def _apply_exposure_result(self, result):
+        if result.status == "completed" and result.actual_value is not None:
+            self.exposure_val = result.actual_value
+            print(f"[Camera] Manual exposure changed to {self.exposure_val}")
+        else:
+            print(f"[Camera] Exposure adjustment failed: {result.error_code}")
+        self.exposure_supported = result.supported
+        self.exposure_min = result.minimum
+        self.exposure_max = result.maximum
+        self.exposure_step = result.step
+        self.exposure_error_code = result.error_code
 
     def update(self):
         while not self.stopped:
@@ -562,12 +754,19 @@ class MJPEGServer:
             max(1, int(round(width * scale))),
             max(1, int(round(height * scale))),
         )
+        if target == (width, height):
+            return frame
         interpolation = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
         return cv2.resize(frame, target, interpolation=interpolation)
 
     def update(self, frame):
         if frame is None:
             return
+        # WebRTC is the primary transport. Keep the compatibility encoder
+        # completely out of the capture loop when nobody is using MJPEG.
+        with self._viewer_lock:
+            if self._viewer_count <= 0:
+                return
         now = time.time()
         if now - self.last_update_t < (1.0 / MJPEG_MAX_FPS):
             return

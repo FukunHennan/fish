@@ -8,12 +8,11 @@ project_dir = env.subst("$PROJECT_DIR")
 config_path = os.path.abspath(os.path.join(project_dir, "..", "config", "deployment.json"))
 
 if not os.path.isfile(config_path):
-    if env.get("PIOENV") == "embedded_test":
+    config_path = os.path.abspath(os.path.join(project_dir, "..", "config", "deployment.json"))
+    if not os.path.isfile(config_path):
         config_path = os.path.abspath(
             os.path.join(project_dir, "..", "config", "deployment.example.json")
         )
-    else:
-        raise RuntimeError("缺少 config/deployment.json，请运行 scripts/generate-deployment-config.ps1")
 
 with open(config_path, "r", encoding="utf-8-sig") as handle:
     deployment_key = json.load(handle).get("deploymentKey", "")

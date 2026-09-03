@@ -4,10 +4,7 @@ import "./styles.css";
 import "./maintenance.css";
 import "./rename.css";
 import VisionPanel from "./VisionPanel.jsx";
-import VideoStream from "./VideoStream.jsx";
-import { chooseCameraIndex } from "./coordinates.js";
-import { visionEventUrl, visionRequest } from "./visionSession.js";
-import { formatFrameLatency, formatServerClock, formatVideoClock } from "./videoTime.js";
+import { deviceStateSignature, keyboardMode, mergeDevicesInStableOrder } from "./deviceState.js";
 import { motionRange } from "./motionCalibration.js";
 
 const MODE_LABELS = {
@@ -16,9 +13,11 @@ const MODE_LABELS = {
 };
 const ALIAS_STORAGE_KEY = "fish-controller-device-aliases-v1";
 const CALIBRATION_STORAGE_KEY = "fish-controller-motion-calibration-v1";
+const MANUAL_MOTION_STORAGE_KEY = "fish-controller-manual-motion-v1";
 const DEFAULT_AMPLITUDE_PERCENT = 40;
-const KEYBOARD_TICK_MS = 50;
+const DEFAULT_FREQUENCY = 2.5;
 const KEYBOARD_CODES = new Set(["KeyW", "KeyA", "KeyS", "KeyD", "Space"]);
+const TURN_CODES = new Set(["KeyA", "KeyD"]);
 
 function clamp(value, min, max, fallback) {
   const number = Number(value);
@@ -50,25 +49,18 @@ function loadCalibrationProfiles() {
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch { return {}; }
 }
+function loadManualMotionProfiles() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(MANUAL_MOTION_STORAGE_KEY) || "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch { return {}; }
+}
 function normalizeDeviceName(value) { return String(value || "").trim().toLocaleLowerCase(); }
 function batteryLevel(device) {
   const value = Number(device?.batteryPercent);
   return Number.isFinite(value) && Number(device?.batteryVoltage) > 0 ? value : null;
 }
 function batteryTone(percent) { return percent == null ? "unknown" : percent < 20 ? "critical" : percent < 40 ? "low" : "normal"; }
-function amplitudePercentFromDevice(device) {
-  const amplitude = Number(device?.amplitude);
-  if (!Number.isFinite(amplitude)) return DEFAULT_AMPLITUDE_PERCENT;
-  return clamp((amplitude / 90) * 100, 0, 100, DEFAULT_AMPLITUDE_PERCENT);
-}
-function keyboardMode(pressed) {
-  if (pressed.has("KeyS") || pressed.has("Space")) return "stop";
-  if (pressed.has("KeyA") && pressed.has("KeyD")) return "stop";
-  if (pressed.has("KeyA")) return "left";
-  if (pressed.has("KeyD")) return "right";
-  if (pressed.has("KeyW")) return "forward";
-  return "stop";
-}
 function isTypingTarget(target) {
   const tag = target?.tagName?.toLowerCase();
   return tag === "input" || tag === "textarea" || tag === "select" || target?.isContentEditable;
@@ -87,333 +79,61 @@ function cameraLabel(camera) {
   return [`#${camera.index}`, model, [size, fps].filter(Boolean).join(" @ ")].filter(Boolean).join(" · ");
 }
 
-function deviceStateSignature(devices) {
-  return JSON.stringify(
-    devices
-      .map(({ lastSeen, uptimeMs, batterySampleAgeMs, ...stable }) => stable)
-      .sort((first, second) => String(first.deviceId).localeCompare(String(second.deviceId))),
-  );
-}
+function OnlineFishSidebar({ devices, selectedId, onSelect, disabled = false, vision = false, visionState = null }) {
+  const onlineDevices = devices.filter((device) => device.online);
+  const visionTargetId = visionState?.targetDeviceId || selectedId;
+  const visionMetrics = visionState?.metrics || {};
+  const visionYolo = visionMetrics.yolo || {};
+  const visionWorkflow = visionMetrics.workflow || {};
 
-function sessionErrorMessage(status) {
-  const error = status?.error;
-  if (!error) return "";
-  return typeof error === "string" ? error : error.message || error.code || "";
-}
-
-const DEFAULT_OVERLAYS = { detections: false, paths: false };
-
-function overlayState(status, fallback) {
-  return { ...DEFAULT_OVERLAYS, ...(fallback || {}), ...(status.metrics?.overlays || {}) };
-}
-
-function ManualVideoPreview() {
-  const [cameras, setCameras] = useState([]);
-  const [cameraIndex, setCameraIndex] = useState("");
-  const [status, setStatus] = useState({ state: "idle", error: "" });
-  const [feedback, setFeedback] = useState("可以不选择鱼，先打开摄像头作为手动驾驶视角。");
-  const [streamFeedback, setStreamFeedback] = useState("");
-  const [streamRetry, setStreamRetry] = useState(0);
-  const [streamState, setStreamState] = useState("idle");
-  const [videoBusy, setVideoBusy] = useState(false);
-  const [switchingCamera, setSwitchingCamera] = useState(false);
-  const [overlayPrefs, setOverlayPrefs] = useState(DEFAULT_OVERLAYS);
-  const [clock, setClock] = useState(() => formatVideoClock());
-  const [clockTick, setClockTick] = useState(() => Date.now());
-  const [serverTime, setServerTime] = useState(null);
-  const [serverUtcOffsetMinutes, setServerUtcOffsetMinutes] = useState(0);
-  const [serverTimeReceivedAt, setServerTimeReceivedAt] = useState(0);
-  const streamRetryTimerRef = useRef(null);
-  const camerasRef = useRef([]);
-
-  const running = ["previewing", "processing", "tracking"].includes(status.state);
-  const processing = ["processing", "tracking"].includes(status.state);
-  const tracking = status.state === "tracking";
-  const selectedCamera = cameras.find((camera) => camera.index === Number(cameraIndex));
-  const videoWidth = status.metrics?.frame?.width || selectedCamera?.width || 640;
-  const videoHeight = status.metrics?.frame?.height || selectedCamera?.height || 480;
-  const yolo = status.metrics?.yolo;
-  const yoloLabel = yolo?.ready ? "识别中" : yolo?.loading ? "模型加载中" : yolo?.error ? "识别异常" : "仅监看";
-  const overlays = overlayState(status, overlayPrefs);
-  const latencyLabel = formatFrameLatency(status.metrics);
-  const serverClock = formatServerClock(
-    serverTime,
-    serverUtcOffsetMinutes,
-    serverTimeReceivedAt,
-    clockTick,
-  );
-
-  function captureServerTime(payload) {
-    const value = Number(payload?.serverTime ?? payload?.data?.serverTime);
-    if (!Number.isFinite(value)) return;
-    setServerTime(value);
-    const offset = Number(payload?.serverUtcOffsetMinutes ?? payload?.data?.serverUtcOffsetMinutes);
-    if (Number.isFinite(offset)) setServerUtcOffsetMinutes(offset);
-    setServerTimeReceivedAt(Date.now());
-  }
-
-  useEffect(() => {
-    const tick = () => {
-      setClock(formatVideoClock());
-      setClockTick(Date.now());
-    };
-    tick();
-    const timer = window.setInterval(tick, 1000);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    async function refresh() {
-      try {
-        const [cameraResponse, statusResponse] = await Promise.all([
-          fetch("/api/vision/cameras", { cache: "no-store" }),
-          fetch("/api/vision/sessions/current", { cache: "no-store" }),
-        ]);
-        if (!cameraResponse.ok || !statusResponse.ok) throw new Error("摄像头服务未就绪");
-        const cameraList = await cameraResponse.json();
-        const statusEnvelope = await statusResponse.json();
-        const nextStatus = statusEnvelope.data || statusEnvelope;
-        if (!active) return;
-        camerasRef.current = cameraList;
-        captureServerTime(statusEnvelope);
-        setCameras(cameraList);
-        setStatus(nextStatus);
-        setCameraIndex((current) => chooseCameraIndex(current, cameraList, nextStatus));
-      } catch (error) {
-        if (active) setFeedback(error.message);
-      }
+  function visionDeviceStatus(device) {
+    if (visionTargetId !== device.deviceId) return ["online", "在线"];
+    if (visionWorkflow.trackingActive || visionState?.state === "tracking") return ["vision-active", "视觉控制"];
+    if (visionState?.state === "processing") {
+      if (Number(visionYolo.detectionCount) > 1) return ["vision-warning", "多目标"];
+      if (Number(visionYolo.detectionCount) === 1) return ["vision-detected", "已识别"];
+      return ["vision-target", "待识别"];
     }
-    refresh();
-    if (typeof window.EventSource !== "function") {
-      if (active) setFeedback("当前浏览器不支持视觉状态推送");
-      return () => { active = false; };
-    }
-    const source = new window.EventSource(visionEventUrl());
-    source.addEventListener("session", (event) => {
-      if (!active) return;
-      try {
-        const envelope = JSON.parse(event.data);
-        const nextStatus = envelope.data || envelope;
-        captureServerTime(envelope);
-        setStatus(nextStatus);
-        setCameraIndex((current) => chooseCameraIndex(current, camerasRef.current, nextStatus));
-      } catch {
-        setFeedback("视觉状态数据无效");
-      }
-    });
-    return () => {
-      active = false;
-      source.close();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!running) {
-      if (streamRetryTimerRef.current) window.clearTimeout(streamRetryTimerRef.current);
-      streamRetryTimerRef.current = null;
-      setStreamFeedback("");
-      setStreamRetry(0);
-      setStreamState("idle");
-    } else {
-      setStreamState("loading");
-    }
-  }, [running]);
-
-  useEffect(() => () => {
-    if (streamRetryTimerRef.current) window.clearTimeout(streamRetryTimerRef.current);
-  }, []);
-
-  function updateStreamRetry() {
-    if (streamRetryTimerRef.current) window.clearTimeout(streamRetryTimerRef.current);
-    streamRetryTimerRef.current = window.setTimeout(() => {
-      setStreamRetry((current) => current + 1);
-      streamRetryTimerRef.current = null;
-    }, 1200);
-  }
-
-  function handleStreamError() {
-    setStreamState("error");
-    setStreamFeedback("视频流中断，正在自动重连…");
-    updateStreamRetry();
-  }
-
-  function handleStreamReady() {
-    setStreamState("ready");
-    if (streamRetryTimerRef.current) window.clearTimeout(streamRetryTimerRef.current);
-    streamRetryTimerRef.current = null;
-    setStreamFeedback("");
-    setFeedback(processing ? "识别画面已连接。" : "预览画面已连接。");
-  }
-
-  async function adoptCurrentSession() {
-    const current = await visionRequest("/sessions/current");
-    const nextStatus = current.data || current;
-    if (nextStatus?.sessionId && ["previewing", "processing", "tracking"].includes(nextStatus.state)) {
-      setStatus(nextStatus);
-      setCameraIndex((currentIndex) => chooseCameraIndex(currentIndex, cameras, nextStatus));
-      setStreamRetry((currentRetry) => currentRetry + 1);
-      return nextStatus;
-    }
-    return null;
-  }
-
-  async function startPreview() {
-    if (videoBusy) return;
-    if (running && status.sessionId) {
-      setFeedback("已接入当前视频画面；可以直接边看边手动控制。");
-      return;
-    }
-    setVideoBusy(true);
-    setStreamFeedback("");
-    try {
-      if (cameraIndex === "") throw new Error("请选择摄像头");
-      setFeedback("正在打开摄像头…");
-      const result = await visionRequest("/sessions", {
-        method: "POST",
-        body: JSON.stringify({ cameraId: `camera-${cameraIndex}`, cameraIndex: Number(cameraIndex) }),
-      });
-      setStatus(result.data);
-      captureServerTime(result);
-      setStreamRetry((currentRetry) => currentRetry + 1);
-      setFeedback("手动监看已开启；现在可以边看画面边控制机器鱼。");
-    } catch (error) {
-      if (/已存在|session_exists/.test(error.message || "")) {
-        try {
-          const existing = await adoptCurrentSession();
-          if (existing) {
-            setFeedback("已接入现有摄像头画面；如需切换摄像头，请先关闭视频。");
-            return;
-          }
-        } catch {
-          // Fall through to the original error below.
-        }
-      }
-      setFeedback(error.message);
-    } finally {
-      setVideoBusy(false);
-    }
-  }
-
-  async function stopPreview() {
-    if (videoBusy) return;
-    setVideoBusy(true);
-    try {
-      if (!status.sessionId) return;
-      const result = await visionRequest(`/sessions/${encodeURIComponent(status.sessionId)}`, { method: "DELETE" });
-      setStatus(result.data);
-      setStreamFeedback("");
-      setFeedback("摄像头监看已关闭。");
-    } catch (error) {
-      setFeedback(error.message);
-    } finally {
-      setVideoBusy(false);
-    }
-  }
-
-  async function changeCamera(event) {
-    const nextCameraIndex = event.target.value;
-    if (!running) {
-      setCameraIndex(nextCameraIndex);
-      return;
-    }
-    if (Number(nextCameraIndex) === status.cameraIndex || switchingCamera) return;
-    const previousCameraIndex = String(status.cameraIndex);
-    setCameraIndex(nextCameraIndex);
-    setSwitchingCamera(true);
-    setStreamState("loading");
-    setStreamFeedback("正在切换摄像头…");
-    try {
-      const result = await visionRequest(
-        `/sessions/${encodeURIComponent(status.sessionId)}/camera`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            cameraId: `camera-${nextCameraIndex}`,
-            cameraIndex: Number(nextCameraIndex),
-          }),
-        },
-      );
-      setStatus(result.data);
-      captureServerTime(result);
-      setStreamRetry((current) => current + 1);
-      setFeedback("摄像头已切换，视频保持开启。");
-    } catch (error) {
-      setCameraIndex(previousCameraIndex);
-      setFeedback(error.message);
-    } finally {
-      setSwitchingCamera(false);
-    }
-  }
-
-  async function toggleProcessing() {
-    if (videoBusy) return;
-    setVideoBusy(true);
-    try {
-      if (!status.sessionId) return;
-      const result = await visionRequest(`/sessions/${encodeURIComponent(status.sessionId)}/processing`, { method: processing ? "DELETE" : "POST" });
-      setStatus(result.data);
-      setFeedback(processing ? "已回到单纯视频预览。" : "已开启识别叠加；手动控制仍由你接管。");
-    } catch (error) {
-      setFeedback(error.message);
-    } finally {
-      setVideoBusy(false);
-    }
-  }
-
-  async function setOverlay(key, enabled) {
-    const next = { ...overlays, [key]: enabled };
-    setOverlayPrefs(next);
-    try {
-      if (!status.sessionId || !running) return;
-      await visionRequest(`/sessions/${encodeURIComponent(status.sessionId)}/actions`, {
-        method: "POST",
-        body: JSON.stringify({ type: "overlay.set", overlays: next }),
-      });
-      setStatus((current) => ({ ...current, metrics: { ...(current.metrics || {}), overlays: next } }));
-      setFeedback(`${key === "detections" ? "识别框" : "路径线"}已${enabled ? "显示" : "屏蔽"}`);
-    } catch (error) {
-      setFeedback(error.message);
-    }
+    return ["vision-target", "视觉目标"];
   }
 
   return (
-    <section className="manual-video-card panel-surface" aria-label="手动视频监看">
-      <div className="panel-heading">
-        <div><span className="eyebrow">DRIVER VIEW</span><h2>视频监看</h2><small>手动控制时观察摄像头画面</small></div>
-        <span className={`status ${running ? "online" : "offline"}`}><i />{running ? yoloLabel : "未开启"}</span>
-      </div>
-      <div className="manual-video-stage" style={{ "--video-aspect": `${videoWidth} / ${videoHeight}` }}>
-        {running ? <>
-          <VideoStream
-            sessionId={status.sessionId}
-            retry={streamRetry}
-            onError={handleStreamError}
-            onReady={handleStreamReady}
-            onTransportError={(error) => setStreamFeedback(`${error?.message || "WebRTC 暂不可用"}，正在重连。`)}
-            alt="手动控制摄像头画面"
-          />
-          {streamState !== "ready" && <div className={`video-stream-status ${streamState}`}>
-            <strong>{streamState === "error" ? "视频流暂时不可用" : "正在连接视频流…"}</strong>
-            <span>{streamState === "error" ? (sessionErrorMessage(status) || "摄像头未返回可显示画面，正在自动重试") : "请稍候，摄像头画面即将出现"}</span>
-          </div>}
-        </> : <div className={`video-placeholder ${status.state === "error" ? "has-error" : ""}`}><strong>{status.state === "error" ? "摄像头启动失败" : "驾驶视角未开启"}</strong><span>{sessionErrorMessage(status) || "选择摄像头后开始监看"}</span></div>}
-        {running && <div className="video-badge">服务器 {serverClock}<br />本机 {clock}{latencyLabel}<br />{videoWidth} × {videoHeight}</div>}
-      </div>
-      <div className="manual-video-controls">
-        <label className="camera-select">摄像头<select value={cameraIndex} disabled={switchingCamera} onChange={changeCamera}><option value="">请选择摄像头</option>{cameras.map((camera) => <option key={camera.index} value={camera.index}>{cameraLabel(camera)}</option>)}</select></label>
-        <div className="manual-video-actions">
-          <button disabled={videoBusy || running || cameraIndex === "" || switchingCamera} onClick={startPreview}>{videoBusy ? "打开中…" : running ? "视频已开启" : "开启监看"}</button>
-          <button disabled={videoBusy || !running || tracking || switchingCamera} onClick={toggleProcessing}>{tracking ? "循迹中" : processing ? "关闭识别" : "叠加识别"}</button>
-          <button className="stop" disabled={videoBusy || !running || tracking || switchingCamera} onClick={stopPreview}>关闭</button>
+    <aside className="control-sidebar panel-surface">
+      <section className="control-section manual-list-section">
+        <div className="panel-heading compact">
+          <div><span className="eyebrow">{vision ? "VISION" : "MANUAL"}</span><h2>在线鱼列表</h2><small>{vision ? "点击一条鱼设为视觉目标，不会接管手动控制。" : "点击一条鱼即可接管，系统会自动释放你上一条鱼。"}</small></div>
+          <span className="fish-status-pill"><i />{onlineDevices.length} 条在线</span>
         </div>
-      </div>
-      <div className="overlay-toggle-row" aria-label="手动视频画面显示选项">
-        <label><input type="checkbox" checked={overlays.detections} disabled={!running} onChange={(event) => setOverlay("detections", event.target.checked)} /> 显示 YOLO 识别</label>
-        <label><input type="checkbox" checked={overlays.paths} disabled={!running} onChange={(event) => setOverlay("paths", event.target.checked)} /> 显示路径</label>
-      </div>
-      <p className="feedback" aria-live="polite">{streamFeedback || feedback}</p>
-    </section>
+        <div className="manual-fish-table" role="list" aria-label={vision ? "视觉目标机器鱼" : "在线机器鱼"}>
+          <div className="manual-fish-table-head" aria-hidden="true">
+            <span>鱼名</span>
+            <span>状态</span>
+            <span>控制者</span>
+            <span>电量</span>
+          </div>
+          {onlineDevices.length ? onlineDevices.map((device) => {
+            const selected = vision ? visionTargetId === device.deviceId : selectedId === device.deviceId;
+            const owner = device.lease ? (device.lease.ownerName || device.lease.ownerEmail) : "空闲";
+            const battery = batteryLevel(device);
+            const [visionStatusClass, visionStatusLabel] = visionDeviceStatus(device);
+            return <button
+              key={device.deviceId}
+              type="button"
+              className={`manual-fish-row ${selected ? "selected" : ""}`}
+              onClick={() => onSelect(device)}
+              disabled={disabled}
+              role="listitem"
+            >
+              <span className="manual-fish-name">{deviceLabel(device)}</span>
+              <span className={`manual-fish-state ${vision ? visionStatusClass : device.lease ? "busy" : "free"}`}>{vision ? visionStatusLabel : device.lease ? "被控" : "空闲"}</span>
+              <span className="manual-fish-owner">{owner}</span>
+              <span className="manual-fish-battery">{battery != null ? `${battery}%` : "—"}</span>
+            </button>;
+          }) : <div className="list-row"><strong>暂无在线鱼</strong><span>设备上线后会出现在这里。</span></div>}
+        </div>
+        {vision && <p className="feedback vision-target-feedback" aria-live="polite">{visionTargetId ? (visionWorkflow.trackingActive ? "YOLO 目标已绑定，视觉控制正在下发。" : Number(visionYolo.detectionCount) === 1 ? "YOLO 已识别当前目标，可执行视觉控制。" : "当前设备已绑定，等待 YOLO 锁定目标。") : "未选择目标时只运行预览和识别。"}</p>}
+      </section>
+    </aside>
   );
 }
 
@@ -667,6 +387,7 @@ function App() {
   const [page, setPage] = useState("manual");
   const [devices, setDevices] = useState([]);
   const [aliases, setAliases] = useState(loadAliases);
+  const [manualMotionByDevice, setManualMotionByDevice] = useState(loadManualMotionProfiles);
   const [selectedDeviceId, setSelectedDeviceId] = useState("");
   const [otaSelectedIds, setOtaSelectedIds] = useState(() => new Set());
   const [feedback, setFeedback] = useState("等待控制指令");
@@ -684,14 +405,19 @@ function App() {
   const [rgbBrightness, setRgbBrightness] = useState(32);
   const [rgbOrder, setRgbOrder] = useState("GRB");
   const [visionDeviceId, setVisionDeviceId] = useState("");
+  const [visionState, setVisionState] = useState({ state: "idle", targetDeviceId: "", metrics: {} });
   const [calibrationProfiles, setCalibrationProfiles] = useState(loadCalibrationProfiles);
   const keyboardRef = useRef({
     pressed: new Set(),
-    timer: null,
+    turnOrder: new Map(),
+    turnSequence: 0,
     active: false,
     leasePromise: null,
+    commandPromise: Promise.resolve(),
     lastMode: "",
+    lastSentMode: "",
     lastErrorAt: 0,
+    sequence: Date.now() * 1000,
   });
   const manualControlRef = useRef(null);
   const devicesRef = useRef([]);
@@ -714,12 +440,21 @@ function App() {
   const onlineDevices = useMemo(() => devices.filter((device) => device.online), [devices]);
   const lowBatteryCount = useMemo(() => onlineDevices.filter((device) => (batteryLevel(device) ?? 101) < 20).length, [onlineDevices]);
   const selectedDevice = useMemo(() => devices.find((device) => device.deviceId === selectedDeviceId) || null, [devices, selectedDeviceId]);
+  const selectedManualMotion = useMemo(() => {
+    const saved = manualMotionByDevice[selectedDeviceId] || {};
+    return {
+      frequency: clamp(saved.frequency, 0.3, 5, DEFAULT_FREQUENCY),
+      amplitudePercent: clamp(saved.amplitudePercent, 0, 100, DEFAULT_AMPLITUDE_PERCENT),
+    };
+  }, [manualMotionByDevice, selectedDeviceId]);
   const otaSelectedDevices = useMemo(() => devices.filter((device) => otaSelectedIds.has(device.deviceId) && device.online), [devices, otaSelectedIds]);
   manualControlRef.current = {
     page,
     authenticated: auth.authenticated,
     currentUserEmail: auth.user?.email,
     selectedDevice,
+    manualMotionByDevice,
+    selectedManualMotion,
   };
   useEffect(() => {
     if (!auth.authenticated) return;
@@ -739,8 +474,9 @@ function App() {
         return;
       }
       if (!Array.isArray(raw)) return;
-      const next = raw.map((device) => ({ ...device, name: aliases[device.deviceId] || device.name }));
+      const incoming = raw.map((device) => ({ ...device, name: aliases[device.deviceId] || device.name }));
       const previous = devicesRef.current;
+      const next = mergeDevicesInStableOrder(previous, incoming);
       const previousByID = new Map(previous.map((device) => [device.deviceId, device]));
       const nextByID = new Map(next.map((device) => [device.deviceId, device]));
       const lostControl = previous
@@ -753,7 +489,8 @@ function App() {
         });
       devicesRef.current = next;
       const nextSignature = deviceStateSignature(next);
-      if (nextSignature !== deviceSignatureRef.current) {
+      const stableChanged = nextSignature !== deviceSignatureRef.current;
+      if (stableChanged) {
         deviceSignatureRef.current = nextSignature;
         setDevices(next);
       }
@@ -890,6 +627,57 @@ function App() {
     setDevices((current) => current.map((item) => item.deviceId === device.deviceId ? { ...item, lease: null } : item));
   }
 
+  async function releaseSelectedDevice() {
+    const device = manualControlRef.current.selectedDevice;
+    if (!device || leaseBusy) return;
+    setLeaseBusy(true);
+    setFeedback(`正在停止并释放 ${deviceLabel(device)}…`);
+    keyboardRef.current.pressed.clear();
+    await stopKeyboardControl(device, true);
+    try {
+      await releaseLease(device);
+      setSelectedDeviceId("");
+      setFeedback(`${deviceLabel(device)} 控制权已释放`);
+    } catch (error) {
+      setFeedback(error.message);
+    } finally {
+      setLeaseBusy(false);
+    }
+  }
+
+  function manualMotionForDevice(device) {
+    const saved = manualMotionByDevice[device?.deviceId] || {};
+    return {
+      frequency: clamp(saved.frequency, 0.3, 5, DEFAULT_FREQUENCY),
+      amplitudePercent: clamp(saved.amplitudePercent, 0, 100, DEFAULT_AMPLITUDE_PERCENT),
+    };
+  }
+
+  function updateManualMotion(device, key, value) {
+    if (!device?.deviceId) return;
+    const current = manualMotionForDevice(device);
+    const next = {
+      ...current,
+      [key]: key === "frequency"
+        ? clamp(value, 0.3, 5, DEFAULT_FREQUENCY)
+        : clamp(value, 0, 100, DEFAULT_AMPLITUDE_PERCENT),
+    };
+    setManualMotionByDevice((profiles) => {
+      const updated = { ...profiles, [device.deviceId]: next };
+      localStorage.setItem(MANUAL_MOTION_STORAGE_KEY, JSON.stringify(updated));
+      return updated;
+    });
+
+    const keyboard = keyboardRef.current;
+    if (
+      keyboard.active
+      && keyboard.lastMode
+      && manualControlRef.current.selectedDevice?.deviceId === device.deviceId
+    ) {
+      sendRealtimeCommand(device, keyboard.lastMode, undefined, next).catch(reportKeyboardError);
+    }
+  }
+
   async function sendCommand(device, mode, override = null) {
     if (auth.authenticated && mode !== "stop") {
       const lease = device.lease;
@@ -921,16 +709,34 @@ function App() {
     return result;
   }
 
-  async function sendRealtimeCommand(device, mode) {
-    const payload = {
+  async function sendRealtimeCommand(device, mode, sequence, override = null) {
+    const isStop = mode === "stop";
+    const savedMotion = manualControlRef.current.manualMotionByDevice?.[device.deviceId] || {};
+    const motion = override || {
+      frequency: clamp(savedMotion.frequency, 0.3, 5, DEFAULT_FREQUENCY),
+      amplitudePercent: clamp(savedMotion.amplitudePercent, 0, 100, DEFAULT_AMPLITUDE_PERCENT),
+    };
+    const payload = isStop ? {
+      deviceId: device.deviceId,
+      mode: "stop",
+      frequency: 0.3,
+      amplitudePercent: 0,
+      bias: 0,
+    } : {
       deviceId: device.deviceId,
       mode,
-      frequency: clamp(device.frequency ?? 2.5, 0.3, 5, 2.5),
-      amplitudePercent: clamp(amplitudePercentFromDevice(device), 0, 100, DEFAULT_AMPLITUDE_PERCENT),
+      frequency: clamp(motion.frequency, 0.3, 5, DEFAULT_FREQUENCY),
+      amplitudePercent: clamp(motion.amplitudePercent, 0, 100, DEFAULT_AMPLITUDE_PERCENT),
     };
-    if (device.bias !== undefined && device.bias !== null && mode !== "left" && mode !== "right") {
-      payload.bias = clamp(device.bias, -90, 90, 0);
+    if (!isStop && motion.bias !== undefined && motion.bias !== null) {
+      payload.bias = clamp(motion.bias, -90, 90, 0);
     }
+    const nextSequence = sequence ?? (() => {
+      const state = keyboardRef.current;
+      state.sequence = Math.max(state.sequence + 1, Date.now() * 1000);
+      return state.sequence;
+    })();
+    payload.sequence = nextSequence;
     const response = await fetch("/api/command/realtime", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -954,38 +760,47 @@ function App() {
     const current = manualControlRef.current;
     const device = targetDevice || current.selectedDevice;
     if (!current.authenticated || current.page !== "manual" || !device) return;
-    const send = () => sendRealtimeCommand(device, mode);
-    if (mode !== "stop" && (!device.lease || device.lease.ownerEmail !== current.currentUserEmail)) {
-      if (keyboardRef.current.leasePromise) return;
-      setLeaseBusy(true);
-      keyboardRef.current.leasePromise = acquireLease(device, "manual")
-        .then(() => {
-          if (!keyboardRef.current.active || !keyboardRef.current.lastMode) return null;
-          return send();
-        })
-        .catch((error) => {
-          stopKeyboardControl(device);
-          reportKeyboardError(error);
-        })
-        .finally(() => {
-          keyboardRef.current.leasePromise = null;
-          setLeaseBusy(false);
-        });
-      return;
-    }
-    send().catch(reportKeyboardError);
+    const state = keyboardRef.current;
+    if (mode !== "stop" && state.lastSentMode === mode) return;
+    state.commandPromise = state.commandPromise
+      .catch(() => {})
+      .then(async () => {
+        const latestMode = mode === "stop" ? "stop" : state.lastMode;
+        if (mode !== "stop" && (!state.active || latestMode !== mode)) return;
+        if (mode !== "stop" && (!device.lease || device.lease.ownerEmail !== current.currentUserEmail)) {
+          if (!state.leasePromise) {
+            setLeaseBusy(true);
+            state.leasePromise = acquireLease(device, "manual")
+              .finally(() => {
+                state.leasePromise = null;
+                setLeaseBusy(false);
+              });
+          }
+          await state.leasePromise;
+          if (!state.active || state.lastMode !== mode) return;
+        }
+        await sendRealtimeCommand(device, mode);
+        state.lastSentMode = mode;
+      })
+      .catch((error) => {
+        if (mode !== "stop") {
+          window.setTimeout(() => stopKeyboardControl(device, true), 0);
+        }
+        reportKeyboardError(error);
+      });
   }
 
-  function stopKeyboardControl(targetDevice = null) {
+  function stopKeyboardControl(targetDevice = null, forceStop = false) {
     const state = keyboardRef.current;
-    if (state.timer !== null) {
-      window.clearInterval(state.timer);
-      state.timer = null;
-    }
-    const shouldStop = state.active || state.lastMode;
+    const shouldStop = forceStop || state.active || state.lastMode || state.lastSentMode;
     state.active = false;
     state.lastMode = "";
-    if (shouldStop) sendKeyboardFrame("stop", targetDevice);
+    state.turnOrder.clear();
+    if (!shouldStop) return Promise.resolve();
+    const targets = Array.isArray(targetDevice) ? targetDevice : [targetDevice || manualControlRef.current.selectedDevice];
+    targets.filter(Boolean).forEach((device) => sendKeyboardFrame("stop", device));
+    state.lastSentMode = "stop";
+    return state.commandPromise;
   }
 
   function updateKeyboardControl() {
@@ -995,25 +810,19 @@ function App() {
       stopKeyboardControl();
       return;
     }
-    const mode = keyboardMode(state.pressed);
+    const mode = keyboardMode(state.pressed, state.turnOrder);
     if (mode === "stop") {
+      const wasActive = state.active || Boolean(state.lastMode);
       stopKeyboardControl();
+      // S/Space is also an explicit stop for motion that was started outside
+      // the current keyboard loop (for example a previous command or vision).
+      if (!wasActive && (state.pressed.has("KeyS") || state.pressed.has("Space"))) {
+        sendKeyboardFrame("stop");
+      }
       return;
     }
     state.active = true;
     state.lastMode = mode;
-    if (state.timer === null) {
-      state.timer = window.setInterval(() => {
-        if (state.leasePromise) return;
-        const nextMode = keyboardMode(state.pressed);
-        if (nextMode === "stop") {
-          stopKeyboardControl();
-          return;
-        }
-        state.lastMode = nextMode;
-        sendKeyboardFrame(nextMode);
-      }, KEYBOARD_TICK_MS);
-    }
     sendKeyboardFrame(mode);
   }
 
@@ -1024,16 +833,22 @@ function App() {
       const state = keyboardRef.current;
       if (state.pressed.has(event.code)) return;
       state.pressed.add(event.code);
+      if (TURN_CODES.has(event.code)) {
+        state.turnOrder.set(event.code, ++state.turnSequence);
+      }
       updateKeyboardControl();
     }
     function onKeyUp(event) {
       if (!KEYBOARD_CODES.has(event.code) || isTypingTarget(event.target)) return;
       event.preventDefault();
-      keyboardRef.current.pressed.delete(event.code);
+      const state = keyboardRef.current;
+      state.pressed.delete(event.code);
       updateKeyboardControl();
     }
     function releaseKeyboard() {
-      keyboardRef.current.pressed.clear();
+      const state = keyboardRef.current;
+      state.pressed.clear();
+      state.turnOrder.clear();
       stopKeyboardControl();
     }
     window.addEventListener("keydown", onKeyDown);
@@ -1055,6 +870,7 @@ function App() {
   useEffect(() => {
     if (page !== "manual" || !auth.authenticated) {
       keyboardRef.current.pressed.clear();
+      keyboardRef.current.turnOrder.clear();
       stopKeyboardControl();
     }
   }, [auth.authenticated, page]);
@@ -1146,7 +962,7 @@ function App() {
     setSending(true);
     setOtaFeedback(`正在向 ${otaSelectedDevices.length} 台设备创建 OTA 任务…`);
     const results = await Promise.allSettled(otaSelectedDevices.map(async (device) => {
-      const response = await fetch("/api/ota", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deviceId: device.deviceId }) });
+      const response = await fetch("/api/ota", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deviceId: device.deviceId, name: deviceLabel(device) }) });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || result.sent === false || result.acknowledged !== true || result.success !== true) throw new Error(result.message || "开发板未确认 OTA 完成");
       return result;
@@ -1201,14 +1017,17 @@ function App() {
       {page !== "settings" ? (
         <div className={`workspace ${page}-workspace`}>
           <section className="center-column">
-            {page === "vision" ? <VisionPanel devices={devices} targetDeviceId={visionDeviceId} onTargetDeviceChange={setVisionDeviceId} /> : (
-              <>
-                <ManualVideoPreview />
-              </>
-            )}
+            <VisionPanel
+              devices={devices}
+              targetDeviceId={page === "vision" ? visionDeviceId : ""}
+              onTargetDeviceChange={setVisionDeviceId}
+              onVisionStateChange={setVisionState}
+              mode={page === "manual" ? "manual" : "vision"}
+              showTargetDeviceSelector={false}
+            />
           </section>
 
-          {page === "manual" && <aside className="control-sidebar panel-surface">
+          {page === "manual" ? <aside className="control-sidebar panel-surface">
             <section className="control-section manual-list-section">
               <div className="panel-heading compact">
                 <div><span className="eyebrow">MANUAL</span><h2>在线鱼列表</h2><small>点击一条鱼即可接管，系统会自动释放你上一条鱼。</small></div>
@@ -1240,9 +1059,56 @@ function App() {
                   </button>;
                 }) : <div className="list-row"><strong>暂无在线鱼</strong><span>设备上线后会出现在这里。</span></div>}
               </div>
+              <section className="manual-motion-panel" aria-label="手动运动参数">
+                <header>
+                  <div><strong>运动参数</strong><span>{selectedDevice ? deviceLabel(selectedDevice) : "未选择设备"}</span></div>
+                  <small>W 前进 · A/D 转向 · S 停止</small>
+                </header>
+                <label className="manual-motion-slider">
+                  <span><b>摆动速度</b><output>{selectedManualMotion.frequency.toFixed(1)} Hz</output></span>
+                  <input
+                    type="range"
+                    min="0.3"
+                    max="5"
+                    step="0.1"
+                    value={selectedManualMotion.frequency}
+                    disabled={!selectedDevice || leaseBusy}
+                    onChange={(event) => updateManualMotion(selectedDevice, "frequency", Number(event.target.value))}
+                    aria-label="摆动速度"
+                  />
+                </label>
+                <label className="manual-motion-slider">
+                  <span><b>摆动幅度</b><output>{Math.round(selectedManualMotion.amplitudePercent)}% · {Math.round(selectedManualMotion.amplitudePercent * 0.9)}°</output></span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="1"
+                    value={selectedManualMotion.amplitudePercent}
+                    disabled={!selectedDevice || leaseBusy}
+                    onChange={(event) => updateManualMotion(selectedDevice, "amplitudePercent", Number(event.target.value))}
+                    aria-label="摆动幅度"
+                  />
+                </label>
+                <small className="manual-motion-note">参数按设备分别保存；运动中调整也会立即生效。</small>
+              </section>
+              {selectedDevice?.lease?.ownerEmail === auth.user?.email && <button
+                className="manual-release-button"
+                type="button"
+                disabled={leaseBusy}
+                onClick={releaseSelectedDevice}
+              >
+                释放当前控制权
+              </button>}
               <p className="feedback" aria-live="polite">{feedback}</p>
             </section>
-          </aside>}
+          </aside> : <OnlineFishSidebar
+            devices={devices}
+            selectedId={visionDeviceId}
+            onSelect={(device) => setVisionDeviceId(device.deviceId)}
+            vision
+            visionState={visionState}
+          />}
         </div>
       ) : (
         <div className="settings-grid">

@@ -4,13 +4,22 @@
 MotionController::MotionController(int pin, float frequency, float amplitude, float turnAmount)
     : pin_(pin), state_(frequency, amplitude, turnAmount) {}
 
-void MotionController::begin() { servo_.attach(pin_); servo_.write(90); lastUpdate_ = millis(); }
-void MotionController::setMode(MotionMode mode) { state_.setMode(mode); if (mode == MotionMode::Stopped) servo_.write(90); }
-bool MotionController::setTuning(float f, float a) { return state_.setTuning(f, a); }
-bool MotionController::setBias(float bias) { return state_.setBias(bias); }
-bool MotionController::centerAtBias(float bias) { state_.safeStop(); if(!state_.setBias(bias))return false; servo_.write((int)(90.0f+bias)); return true; }
-bool MotionController::applyVisual(float f,float a,float bias){if(!state_.setTuning(f,a)||!state_.setBias(bias))return false;state_.setMode(MotionMode::Forward);return true;}
-void MotionController::safeStop() { state_.safeStop(); servo_.write(90); }
+void MotionController::begin() {
+    servo_.attach(pin_);
+    outputAngle_ = state_.angleAt(0.0f);
+    servo_.write((int)outputAngle_);
+    lastUpdate_ = millis();
+}
+void MotionController::setNeutralCenter(float center) { state_.setNeutralCenter(center); }
+void MotionController::setMode(MotionMode mode) { state_.setMode(mode); }
+void MotionController::setTuning(float f, float a) { state_.setTuning(f, a); }
+void MotionController::setBias(float bias) { state_.setBias(bias); }
+void MotionController::centerAtBias(float bias) {
+    state_.setNeutralCenter(90.0f + bias);
+    state_.safeStop();
+    state_.setBias(0.0f);
+}
+void MotionController::safeStop() { state_.safeStop(); }
 MotionSnapshot MotionController::snapshot() const { return state_.snapshot(); }
 
 void MotionController::update(uint32_t nowMs) {
@@ -18,8 +27,14 @@ void MotionController::update(uint32_t nowMs) {
     float dt = (nowMs - lastUpdate_) / 1000.0f;
     lastUpdate_ = nowMs;
     MotionSnapshot s = state_.snapshot();
-    if (s.mode == MotionMode::Stopped) return;
-    float frequency = s.mode == MotionMode::Idle ? 0.6f : s.frequency;
-    phase_ = fmodf(phase_ + frequency * 2.0f * PI * dt, 2.0f * PI);
-    servo_.write((int)state_.angleAt(phase_));
+    if (s.mode != MotionMode::Stopped) {
+        phase_ = fmodf(phase_ + s.frequency * 2.0f * PI * dt, 2.0f * PI);
+    }
+    float target = state_.angleAt(phase_);
+    float delta = target - outputAngle_;
+    const float maxStep = 8.0f;
+    if (delta > maxStep) delta = maxStep;
+    if (delta < -maxStep) delta = -maxStep;
+    outputAngle_ += delta;
+    servo_.write((int)outputAngle_);
 }

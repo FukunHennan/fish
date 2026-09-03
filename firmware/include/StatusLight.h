@@ -9,7 +9,6 @@ enum class StatusLightMode {
     Discovering,
     Ready,
     ManualMotion,
-    VisionControl,
     Ota,
     Error,
 };

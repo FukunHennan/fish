@@ -6,6 +6,18 @@ export function visionStreamUrl(sessionId, retry = 0) {
   return `/api/vision/sessions/${encodeURIComponent(sessionId)}/stream.mjpg?retry=${retry}`;
 }
 
+export function visionWebRTCConfigUrl() {
+  return "/api/vision/webrtc/config";
+}
+
+export function visionWebRTCOfferUrl() {
+  return "/api/vision/webrtc/offer";
+}
+
+export function visionEventUrl() {
+  return "/api/vision/events";
+}
+
 export async function visionRequest(path, options = {}) {
   const response = await fetch(`/api/vision${path}`, {
     ...options,

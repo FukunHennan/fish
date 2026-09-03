@@ -1028,8 +1028,7 @@ class VisionPresentation:
     @staticmethod
     def _draw_video_timing(image: np.ndarray, frame_time: float) -> None:
         captured = datetime.fromtimestamp(frame_time).strftime("%H:%M:%S.%f")[:-3]
-        latency_ms = max(0.0, (time.time() - frame_time) * 1000.0)
-        label = f"采集 {captured} · 延时 {latency_ms:.0f} ms"
+        label = f"采集 {captured}"
         text_width, text_height = measure_unicode_text(label, 12, bold=True)
         height, width = image.shape[:2]
         panel_width = min(max(1, width - 16), text_width + 18)

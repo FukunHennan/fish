@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 
 SIMPLE_ACTIONS = {
     "marker.select": "MARKER_ROI",
@@ -64,10 +66,16 @@ def translate_web_action(action, frame_size=None):
             translated.append(point)
         return "SET_PATH", translated
     if action_type == "camera.exposure":
-        delta = action.get("value")
-        if delta not in (-1, 1):
+        value = action.get("value")
+        if action.get("mode") == "absolute":
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return None
+            if not math.isfinite(float(value)):
+                return None
+            return "SET_EXPOSURE", float(value)
+        if value not in (-1, 1):
             return None
-        return "EXP_DOWN" if delta < 0 else "EXP_UP"
+        return "EXP_DOWN" if value < 0 else "EXP_UP"
     if action_type == "overlay.set":
         overlays = action.get("overlays")
         if not isinstance(overlays, dict):

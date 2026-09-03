@@ -1,6 +1,5 @@
 #include "NetworkManager.h"
 #include "DeviceIdentity.h"
-#include "CaptivePortalRoutes.h"
 #include <WiFi.h>
 #include <ArduinoJson.h>
 

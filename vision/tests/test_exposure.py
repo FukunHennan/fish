@@ -6,6 +6,7 @@ import cv2
 from interface import (
     apply_manual_exposure,
     apply_manual_exposure_for_device,
+    set_manual_exposure_for_device,
     prepare_v4l2_capture,
 )
 
@@ -104,6 +105,49 @@ class ExposureTests(unittest.TestCase):
         self.assertEqual(result.previous_value, 100)
         self.assertEqual(result.actual_value, 201)
         self.assertTrue(any("exposure_auto=1" in call for call in calls))
+
+    def test_absolute_opencv_exposure_uses_requested_value(self):
+        result = set_manual_exposure_for_device(FakeCapture(), 42)
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.requested_value, 42)
+        self.assertEqual(result.actual_value, 42)
+
+    def test_absolute_v4l2_exposure_is_clamped_and_reports_range(self):
+        calls = []
+
+        class Completed:
+            def __init__(self, stdout="", returncode=0):
+                self.stdout = stdout
+                self.returncode = returncode
+
+        control_before = (
+            "exposure_auto 0x0 (menu) : min=0 max=3 default=3 value=3\n"
+            "exposure_absolute 0x0 (int) : min=3 max=2031 step=10 default=250 value=100"
+        )
+        control_after = (
+            "exposure_auto 0x0 (menu) : min=0 max=3 default=3 value=1\n"
+            "exposure_absolute 0x0 (int) : min=3 max=2031 step=10 default=250 value=2031"
+        )
+
+        def fake_run(args, **_kwargs):
+            calls.append(args)
+            if "--list-ctrls" in args:
+                listed = [call for call in calls if "--list-ctrls" in call]
+                return Completed(control_after if len(listed) > 1 else control_before)
+            return Completed()
+
+        with patch("interface.shutil.which", return_value="/usr/bin/v4l2-ctl"), patch(
+            "interface.subprocess.run", side_effect=fake_run
+        ):
+            result = set_manual_exposure_for_device(FakeCapture(), 9999, 0)
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.requested_value, 9999)
+        self.assertEqual(result.actual_value, 2031)
+        self.assertEqual(result.minimum, 3)
+        self.assertEqual(result.maximum, 2031)
+        self.assertEqual(result.step, 10)
+        self.assertTrue(any("exposure_absolute=2031" in call for call in calls))
 
 
 if __name__ == "__main__":

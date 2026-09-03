@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+import os
 import secrets
 from typing import Any, Optional
 
@@ -60,18 +61,26 @@ class VisionSession:
     camera_id: Optional[str]
     camera_index: Optional[int]
     target_device_id: Optional[str]
+    yolo_model: Optional[str]
     state: VisionState
     error: Optional[dict[str, str]] = None
     metrics: dict[str, Any] = field(default_factory=dict)
     last_action: Optional[dict[str, Any]] = None
 
     @classmethod
-    def new(cls, camera_id: str, camera_index: int, target_device_id: Optional[str] = None) -> "VisionSession":
+    def new(
+        cls,
+        camera_id: str,
+        camera_index: int,
+        target_device_id: Optional[str] = None,
+        yolo_model: Optional[str] = None,
+    ) -> "VisionSession":
         return cls(
             session_id=secrets.token_urlsafe(24),
             camera_id=camera_id,
             camera_index=camera_index,
             target_device_id=target_device_id,
+            yolo_model=yolo_model,
             state=VisionState.OPENING,
         )
 
@@ -97,6 +106,7 @@ class VisionSession:
             "cameraId": self.camera_id,
             "cameraIndex": self.camera_index,
             "targetDeviceId": self.target_device_id,
+            "yoloModel": os.path.basename(self.yolo_model) if self.yolo_model else None,
             "error": self.error,
             "metrics": dict(self.metrics),
             "lastAction": self.last_action,

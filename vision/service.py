@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from queue import Empty, SimpleQueue
+from queue import Empty, Queue, SimpleQueue
 from threading import RLock
+import inspect
 import math
 import time
 from typing import Callable, Optional
@@ -224,15 +225,31 @@ class VisionService:
         self._error = ""
         self._actions = SimpleQueue()
         self._session = None
+        self._subscribers = set()
+        self._last_metrics_notify = 0.0
 
-    def create_session(self, camera_id, camera_index, target_device_id=None):
+    def create_session(self, camera_id, camera_index, target_device_id=None, yolo_model=None):
         with self._lock:
             if self._stop_runner is not None:
                 return None
-            session = VisionSession.new(camera_id, camera_index, target_device_id)
+            session = VisionSession.new(
+                camera_id, camera_index, target_device_id, yolo_model
+            )
             self._error = ""
             try:
-                stop_runner = self._runner_factory(camera_index, self.publish)
+                parameters = list(inspect.signature(self._runner_factory).parameters.values())
+                accepts_model = any(
+                    parameter.kind == inspect.Parameter.VAR_POSITIONAL
+                    or parameter.kind == inspect.Parameter.VAR_KEYWORD
+                    or parameter.name == "yolo_model_path"
+                    for parameter in parameters
+                ) or len(parameters) >= 3
+                if accepts_model:
+                    stop_runner = self._runner_factory(
+                        camera_index, self.publish, yolo_model
+                    )
+                else:
+                    stop_runner = self._runner_factory(camera_index, self.publish)
             except Exception as error:
                 session.fail("camera_open_failed", str(error))
                 self._session = session
@@ -241,6 +258,7 @@ class VisionService:
             self._camera_index = camera_index
             self._session = session
             session.transition(VisionState.PREVIEWING)
+            self._notify()
             return session.snapshot()
 
     def current_session(self):
@@ -249,6 +267,7 @@ class VisionService:
                 return {
                     "state": "idle", "sessionId": None,
                     "cameraId": None, "cameraIndex": None, "targetDeviceId": None,
+                    "yoloModel": None,
                     "error": None, "metrics": {}, "lastAction": None,
                 }
             return self._session.snapshot()
@@ -259,6 +278,7 @@ class VisionService:
             if session.state == VisionState.PREVIEWING:
                 session.transition(VisionState.PROCESSING)
                 self._actions.put("PROCESSING_START")
+            self._notify()
             return session.snapshot()
 
     def stop_processing(self, session_id):
@@ -272,6 +292,7 @@ class VisionService:
             if was_tracking:
                 self._actions.put("STOP")
             self._actions.put("PROCESSING_STOP")
+            self._notify()
             return session.snapshot()
 
     def handle_session_action(self, session_id, action):
@@ -290,6 +311,7 @@ class VisionService:
                 action["deviceId"] = session.target_device_id
             self._actions.put(action)
             session.last_action = {"type": action["type"], "accepted": True}
+            self._notify()
             return True
 
     def stop_session(self, session_id):
@@ -305,6 +327,7 @@ class VisionService:
             snapshot["cameraId"] = None
             snapshot["cameraIndex"] = None
             self._session = None
+            self._notify()
             return snapshot
 
     def _require_session(self, session_id):
@@ -315,6 +338,43 @@ class VisionService:
 
     def start(self, camera_index):
         return self.create_session(f"camera-{camera_index}", camera_index) is not None
+
+    def set_target_device(self, session_id, target_device_id):
+        with self._lock:
+            session = self._require_session(session_id)
+            if session.state not in (
+                VisionState.PREVIEWING,
+                VisionState.PROCESSING,
+                VisionState.TRACKING,
+            ):
+                return None
+            session.target_device_id = (
+                target_device_id.strip() if target_device_id else None
+            )
+            self._notify()
+            return session.snapshot()
+
+    def switch_camera(self, session_id, camera_id, camera_index):
+        with self._lock:
+            session = self._require_session(session_id)
+            target_device_id = session.target_device_id
+            if session.camera_index == camera_index:
+                return session.snapshot()
+
+        if not self.stop():
+            return self.current_session()
+
+        with self._lock:
+            if self._session is not None:
+                self._session.transition(VisionState.IDLE)
+                self._session = None
+
+        snapshot = self.create_session(
+            camera_id, camera_index, target_device_id, session.yolo_model
+        )
+        if snapshot is None:
+            return self.current_session()
+        return snapshot
 
     def stop(self):
         with self._lock:
@@ -339,6 +399,7 @@ class VisionService:
             self._stop_runner = None
             self._camera_index = None
             self._error = ""
+            self._notify()
 
         while self.next_action() is not None:
             pass
@@ -352,14 +413,24 @@ class VisionService:
                 metrics = event.get("metrics")
                 if isinstance(metrics, dict):
                     self._session.metrics.update(metrics)
+                now = time.monotonic()
+                if now - self._last_metrics_notify < 0.5:
+                    return
+                self._last_metrics_notify = now
+                self._notify()
                 return
             self._session.last_action = dict(event)
             if event.get("type") == "camera.exposure":
                 self._session.metrics["exposure"] = {
                     "supported": bool(event.get("supported")),
                     "actualValue": event.get("actualValue"),
+                    "minimum": event.get("minimum"),
+                    "maximum": event.get("maximum"),
+                    "step": event.get("step"),
+                    "requestedValue": event.get("requestedValue"),
                     "errorCode": event.get("errorCode"),
                 }
+            self._notify()
 
     def handle_action(self, action):
         with self._lock:
@@ -368,6 +439,7 @@ class VisionService:
             if not isinstance(action, dict) or action.get("type") not in self.ACTION_TYPES:
                 return False
             self._actions.put(action)
+            self._notify()
             return True
 
     def next_action(self):
@@ -375,6 +447,30 @@ class VisionService:
             return self._actions.get_nowait()
         except Empty:
             return None
+
+    def subscribe(self):
+        updates = Queue(maxsize=1)
+        with self._lock:
+            self._subscribers.add(updates)
+
+        def unsubscribe():
+            with self._lock:
+                self._subscribers.discard(updates)
+
+        return updates, unsubscribe
+
+    def _notify(self):
+        snapshot = self.current_session()
+        for queue in list(self._subscribers):
+            try:
+                if queue.full():
+                    try:
+                        queue.get_nowait()
+                    except Empty:
+                        pass
+                queue.put_nowait(snapshot)
+            except Exception:
+                self._subscribers.discard(queue)
 
     def status(self):
         with self._lock:

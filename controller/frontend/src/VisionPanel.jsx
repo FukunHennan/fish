@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { chooseCameraIndex, toVideoPoint } from "./coordinates.js";
-import { visionStreamSource } from "./visionStream.js";
 import { transitionVisionTool } from "./visionTools.js";
-import { canEditVision, visionRequest, visionStreamUrl } from "./visionSession.js";
-import { formatFrameLatency, formatVideoClock } from "./videoTime.js";
+import { canEditVision, visionEventUrl, visionRequest } from "./visionSession.js";
+import { formatFrameLatency, formatServerClock, formatVideoClock } from "./videoTime.js";
+import VideoStream from "./VideoStream.jsx";
 
 const TOOLS = [
   ["path", "绘制轨迹"],
@@ -33,6 +33,12 @@ const CONTROL_MODES = [
 
 const DEFAULT_OVERLAYS = { detections: false, paths: false };
 
+function sessionErrorMessage(status) {
+  const error = status?.error;
+  if (!error) return "";
+  return typeof error === "string" ? error : error.message || error.code || "";
+}
+
 function cameraLabel(camera) {
   const model = camera.model || camera.name || `摄像头 ${camera.index}`;
   const size = camera.width && camera.height ? `${camera.width}×${camera.height}` : "";
@@ -41,7 +47,14 @@ function cameraLabel(camera) {
   return [`#${camera.index}`, model, capability].filter(Boolean).join(" · ");
 }
 
-export default function VisionPanel({ devices = [], targetDeviceId = "", onTargetDeviceChange = () => {} }) {
+export default function VisionPanel({
+  devices = [],
+  targetDeviceId = "",
+  onTargetDeviceChange = () => {},
+  onVisionStateChange = () => {},
+  mode = "vision",
+  showTargetDeviceSelector = true,
+}) {
   const [cameras, setCameras] = useState([]);
   const [cameraIndex, setCameraIndex] = useState("");
   const [status, setStatus] = useState({ state: "stopped", error: "" });
@@ -50,15 +63,29 @@ export default function VisionPanel({ devices = [], targetDeviceId = "", onTarge
   const [drag, setDrag] = useState(null);
   const [streamRetry, setStreamRetry] = useState(0);
   const [streamFeedback, setStreamFeedback] = useState("");
+  const [streamState, setStreamState] = useState("idle");
+  const [switchingCamera, setSwitchingCamera] = useState(false);
+  const [yoloModels, setYoloModels] = useState([]);
+  const [selectedYoloModel, setSelectedYoloModel] = useState("");
   const [controlMode, setControlMode] = useState("detect");
   const [autoSpeed, setAutoSpeed] = useState(42);
   const [autoAmplitude, setAutoAmplitude] = useState(35);
   const [autoConfidence, setAutoConfidence] = useState(80);
   const [overlayPrefs, setOverlayPrefs] = useState(DEFAULT_OVERLAYS);
   const [clock, setClock] = useState(() => formatVideoClock());
+  const [clockTick, setClockTick] = useState(() => Date.now());
+  const [serverTime, setServerTime] = useState(null);
+  const [serverUtcOffsetMinutes, setServerUtcOffsetMinutes] = useState(0);
+  const [serverTimeReceivedAt, setServerTimeReceivedAt] = useState(0);
+  const [exposurePercent, setExposurePercent] = useState(50);
+  const [exposureMaxInput, setExposureMaxInput] = useState("");
   const imageRef = useRef(null);
   const retryTimerRef = useRef(null);
+  const exposurePendingRef = useRef(null);
+  const camerasRef = useRef([]);
+  const targetDeviceIdRef = useRef(targetDeviceId);
 
+  const manual = mode === "manual";
   const running = ["previewing", "processing", "tracking"].includes(status.state);
   const processing = ["processing", "tracking"].includes(status.state);
   const editable = canEditVision(status);
@@ -76,9 +103,111 @@ export default function VisionPanel({ devices = [], targetDeviceId = "", onTarge
   const exposure = status.metrics?.exposure || {};
   const controlModeLabel = CONTROL_MODES.find(([name]) => name === controlMode)?.[2] || "只识别，不自动控制";
   const latencyLabel = formatFrameLatency(status.metrics);
-  let exposureHelp = "每次调整一级，并读取驱动实际值";
+  const serverClock = formatServerClock(
+    serverTime,
+    serverUtcOffsetMinutes,
+    serverTimeReceivedAt,
+    clockTick,
+  );
+  const exposureMin = Number(exposure.minimum);
+  const exposureDriverMax = Number(exposure.maximum);
+  const exposureStep = Number(exposure.step) > 0 ? Number(exposure.step) : 1;
+  const exposureRangeReady = (
+    exposure.supported !== false
+    && Number.isFinite(exposureMin)
+    && Number.isFinite(exposureDriverMax)
+    && exposureDriverMax > exposureMin
+  );
+  const requestedExposureMax = Number(exposureMaxInput);
+  const snapExposureValue = (value) => {
+    if (!exposureRangeReady) return null;
+    const bounded = Math.min(exposureDriverMax, Math.max(exposureMin, Number(value)));
+    if (bounded >= exposureDriverMax) return exposureDriverMax;
+    const stepped = exposureMin + Math.round((bounded - exposureMin) / exposureStep) * exposureStep;
+    return Math.min(exposureDriverMax, Math.max(exposureMin, stepped));
+  };
+  const exposureMax = exposureRangeReady
+    ? snapExposureValue(
+      Number.isFinite(requestedExposureMax) ? requestedExposureMax : exposureDriverMax,
+    )
+    : null;
+  const legalExposureValue = (percent, maximum = exposureMax) => {
+    if (!exposureRangeReady || maximum === null) return null;
+    const boundedPercent = Math.min(100, Math.max(0, Number(percent) || 0));
+    const raw = exposureMin + (maximum - exposureMin) * boundedPercent / 100;
+    const stepped = exposureMin + Math.round((raw - exposureMin) / exposureStep) * exposureStep;
+    return Math.min(exposureDriverMax, Math.max(exposureMin, stepped));
+  };
+  const previewExposureValue = legalExposureValue(exposurePercent);
+  let exposureHelp = exposureRangeReady
+    ? `驱动范围 ${exposureMin}–${exposureDriverMax}，按 ${exposureStep} 步进取整`
+    : "当前摄像头没有提供可用的曝光范围";
   if (exposure.supported === false) exposureHelp = "当前摄像头不支持手动曝光";
   if (exposure.errorCode === "exposure_not_applied") exposureHelp = "驱动未应用曝光值";
+
+  const sharedOverlayPanel = (
+    <section className="overlay-panel">
+      <header><strong>画面叠加</strong><span>只影响显示，不影响识别/控制</span></header>
+      <div className="overlay-toggle-row compact">
+        <label><input type="checkbox" checked={overlays.detections} disabled={!running} onChange={(event) => setOverlay("detections", event.target.checked)} /> YOLO 识别</label>
+        <label><input type="checkbox" checked={overlays.paths} disabled={!running} onChange={(event) => setOverlay("paths", event.target.checked)} /> 路径/轨迹</label>
+      </div>
+    </section>
+  );
+
+  const sharedExposurePanel = (
+    <section className="exposure-control">
+      <header><strong>摄像头曝光</strong><span>实际 {exposure.actualValue ?? "—"}</span></header>
+      <label className="exposure-limit-row">
+        <span>曝光上限</span>
+        <input
+          type="number"
+          min={exposureRangeReady ? exposureMin : undefined}
+          max={exposureRangeReady ? exposureDriverMax : undefined}
+          step={exposureRangeReady ? exposureStep : 1}
+          value={exposureMaxInput}
+          disabled={!exposureRangeReady}
+          onChange={(event) => setExposureMaxInput(event.target.value)}
+          onBlur={normalizeExposureMax}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+          }}
+          aria-label="曝光上限"
+        />
+      </label>
+      <label className="exposure-slider-row">
+        <span>曝光百分比 <b>{Math.round(exposurePercent)}%</b></span>
+        <input
+          type="range"
+          min="0"
+          max="100"
+          step="1"
+          value={exposurePercent}
+          disabled={!running || !exposureRangeReady}
+          onChange={(event) => setExposurePercent(Number(event.target.value))}
+          onPointerUp={(event) => commitExposurePercent(event.currentTarget.value)}
+          onKeyUp={(event) => {
+            if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+              commitExposurePercent(event.currentTarget.value);
+            }
+          }}
+          onBlur={(event) => commitExposurePercent(event.currentTarget.value)}
+          aria-label="曝光百分比"
+        />
+        <output>{previewExposureValue ?? "—"}</output>
+      </label>
+      <small>{exposureHelp}</small>
+    </section>
+  );
+
+  function captureServerTime(payload) {
+    const value = Number(payload?.serverTime ?? payload?.data?.serverTime);
+    if (!Number.isFinite(value)) return;
+    setServerTime(value);
+    const offset = Number(payload?.serverUtcOffsetMinutes ?? payload?.data?.serverUtcOffsetMinutes);
+    if (Number.isFinite(offset)) setServerUtcOffsetMinutes(offset);
+    setServerTimeReceivedAt(Date.now());
+  }
 
   useEffect(() => {
     let active = true;
@@ -93,22 +222,99 @@ export default function VisionPanel({ devices = [], targetDeviceId = "", onTarge
         const statusEnvelope = await statusResponse.json();
         const nextStatus = statusEnvelope.data || statusEnvelope;
         if (!active) return;
+        camerasRef.current = cameraList;
+        captureServerTime(statusEnvelope);
         setCameras(cameraList);
         setStatus(nextStatus);
+        if (nextStatus.yoloModel) setSelectedYoloModel(nextStatus.yoloModel);
         setCameraIndex((current) => chooseCameraIndex(current, cameraList, nextStatus));
       } catch (error) {
         if (active) setFeedback(error.message);
       }
     }
     refresh();
-    const timer = window.setInterval(refresh, 1500);
-    return () => { active = false; window.clearInterval(timer); };
+    if (typeof window.EventSource !== "function") {
+      if (active) setFeedback("当前浏览器不支持视觉状态推送");
+      return () => { active = false; };
+    }
+    const source = new window.EventSource(visionEventUrl());
+    source.addEventListener("session", (event) => {
+      if (!active) return;
+      try {
+        const envelope = JSON.parse(event.data);
+        const nextStatus = envelope.data || envelope;
+        captureServerTime(envelope);
+        setStatus(nextStatus);
+        if (nextStatus.yoloModel) setSelectedYoloModel(nextStatus.yoloModel);
+        setCameraIndex((current) => chooseCameraIndex(current, camerasRef.current, nextStatus));
+      } catch {
+        setFeedback("视觉状态数据无效");
+      }
+    });
+    return () => {
+      active = false;
+      source.close();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (manual || targetDeviceIdRef.current === targetDeviceId) return undefined;
+    const previousTargetDeviceId = targetDeviceIdRef.current;
+    targetDeviceIdRef.current = targetDeviceId;
+    if (!running || !status.sessionId) return undefined;
+    let active = true;
+    visionRequest(
+      `/sessions/${encodeURIComponent(status.sessionId)}/target`,
+      {
+        method: "POST",
+        body: JSON.stringify({ targetDeviceId }),
+      },
+    ).then((result) => {
+      if (!active) return;
+      setStatus(result.data);
+      setFeedback(targetDeviceId ? "目标机器鱼已绑定。" : "已取消目标机器鱼，当前只预览和识别。");
+    }).catch((error) => {
+      if (!active) return;
+      targetDeviceIdRef.current = previousTargetDeviceId;
+      onTargetDeviceChange(previousTargetDeviceId);
+      setFeedback(error.message);
+    });
+    return () => { active = false; };
+  }, [manual, onTargetDeviceChange, running, status.sessionId, targetDeviceId]);
+
+  useEffect(() => {
+    if (manual) return;
+    onVisionStateChange({
+      state: status.state,
+      sessionId: status.sessionId || null,
+      targetDeviceId: status.targetDeviceId || targetDeviceId || "",
+      metrics: status.metrics || {},
+    });
+  }, [manual, onVisionStateChange, status, targetDeviceId]);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/vision/yolo/models", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error("YOLO 模型列表读取失败")))
+      .then((data) => {
+        if (!active) return;
+        const models = Array.isArray(data.models) ? data.models : [];
+        setYoloModels(models);
+        setSelectedYoloModel((current) => current || data.default || models[0] || "");
+      })
+      .catch((error) => {
+        if (active) setFeedback(error.message);
+      });
+    return () => { active = false; };
   }, []);
 
   useEffect(() => () => window.clearTimeout(retryTimerRef.current), []);
 
   useEffect(() => {
-    const tick = () => setClock(formatVideoClock());
+    const tick = () => {
+      setClock(formatVideoClock());
+      setClockTick(Date.now());
+    };
     tick();
     const timer = window.setInterval(tick, 1000);
     return () => window.clearInterval(timer);
@@ -119,24 +325,61 @@ export default function VisionPanel({ devices = [], targetDeviceId = "", onTarge
       window.clearTimeout(retryTimerRef.current);
       setStreamRetry(0);
       setStreamFeedback("");
+      setStreamState("idle");
+    } else {
+      setStreamState("loading");
     }
   }, [running]);
 
   useEffect(() => {
     const action = status.lastAction;
     if (action?.type !== "camera.exposure" || action.status === undefined) return;
-    if (action.status === "completed") setFeedback(`实际曝光：${action.actualValue}`);
+    exposurePendingRef.current = null;
+    if (action.status === "completed") {
+      setFeedback(`实际曝光：${action.actualValue}`);
+      if (Number.isFinite(Number(action.actualValue))) {
+        const actual = Number(action.actualValue);
+        const percentage = exposureMax > exposureMin
+          ? ((actual - exposureMin) / (exposureMax - exposureMin)) * 100
+          : 0;
+        setExposurePercent(Math.round(Math.min(100, Math.max(0, percentage))));
+      }
+    }
     else if (action.errorCode === "exposure_not_applied") setFeedback("摄像头驱动未应用曝光值");
     else setFeedback("当前摄像头不支持手动曝光");
-  }, [status.lastAction]);
+  }, [exposureMax, exposureMin, status.lastAction]);
+
+  useEffect(() => {
+    if (!exposureRangeReady) return;
+    if (exposurePendingRef.current !== null) return;
+    setExposureMaxInput((current) => {
+      const currentValue = Number(current);
+      if (!current || !Number.isFinite(currentValue)) return String(exposureDriverMax);
+      return String(snapExposureValue(currentValue));
+    });
+    const actual = Number(exposure.actualValue);
+    if (Number.isFinite(actual) && exposureMax > exposureMin) {
+      setExposurePercent(
+        Math.round(Math.min(100, Math.max(0, ((actual - exposureMin) / (exposureMax - exposureMin)) * 100))),
+      );
+    }
+  }, [
+    exposure.actualValue,
+    exposureDriverMax,
+    exposureMin,
+    exposureMax,
+    exposureRangeReady,
+  ]);
 
   function reconnectStream() {
+    setStreamState("error");
     setStreamFeedback("视频流中断，正在自动重连…");
     window.clearTimeout(retryTimerRef.current);
     retryTimerRef.current = window.setTimeout(() => setStreamRetry((current) => current + 1), 1000);
   }
 
   function streamConnected() {
+    setStreamState("ready");
     window.clearTimeout(retryTimerRef.current);
     setStreamFeedback("");
   }
@@ -146,10 +389,69 @@ export default function VisionPanel({ devices = [], targetDeviceId = "", onTarge
       if (cameraIndex === "") throw new Error("请选择摄像头");
       const payload = { cameraId: `camera-${cameraIndex}`, cameraIndex: Number(cameraIndex) };
       if (targetDeviceId) payload.targetDeviceId = targetDeviceId;
+      if (selectedYoloModel) payload.yoloModel = selectedYoloModel;
       const result = await visionRequest("/sessions", { method: "POST", body: JSON.stringify(payload) });
       setStatus(result.data);
+      setSelectedYoloModel(result.data.yoloModel || selectedYoloModel);
+      captureServerTime(result);
       setFeedback(targetDeviceId ? "摄像头预览已启动，已绑定目标鱼" : "摄像头预览已启动；未选择目标鱼，仅预览/识别");
     } catch (error) { setFeedback(error.message); }
+  }
+
+  async function changeCamera(event) {
+    const nextCameraIndex = event.target.value;
+    if (!running) {
+      setCameraIndex(nextCameraIndex);
+      return;
+    }
+    if (Number(nextCameraIndex) === status.cameraIndex || switchingCamera) return;
+    const previousCameraIndex = String(status.cameraIndex);
+    setCameraIndex(nextCameraIndex);
+    setSwitchingCamera(true);
+    setStreamState("loading");
+    setStreamFeedback("正在切换摄像头…");
+    try {
+      const result = await visionRequest(
+        `/sessions/${encodeURIComponent(status.sessionId)}/camera`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            cameraId: `camera-${nextCameraIndex}`,
+            cameraIndex: Number(nextCameraIndex),
+          }),
+        },
+      );
+      setStatus(result.data);
+      setSelectedYoloModel(result.data.yoloModel || selectedYoloModel);
+      captureServerTime(result);
+      setStreamRetry((current) => current + 1);
+      setFeedback("摄像头已切换，视频保持开启。");
+    } catch (error) {
+      setCameraIndex(previousCameraIndex);
+      setFeedback(error.message);
+    } finally {
+      setSwitchingCamera(false);
+    }
+  }
+
+  async function changeTargetDevice(event) {
+    const nextTargetDeviceId = event.target.value;
+    onTargetDeviceChange(nextTargetDeviceId);
+    if (!running) return;
+    try {
+      const result = await visionRequest(
+        `/sessions/${encodeURIComponent(status.sessionId)}/target`,
+        {
+          method: "POST",
+          body: JSON.stringify({ targetDeviceId: nextTargetDeviceId }),
+        },
+      );
+      setStatus(result.data);
+      setFeedback(nextTargetDeviceId ? "目标机器鱼已绑定。" : "已取消目标机器鱼，当前只预览和识别。");
+    } catch (error) {
+      onTargetDeviceChange(targetDeviceId);
+      setFeedback(error.message);
+    }
   }
 
   async function stop() {
@@ -167,6 +469,29 @@ export default function VisionPanel({ devices = [], targetDeviceId = "", onTarge
     const result = await visionRequest(`/sessions/${encodeURIComponent(status.sessionId)}/actions`, { method: "POST", body: JSON.stringify({ ...action, actionId }) });
     if (report) setFeedback(result.data.accepted ? "操作已确认" : "操作未接受");
     return result;
+  }
+
+  function commitExposurePercent(percent) {
+    const value = legalExposureValue(percent);
+    if (!running || value === null || exposurePendingRef.current === value) return;
+    exposurePendingRef.current = value;
+    sendAction(
+      { type: "camera.exposure", mode: "absolute", value },
+      false,
+    ).catch((error) => {
+      exposurePendingRef.current = null;
+      setFeedback(error.message);
+    });
+  }
+
+  function normalizeExposureMax() {
+    if (!exposureRangeReady) return;
+    const value = Number(exposureMaxInput);
+    const normalized = Number.isFinite(value)
+      ? snapExposureValue(value)
+      : exposureDriverMax;
+    setExposureMaxInput(String(normalized));
+    setExposurePercent((current) => Math.min(100, Math.max(0, current)));
   }
 
   async function toggleProcessing() {
@@ -200,7 +525,9 @@ export default function VisionPanel({ devices = [], targetDeviceId = "", onTarge
 
   function pointFrom(event) {
     const image = imageRef.current;
-    return toVideoPoint(event, image.getBoundingClientRect(), videoWidth, videoHeight, image.naturalWidth, image.naturalHeight);
+    const mediaWidth = image.videoWidth || image.naturalWidth || videoWidth;
+    const mediaHeight = image.videoHeight || image.naturalHeight || videoHeight;
+    return toVideoPoint(event, image.getBoundingClientRect(), videoWidth, videoHeight, mediaWidth, mediaHeight);
   }
 
   function pointerDown(event) {
@@ -231,9 +558,9 @@ export default function VisionPanel({ devices = [], targetDeviceId = "", onTarge
   }
 
   return (
-    <section className="vision-card panel-surface" aria-label="视觉控制">
+    <section className={`vision-card panel-surface ${manual ? "manual-mode" : ""}`} aria-label={manual ? "视频监看" : "视觉控制"}>
       <header className="vision-header">
-        <div><span className="eyebrow">FISH VISION</span><h2>视觉识别</h2><small>摄像头画面、YOLO 识别框、跟踪结果</small></div>
+        <div><span className="eyebrow">{manual ? "DRIVER VIEW" : "FISH VISION"}</span><h2>{manual ? "视频监看" : "视觉识别"}</h2><small>{manual ? "手动和视觉模式共用当前视频会话" : "摄像头画面、YOLO 识别框、跟踪结果"}</small></div>
         <div className="vision-header-status">
           <span className={`status ${running ? "online" : "offline"}`}><i />{running ? "运行中" : "已停止"}</span>
           <span className={`status ${yolo?.ready ? "online" : "offline"}`}><i />{yoloLabel}</span>
@@ -241,25 +568,39 @@ export default function VisionPanel({ devices = [], targetDeviceId = "", onTarge
         </div>
       </header>
       <div className="vision-setup-bar">
-        <label className="camera-select">视觉目标设备<select value={targetDeviceId} disabled={running} onChange={(event) => onTargetDeviceChange(event.target.value)}><option value="">不指定目标鱼（仅预览/识别）</option>{devices.filter((device) => device.online).map((device) => <option key={device.deviceId} value={device.deviceId}>{device.name || device.deviceId} · {device.deviceId}</option>)}</select><small className="camera-hint">{targetDeviceId ? "自动/循迹会控制所选机器鱼" : "无鱼在线也可以先开启摄像头预览和视觉识别"}</small></label>
-        <label className="camera-select">摄像头<select value={cameraIndex} disabled={running} onChange={(event) => setCameraIndex(event.target.value)}><option value="">请选择摄像头</option>{cameras.map((camera) => <option key={camera.index} value={camera.index}>{cameraLabel(camera)}</option>)}</select><small className="camera-hint">{selectedCamera ? cameraLabel(selectedCamera) : "选择要用于视觉识别的 USB 摄像头"}</small></label>
-        <div className="vision-primary setup-actions"><button disabled={running || cameraIndex === ""} onClick={start}>开始预览</button><button disabled={!running} onClick={toggleProcessing}>{processing ? "停止识别" : "启动识别"}</button><button className="stop" disabled={!running} onClick={stop}>关闭视频</button></div>
+        {!manual && showTargetDeviceSelector && <label className="camera-select">视觉目标设备<select value={targetDeviceId} disabled={switchingCamera} onChange={changeTargetDevice}><option value="">不指定目标鱼（仅预览/识别）</option>{devices.filter((device) => device.online).map((device) => <option key={device.deviceId} value={device.deviceId}>{device.name || device.deviceId} · {device.deviceId}</option>)}</select><small className="camera-hint">{targetDeviceId ? "自动/循迹会控制所选机器鱼" : "无鱼在线也可以先开启摄像头预览和视觉识别"}</small></label>}
+        <label className="camera-select">摄像头<select value={cameraIndex} disabled={switchingCamera} onChange={changeCamera}><option value="">请选择摄像头</option>{cameras.map((camera) => <option key={camera.index} value={camera.index}>{cameraLabel(camera)}</option>)}</select><small className="camera-hint">{selectedCamera ? cameraLabel(selectedCamera) : "选择要用于视觉识别的 USB 摄像头"}</small></label>
+        {!manual && <label className="camera-select">YOLO 模型<select value={selectedYoloModel} disabled={running || switchingCamera || !yoloModels.length} onChange={(event) => setSelectedYoloModel(event.target.value)}><option value="">{yoloModels.length ? "请选择 .pt 模型" : "未找到 .pt 模型"}</option>{yoloModels.map((model) => <option key={model} value={model}>{model}</option>)}</select><small className="camera-hint">{running ? `当前会话：${status.yoloModel || selectedYoloModel || "默认模型"}` : "选择本地 vision/assets 下的 .pt 模型"}</small></label>}
+        <div className="vision-primary setup-actions"><button disabled={running || cameraIndex === "" || switchingCamera} onClick={start}>{running ? "视频已开启" : "开始预览"}</button><button disabled={!running || switchingCamera} onClick={toggleProcessing}>{processing ? "停止识别" : "启动识别"}</button><button className="stop" disabled={!running || switchingCamera} onClick={stop}>关闭视频</button></div>
       </div>
       <div className="vision-layout">
-        <div className="video-stage" style={{ "--video-aspect": `${videoWidth} / ${videoHeight}` }} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp}>
-          {running ? <img ref={imageRef} src={visionStreamUrl(status.sessionId, streamRetry)} onError={reconnectStream} onLoad={streamConnected} alt="机器鱼视觉处理画面" draggable="false" /> : <div className="video-placeholder"><strong>视觉画面未启动</strong><span>选择摄像头后开始预览</span></div>}
-          {running && <div className="video-badge">本机 {clock}{latencyLabel}<br />{videoWidth} × {videoHeight}</div>}
+        <div className="shared-video-stage video-stage" style={{ "--video-aspect": `${videoWidth} / ${videoHeight}` }} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp}>
+          {running ? <>
+            <VideoStream
+              ref={imageRef}
+              sessionId={status.sessionId}
+              retry={streamRetry}
+              onError={reconnectStream}
+              onReady={streamConnected}
+              onTransportError={(error) => setStreamFeedback(`${error?.message || "WebRTC 暂不可用"}，正在重连。`)}
+              alt="机器鱼视觉处理画面"
+            />
+            {streamState !== "ready" && <div className={`video-stream-status ${streamState}`}>
+              <strong>{streamState === "error" ? "视频流暂时不可用" : "正在连接视频流…"}</strong>
+              <span>{streamState === "error" ? (sessionErrorMessage(status) || "摄像头未返回可显示画面，正在自动重试") : "请稍候，摄像头画面即将出现"}</span>
+            </div>}
+          </> : <div className={`video-placeholder ${status.state === "error" ? "has-error" : ""}`}><strong>{status.state === "error" ? "摄像头启动失败" : "视觉画面未启动"}</strong><span>{sessionErrorMessage(status) || "选择摄像头后开始预览"}</span></div>}
+          {running && <div className="video-badge">服务器 {serverClock}<br />本机 {clock}{latencyLabel}<br />{videoWidth} × {videoHeight}</div>}
         </div>
-        <aside className="vision-controls">
+        {manual ? <aside className="vision-controls manual-video-controls-panel">
+          <div className="vision-control-head"><h2>视频设置</h2><small>摄像头、曝光和识别框在两个模式中保持一致</small></div>
+          {sharedOverlayPanel}
+          {sharedExposurePanel}
+          <p className="feedback manual-shared-feedback" aria-live="polite">{streamFeedback || feedback || (running ? `摄像头 ${status.cameraIndex} · ${yoloLabel}` : "视频服务未启动")}</p>
+        </aside> : <aside className="vision-controls">
           <div className="vision-control-head"><h2>识别状态</h2><small>当前：{controlModeLabel}</small></div>
           <section className="vision-targets"><strong>检测目标 · {detections.length}</strong>{detections.length ? detections.map((target) => <div key={target.trackId}><i style={{ background: target.colorHex }} /><span>目标 #{target.trackId}</span><b>{target.color}</b><small>{Math.round(target.confidence * 100)}%</small></div>) : <p>{processing ? "暂未检测到机器鱼" : "启动视觉处理后显示目标"}</p>}</section>
-          <section className="overlay-panel">
-            <header><strong>画面叠加</strong><span>只影响显示，不影响识别/控制</span></header>
-            <div className="overlay-toggle-row compact">
-              <label><input type="checkbox" checked={overlays.detections} disabled={!running} onChange={(event) => setOverlay("detections", event.target.checked)} /> YOLO 识别</label>
-              <label><input type="checkbox" checked={overlays.paths} disabled={!running} onChange={(event) => setOverlay("paths", event.target.checked)} /> 路径/轨迹</label>
-            </div>
-          </section>
+          {sharedOverlayPanel}
           <section className="vision-mode-panel">
             <div className="mode-grid">{CONTROL_MODES.map(([name, label, description]) => <button key={name} type="button" className={controlMode === name ? "active" : ""} aria-pressed={controlMode === name} onClick={() => { setControlMode(name); setFeedback(`视觉模式：${description}`); }}>{label}</button>)}</div>
             <div className="param-panel auto-param-panel" aria-label="自动控制参数">
@@ -270,7 +611,7 @@ export default function VisionPanel({ devices = [], targetDeviceId = "", onTarge
             </div>
             <p className="logic-box"><strong>控制逻辑</strong>只识别不会下发运动；辅助/自动模式仍受控制权、限速、限幅约束，正式运动由循迹启动按钮接管。未选择目标鱼时只运行预览和识别。</p>
           </section>
-          <section className="exposure-control"><header><strong>摄像头曝光</strong><span>{exposure.actualValue ?? "—"}</span></header><div><button disabled={!running} onClick={() => sendAction({ type: "camera.exposure", value: -1 })}>− 降低曝光</button><button disabled={!running} onClick={() => sendAction({ type: "camera.exposure", value: 1 })}>提高曝光 +</button></div><small>{exposureHelp}</small></section>
+          {sharedExposurePanel}
           <section className={`vision-workflow ${workflow.trackingActive ? "active" : ""}`}>
             <header><strong>循迹流程</strong><span>{workflowLabel}</span></header>
             <div>{WORKFLOW_STAGES.map(([key, label], index) => {
@@ -290,7 +631,7 @@ export default function VisionPanel({ devices = [], targetDeviceId = "", onTarge
           </div>
           <div className="tracking-actions"><button disabled={!running || !workflow.canStart || targetRequiredForMotion} onClick={() => sendAction({ type: "tracking.start" })}>{targetRequiredForMotion ? "选择鱼后循迹" : workflow.headingCalibrating ? "方向标定中" : workflow.trackingActive ? "循迹运行中" : "启动循迹"}</button><button className="stop" disabled={!running} onClick={() => sendAction({ type: "tracking.stop" })}>停止循迹</button></div>
           <p className="feedback" aria-live="polite">{streamFeedback || feedback || yolo?.error || yolo?.lastInferenceError || (running ? `摄像头 ${status.cameraIndex} 正在处理 · ${yoloLabel} · ${coordinateLabel}` : "视觉服务未启动")}</p>
-        </aside>
+        </aside>}
       </div>
     </section>
   );

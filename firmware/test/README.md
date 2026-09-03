@@ -16,7 +16,7 @@ $env:FISH_MINGW_BIN = "D:\path\to\mingw64\bin"
 
 ## Arduino 依赖测试
 
-认证协议、设备身份、发现协议、配网探测和 Arduino 时序测试使用 ESP32 Arduino 框架。没有本地 `config/deployment.json` 时，编译检查只使用仓库中的示例密钥：
+认证协议、设备身份、发现协议和 Arduino 时序测试使用 ESP32 Arduino 框架。没有本地 `config/deployment.json` 时，编译检查只使用仓库中的示例密钥：
 
 ```powershell
 pio test -e embedded_test --without-uploading --without-testing

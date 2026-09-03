@@ -1,4 +1,6 @@
 import unittest
+from queue import Empty
+from unittest.mock import patch
 
 from service import CameraInfo, VisionService
 from web_api import create_app
@@ -44,6 +46,31 @@ class VisionWebApiTests(unittest.TestCase):
             409,
         )
 
+    def test_session_envelope_contains_server_clock(self):
+        response = self.client.get("/sessions/current")
+        body = response.get_json()
+
+        self.assertIsInstance(body["serverTime"], float)
+        self.assertIsInstance(body["serverUtcOffsetMinutes"], int)
+        self.assertEqual(body["data"]["serverTime"], body["serverTime"])
+        self.assertEqual(
+            body["data"]["serverUtcOffsetMinutes"],
+            body["serverUtcOffsetMinutes"],
+        )
+
+    def test_service_subscribers_receive_status_updates(self):
+        updates, unsubscribe = self.service.subscribe()
+        try:
+            started = self.client.post("/start", json={"cameraIndex": 1})
+            self.assertEqual(started.status_code, 200)
+            snapshot = updates.get(timeout=1)
+            self.assertEqual(snapshot["state"], "previewing")
+            self.assertEqual(snapshot["cameraIndex"], 1)
+        finally:
+            unsubscribe()
+        with self.assertRaises(Empty):
+            updates.get_nowait()
+
     def test_camera_endpoint_uses_cache_while_vision_is_running(self):
         class RecordingCatalog:
             def __init__(self):
@@ -85,6 +112,28 @@ class VisionWebApiTests(unittest.TestCase):
         stopped = self.client.delete(f"/sessions/{session_id}")
         self.assertEqual(stopped.get_json()["state"], "idle")
 
+    def test_session_camera_switch_and_target_update_contract(self):
+        created = self.client.post(
+            "/sessions",
+            json={"cameraId": "camera-1", "cameraIndex": 1},
+        ).get_json()
+        session_id = created["sessionId"]
+
+        target = self.client.post(
+            f"/sessions/{session_id}/target",
+            json={"targetDeviceId": "fish-2"},
+        )
+        self.assertEqual(target.status_code, 200)
+        self.assertEqual(target.get_json()["data"]["targetDeviceId"], "fish-2")
+
+        switched = self.client.post(
+            f"/sessions/{session_id}/camera",
+            json={"cameraId": "camera-2", "cameraIndex": 2},
+        )
+        self.assertEqual(switched.status_code, 200)
+        self.assertEqual(switched.get_json()["data"]["cameraIndex"], 2)
+        self.assertEqual(switched.get_json()["data"]["targetDeviceId"], "fish-2")
+
     def test_stale_session_action_is_rejected(self):
         created = self.client.post(
             "/sessions",
@@ -98,6 +147,28 @@ class VisionWebApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.get_json()["error"]["code"], "session_mismatch")
+
+    def test_yolo_models_are_listed_and_selected_for_a_session(self):
+        selected = []
+
+        def runner_factory(_index, _publish, yolo_model_path):
+            selected.append(yolo_model_path)
+            return lambda: None
+
+        service = VisionService(runner_factory=runner_factory)
+        app = create_app(service, camera_provider=lambda: [])
+        client = app.test_client()
+        with patch("web_api.list_yolo_models", return_value=["best.pt", "fish.pt"]), \
+                patch("web_api.resolve_yolo_model", return_value="/vision/assets/fish.pt"):
+            models = client.get("/yolo/models")
+            self.assertEqual(models.get_json()["models"], ["best.pt", "fish.pt"])
+            created = client.post(
+                "/sessions",
+                json={"cameraId": "camera-1", "cameraIndex": 1, "yoloModel": "fish.pt"},
+            )
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.get_json()["data"]["yoloModel"], "fish.pt")
+        self.assertEqual(selected, ["/vision/assets/fish.pt"])
 
 
 if __name__ == "__main__":

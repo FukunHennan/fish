@@ -1,6 +1,8 @@
 package web
 
 import (
+	"bufio"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fish-controller/internal/hub"
@@ -33,7 +35,7 @@ func TestOtaEndpointServesFirmwareAndSendsVerifiedMetadata(t *testing.T) {
 		message := value.(map[string]any)
 		h.ResolveCommandResult(map[string]any{"type": "command.result", "requestId": message["requestId"], "success": true, "code": "OK", "message": "installed"})
 	}}
-	h.Register(hub.Device{ID: "fish-1"}, connection)
+	h.Register(hub.Device{ID: "fish-1", Name: "机器鱼1号"}, connection)
 	handler := NewHandlerWithFirmware(h, testKey(), path)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/firmware/current.bin", nil))
@@ -50,6 +52,9 @@ func TestOtaEndpointServesFirmwareAndSendsVerifiedMetadata(t *testing.T) {
 	expected := fmt.Sprintf("%x", sha256.Sum256(firmware))
 	if message["command"] != "ota.start" || payload["sha256"] != expected || payload["size"] != len(firmware) {
 		t.Fatalf("OTA 元数据错误: %#v", message)
+	}
+	if payload["name"] != "机器鱼1号" {
+		t.Fatalf("OTA 未携带设备名称: %#v", payload)
 	}
 	var otaResponse map[string]any
 	if json.Unmarshal(w.Body.Bytes(), &otaResponse) != nil || otaResponse["acknowledged"] != true || otaResponse["success"] != true {
@@ -81,6 +86,68 @@ func TestHealthAndDashboard(t *testing.T) {
 		handler.ServeHTTP(w, r)
 		if w.Code != 200 || !strings.Contains(w.Body.String(), tc.contains) {
 			t.Fatalf("%s 返回异常: %d %s", tc.path, w.Code, w.Body.String())
+		}
+	}
+}
+
+func TestAuthIsDisabledByDefaultForLocalCommissioning(t *testing.T) {
+	t.Setenv("FISH_AUTH_DISABLED", "")
+	handler := NewHandler(hub.New(), testKey())
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/auth/me", nil))
+	var response map[string]any
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &response) != nil || response["authenticated"] != true {
+		t.Fatalf("本地调试默认应跳过登录: %d %s", w.Code, w.Body.String())
+	}
+	if response["user"] == nil {
+		t.Fatalf("免登录模式应提供本地管理员身份: %s", w.Body.String())
+	}
+}
+
+func TestDeviceEventsPushInitialSnapshotAndUpdates(t *testing.T) {
+	h := hub.New()
+	testServer := httptest.NewServer(NewHandler(h, testKey()))
+	defer testServer.Close()
+
+	request, err := http.NewRequest(http.MethodGet, testServer.URL+"/api/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	request = request.WithContext(ctx)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != "text/event-stream" {
+		t.Fatalf("事件流响应异常: %d %q", response.StatusCode, response.Header.Get("Content-Type"))
+	}
+	reader := bufio.NewReader(response.Body)
+	line, err := reader.ReadString('\n')
+	if err != nil || line != "event: devices\n" {
+		t.Fatalf("没有收到初始设备事件: %q %v", line, err)
+	}
+	line, err = reader.ReadString('\n')
+	if err != nil || line != "data: []\n" {
+		t.Fatalf("初始设备快照异常: %q %v", line, err)
+	}
+	if _, err := reader.ReadString('\n'); err != nil {
+		t.Fatalf("初始事件没有结束: %v", err)
+	}
+
+	h.Register(hub.Device{ID: "fish-1", Name: "测试鱼"}, &captureConn{})
+	for {
+		line, err = reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("设备上线后没有收到事件: %v", err)
+		}
+		if strings.HasPrefix(line, "data: ") {
+			if !strings.Contains(line, `"deviceId":"fish-1"`) {
+				t.Fatalf("设备事件没有包含目标鱼: %q", line)
+			}
+			return
 		}
 	}
 }
@@ -235,7 +302,7 @@ func TestVisionDeviceCommandRoutesToOnlyConnectedFish(t *testing.T) {
 	}}
 	h.Register(hub.Device{ID: "fish-1"}, connection)
 	handler := NewHandler(h, testKey())
-	body := `{"operation":"update","sessionId":"session-1","sequence":7,"crossTrackError":0.2,"headingErrorDeg":-12,"distanceToTarget":0.8,"speed":0.1,"curvature":0.3,"brake":false}`
+	body := `{"operation":"motion","sessionId":"session-1","mode":"forward","frequency":2.8,"amplitude":31,"bias":-12}`
 	r := httptest.NewRequest(http.MethodPost, "/api/vision/device-command", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, r)
@@ -249,11 +316,11 @@ func TestVisionDeviceCommandRoutesToOnlyConnectedFish(t *testing.T) {
 		t.Fatalf("发送数量=%d", len(connection.sent))
 	}
 	message := connection.sent[0].(map[string]any)
-	if message["command"] != "vision.update" {
+	if message["command"] != "motion.set" {
 		t.Fatalf("命令=%v", message["command"])
 	}
 	payload := message["payload"].(map[string]any)
-	if payload["sequence"] != uint32(7) || payload["headingErrorDeg"] != -12.0 {
+	if payload["mode"] != "forward" || payload["frequency"] != 2.8 || payload["amplitude"] != 31.0 || payload["bias"] != 0.0 {
 		t.Fatalf("载荷=%+v", payload)
 	}
 }
@@ -290,9 +357,13 @@ func TestVisionDeviceCommandRoutesToExplicitTargetAmongMultipleFish(t *testing.T
 	if w.Code != http.StatusOK || len(first.sent) != 0 || len(second.sent) != 1 {
 		t.Fatalf("explicit target routing failed: status=%d first=%d second=%d body=%s", w.Code, len(first.sent), len(second.sent), w.Body.String())
 	}
-	payload := second.sent[0].(map[string]any)["payload"].(map[string]any)
-	if payload["durationMs"] != uint32(3600) {
-		t.Fatalf("durationMs=%v", payload["durationMs"])
+	message := second.sent[0].(map[string]any)
+	if message["command"] != "motion.set" {
+		t.Fatalf("command=%v", message["command"])
+	}
+	payload := message["payload"].(map[string]any)
+	if payload["mode"] != "forward" || payload["frequency"] != 2.0 || payload["amplitude"] != 22.0 {
+		t.Fatalf("payload=%+v", payload)
 	}
 }
 
@@ -410,6 +481,61 @@ func TestMotionCommandIncludesBiasAndRequestID(t *testing.T) {
 	}
 }
 
+func TestMotionCommandSupportsStopAndIdleModes(t *testing.T) {
+	for _, mode := range []string{"stop", "idle"} {
+		t.Run(mode, func(t *testing.T) {
+			h := hub.New()
+			c := &captureConn{onWrite: func(value any) {
+				message := value.(map[string]any)
+				h.ResolveCommandResult(map[string]any{
+					"type": "command.result", "requestId": message["requestId"], "success": true,
+					"code": "OK", "message": "applied",
+				})
+			}}
+			h.Register(hub.Device{ID: "fish-1"}, c)
+			handler := NewHandler(h, testKey())
+			body := fmt.Sprintf(`{"deviceId":"fish-1","mode":"%s","frequency":2.5,"amplitudePercent":40}`, mode)
+			r := httptest.NewRequest(http.MethodPost, "/api/command", strings.NewReader(body))
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, r)
+			if w.Code != http.StatusOK || len(c.sent) != 1 {
+				t.Fatalf("%s 命令发送失败: %d %s", mode, w.Code, w.Body.String())
+			}
+			message := c.sent[0].(map[string]any)
+			payload := message["payload"].(map[string]any)
+			if payload["mode"] != mode {
+				t.Fatalf("模式没有原样转发: got=%v want=%s", payload["mode"], mode)
+			}
+			if mode == "stop" && payload["amplitude"] != 0.0 {
+				t.Fatalf("停止命令不应携带运动幅度: got=%v", payload["amplitude"])
+			}
+			if mode == "stop" && payload["bias"] != 0.0 {
+				t.Fatalf("停止命令必须回到直线中位: got=%v", payload["bias"])
+			}
+		})
+	}
+}
+
+func TestRealtimeCommandDropsOutOfOrderKeyboardFrame(t *testing.T) {
+	h := hub.New()
+	c := &captureConn{}
+	h.Register(hub.Device{ID: "fish-1"}, c)
+	handler := NewHandler(h, testKey())
+
+	post := func(sequence uint64, mode string) *httptest.ResponseRecorder {
+		body := fmt.Sprintf(`{"deviceId":"fish-1","mode":"%s","frequency":2.5,"amplitudePercent":40,"sequence":%d}`, mode, sequence)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/command/realtime", strings.NewReader(body)))
+		return w
+	}
+	if post(2, "stop").Code != http.StatusOK {
+		t.Fatal("最新停止命令没有入队")
+	}
+	if post(1, "forward").Code != http.StatusConflict {
+		t.Fatal("过期的前进命令不应覆盖停止命令")
+	}
+}
+
 func TestTurnCommandWithoutCalibrationUsesDefaultGeometry(t *testing.T) {
 	h := hub.New()
 	c := &captureConn{onWrite: func(value any) {
@@ -478,6 +604,62 @@ func TestMotionCommandUsesCalibratedTurnCenter(t *testing.T) {
 	payload := c.sent[0].(map[string]any)["payload"].(map[string]any)
 	if payload["bias"] != -35.0 || payload["amplitude"] != 35.0 {
 		t.Fatalf("左转没有围绕标定中心摆动: %#v", payload)
+	}
+}
+
+func TestMotionCommandBalancesTurnCentersAroundAsymmetricStraightCenter(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "motion-calibrations.json")
+	t.Setenv("FISH_MOTION_CALIBRATIONS", path)
+	if err := os.WriteFile(path, []byte(`{
+		"fish-1": {
+			"deviceId": "fish-1",
+			"servoMin": 0,
+			"servoMax": 180,
+			"straightCenter": 100,
+			"forwardFrequency": 2.5,
+			"forwardAmplitudePercent": 0.4,
+			"leftCenterRatio": 1,
+			"leftFrequency": 2.3,
+			"leftAmplitudePercent": 0.4,
+			"rightCenterRatio": 1,
+			"rightFrequency": 2.3,
+			"rightAmplitudePercent": 0.4,
+			"transitionMs": 600
+		}
+	}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, testCase := range []struct {
+		mode string
+		bias float64
+	}{
+		{mode: "left", bias: -40},
+		{mode: "right", bias: 40},
+	} {
+		t.Run(testCase.mode, func(t *testing.T) {
+			h := hub.New()
+			c := &captureConn{onWrite: func(value any) {
+				message := value.(map[string]any)
+				h.ResolveCommandResult(map[string]any{
+					"type": "command.result", "requestId": message["requestId"], "success": true,
+					"code": "OK", "message": "applied",
+				})
+			}}
+			h.Register(hub.Device{ID: "fish-1"}, c)
+			handler := NewHandler(h, testKey())
+			body := fmt.Sprintf(`{"deviceId":"fish-1","mode":"%s","frequency":2.5,"amplitudePercent":40}`, testCase.mode)
+			r := httptest.NewRequest(http.MethodPost, "/api/command", strings.NewReader(body))
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, r)
+			if w.Code != http.StatusOK || len(c.sent) != 1 {
+				t.Fatalf("%s 命令发送失败: %d %s", testCase.mode, w.Code, w.Body.String())
+			}
+			payload := c.sent[0].(map[string]any)["payload"].(map[string]any)
+			if payload["bias"] != testCase.bias {
+				t.Fatalf("%s 中心偏置错误: got=%v want=%v", testCase.mode, payload["bias"], testCase.bias)
+			}
+		})
 	}
 }
 

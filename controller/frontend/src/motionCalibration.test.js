@@ -32,6 +32,17 @@ test("left and right centers mirror around straight trim for symmetric limits", 
   assert.equal(motionCenter(profile, "right"), 125);
 });
 
+test("left and right centers use half of the smaller available offset", () => {
+  const asymmetricCenter = {
+    ...profile,
+    servoMin: 0,
+    servoMax: 180,
+    straightCenter: 100,
+  };
+  assert.equal(motionCenter(asymmetricCenter, "left"), 60);
+  assert.equal(motionCenter(asymmetricCenter, "right"), 140);
+});
+
 test("turn amplitudes stay inside configured servo limits", () => {
   for (const mode of ["left", "right"]) {
     const range = motionRange(profile, mode);
@@ -76,4 +87,17 @@ test("asymmetric servo limits are respected", () => {
   assert.equal(range.center, 80);
   assert.ok(range.min >= 10);
   assert.ok(range.max <= 150);
+});
+
+test("asymmetric straight center keeps left and right turn amplitudes equal", () => {
+  const asymmetricCenter = {
+    ...profile,
+    servoMin: 0,
+    servoMax: 180,
+    straightCenter: 100,
+    leftAmplitudePercent: 1,
+    rightAmplitudePercent: 1,
+  };
+  assert.equal(motionRange(asymmetricCenter, "left").amplitude, 40);
+  assert.equal(motionRange(asymmetricCenter, "right").amplitude, 40);
 });

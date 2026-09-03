@@ -5,7 +5,6 @@ namespace {
 constexpr uint32_t kBlinkIntervalMs = 500;
 constexpr uint32_t kConnectBlinkIntervalMs = 700;
 constexpr uint32_t kDiscoveryIntervalMs = 180;
-constexpr uint32_t kVisionIntervalMs = 130;
 constexpr uint32_t kOtaIntervalMs = 90;
 constexpr uint32_t kErrorBlinkIntervalMs = 140;
 uint8_t scaleChannel(uint8_t value, uint8_t brightness) {
@@ -84,7 +83,6 @@ void StatusLight::update(uint32_t nowMs) {
     uint32_t interval = kBlinkIntervalMs;
     if (mode_ == StatusLightMode::WifiConnecting) interval = kConnectBlinkIntervalMs;
     else if (mode_ == StatusLightMode::Discovering) interval = kDiscoveryIntervalMs;
-    else if (mode_ == StatusLightMode::VisionControl) interval = kVisionIntervalMs;
     else if (mode_ == StatusLightMode::Ota) interval = kOtaIntervalMs;
     else if (mode_ == StatusLightMode::Error) interval = kErrorBlinkIntervalMs;
     if (lastUpdateMs_ != 0 && nowMs - lastUpdateMs_ < interval) return;
@@ -107,9 +105,6 @@ void StatusLight::update(uint32_t nowMs) {
             break;
         case StatusLightMode::ManualMotion:
             showSolid(0, 90, 255, true);
-            break;
-        case StatusLightMode::VisionControl:
-            showChase(0, 220, 220);
             break;
         case StatusLightMode::Ota:
             showChase(180, 0, 255);

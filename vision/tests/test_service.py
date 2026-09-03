@@ -252,6 +252,34 @@ class VisionServiceLifecycleTests(unittest.TestCase):
         service.stop_processing(snapshot["sessionId"])
         self.assertEqual(service.next_action(), "PROCESSING_STOP")
 
+    def test_switch_camera_restarts_preview_and_preserves_target(self):
+        started = []
+        stopped = []
+
+        def runner_factory(camera_index, _publish):
+            started.append(camera_index)
+            return lambda: stopped.append(camera_index)
+
+        service = VisionService(runner_factory=runner_factory)
+        first = service.create_session("camera-1", 1, "fish-1")
+        second = service.switch_camera(first["sessionId"], "camera-2", 2)
+
+        self.assertNotEqual(second["sessionId"], first["sessionId"])
+        self.assertEqual(second["cameraIndex"], 2)
+        self.assertEqual(second["targetDeviceId"], "fish-1")
+        self.assertEqual(started, [1, 2])
+        self.assertEqual(stopped, [1])
+
+    def test_target_device_can_change_during_preview(self):
+        service = VisionService(
+            runner_factory=lambda _index, _publish: lambda: None
+        )
+        snapshot = service.create_session("camera-1", 1)
+
+        updated = service.set_target_device(snapshot["sessionId"], "fish-2")
+
+        self.assertEqual(updated["targetDeviceId"], "fish-2")
+
     def test_exposure_is_accepted_during_preview(self):
         service = VisionService(runner_factory=lambda _index, _publish: lambda: None)
         snapshot = service.create_session("camera-1", 1)

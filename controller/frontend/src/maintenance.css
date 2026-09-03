@@ -42,18 +42,3 @@
 .device-info-card dt { color:var(--muted); }
 .device-info-card dd { color:#d6e1e5; overflow-wrap:anywhere; }
 .device-info-card dt:nth-last-of-type(1), .device-info-card dd:nth-last-of-type(1) { border-bottom:0; }
-
-@media (max-width:1180px) {
-  .device-info-list { max-height:none; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
-  .admin-create-form { grid-template-columns:repeat(2,minmax(0,1fr)); }
-  .admin-create-form .action { width:100%; }
-  .admin-user-row { grid-template-columns:minmax(180px,1.2fr) repeat(2,minmax(110px,1fr)) minmax(150px,1fr); }
-  .admin-user-actions { grid-column:1 / -1; }
-}
-@media (max-width:820px) {
-  .page-tabs { width:100%; }
-  .page-tabs button { flex:1; }
-  .ota-device-grid, .device-info-list { grid-template-columns:1fr; }
-  .admin-create-form,.admin-user-row { grid-template-columns:1fr; }
-  .admin-user-actions { grid-column:auto; }
-}

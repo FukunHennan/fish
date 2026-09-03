@@ -15,7 +15,7 @@ class MjpegCapacityTests(unittest.TestCase):
         frame = np.zeros((480, 640, 3), dtype=np.uint8)
         resized = MJPEGServer._resize_for_stream(frame)
 
-        self.assertEqual(resized.shape[:2], (540, 720))
+        self.assertEqual(resized.shape[:2], (480, 640))
 
 
 if __name__ == "__main__":

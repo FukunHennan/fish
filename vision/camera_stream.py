@@ -19,7 +19,9 @@ import cv2
 from config import TARGET_FPS, TARGET_HEIGHT, TARGET_WIDTH
 from interface import (
     apply_manual_exposure_for_device,
+    get_manual_exposure_for_device,
     prepare_v4l2_capture,
+    set_manual_exposure_for_device,
 )
 
 
@@ -108,6 +110,12 @@ def _open_working_capture(src):
             _safe_release(capture)
             continue
 
+        # A deep driver queue makes the browser display old frames after a
+        # network or CPU stall. This is optional because some backends reject
+        # the property during startup.
+        if hasattr(cv2, "CAP_PROP_BUFFERSIZE"):
+            _safe_set(capture, cv2.CAP_PROP_BUFFERSIZE, 1, "BUFFERSIZE")
+
         # Do not touch FPS/resolution until the backend proves it can deliver a
         # frame. This avoids backend-specific startup failures.
         try:
@@ -171,6 +179,12 @@ class RestartSafeCameraStream:
             _safe_set(self.cap, cv2.CAP_PROP_AUTO_EXPOSURE, 0.25, "AUTO_EXPOSURE")
             _safe_set(self.cap, cv2.CAP_PROP_EXPOSURE, self.exposure_val, "EXPOSURE")
             _safe_set(self.cap, cv2.CAP_PROP_GAIN, 100, "GAIN")
+        self.exposure_supported = False
+        self.exposure_min = None
+        self.exposure_max = None
+        self.exposure_step = None
+        self.exposure_error_code = None
+        self._refresh_exposure_info()
 
         self.ret = True
         self.frame = first_frame
@@ -209,12 +223,38 @@ class RestartSafeCameraStream:
             return apply_manual_exposure_for_device(_ClosedCapture(), delta, self.src)
         with self.capture_lock:
             result = apply_manual_exposure_for_device(self.cap, delta, self.src)
-            if result.status == "completed":
-                self.exposure_val = result.actual_value
-                print(f"[Camera] Manual exposure changed to {self.exposure_val}")
-            else:
-                print(f"[Camera] Exposure adjustment failed: {result.error_code}")
+            self._apply_exposure_result(result)
             return result
+
+    def set_exposure(self, value):
+        if self._stop_event.is_set():
+            return set_manual_exposure_for_device(_ClosedCapture(), value, self.src)
+        with self.capture_lock:
+            result = set_manual_exposure_for_device(self.cap, value, self.src)
+            self._apply_exposure_result(result)
+            return result
+
+    def _refresh_exposure_info(self):
+        info = get_manual_exposure_for_device(self.cap, self.src)
+        self.exposure_supported = info.supported
+        self.exposure_min = info.minimum
+        self.exposure_max = info.maximum
+        self.exposure_step = info.step
+        self.exposure_error_code = info.error_code
+        if info.actual_value is not None:
+            self.exposure_val = info.actual_value
+
+    def _apply_exposure_result(self, result):
+        if result.status == "completed" and result.actual_value is not None:
+            self.exposure_val = result.actual_value
+            print(f"[Camera] Manual exposure changed to {self.exposure_val}")
+        else:
+            print(f"[Camera] Exposure adjustment failed: {result.error_code}")
+        self.exposure_supported = result.supported
+        self.exposure_min = result.minimum
+        self.exposure_max = result.maximum
+        self.exposure_step = result.step
+        self.exposure_error_code = result.error_code
 
     def update(self):
         while not self._stop_event.is_set():

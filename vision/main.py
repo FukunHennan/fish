@@ -91,11 +91,21 @@ class VisionApplication:
 
     WINDOW_NAME = "AUV YOLO Tracker (RoboFish PID)"
 
-    def __init__(self, camera_index=1, headless=False, action_source=None, action_result_sink=None):
+    def __init__(
+        self,
+        camera_index=1,
+        headless=False,
+        action_source=None,
+        action_result_sink=None,
+        frame_sink=None,
+        yolo_model_path=None,
+    ):
         self.camera_index = camera_index
+        self.yolo_model_path = yolo_model_path or YOLO_MODEL_PATH
         self.headless = headless
         self.action_source = action_source
         self.action_result_sink = action_result_sink
+        self.frame_sink = frame_sink
         self.cam = None
         self.last_error = None
         self.tablet = None
@@ -148,6 +158,20 @@ class VisionApplication:
     def request_exit(self):
         self._exit_requested = True
 
+    def _publish_frame(self, image, frame_time=None):
+        if self.mjpeg is not None:
+            self.mjpeg.update(image)
+        if self.frame_sink is not None:
+            update = getattr(self.frame_sink, "update", None)
+            if callable(update):
+                try:
+                    update(image, frame_time)
+                except TypeError:
+                    # Preserve compatibility with older one-argument sinks.
+                    update(image)
+            elif callable(self.frame_sink):
+                self.frame_sink(image)
+
     def _print_startup(self):
         print("\n" + "=" * 60)
         print("Starting YOLO RoboFish tracking and vision control...")
@@ -167,11 +191,12 @@ class VisionApplication:
         self.tablet = TabletTCPServer(
             host=TABLET_TCP_HOST, port=TABLET_TCP_PORT
         )
-        self.mjpeg = MJPEGServer()
-        self.mjpeg.start()
+        # WebRTC is the only browser transport. MJPEG is kept as a testable
+        # compatibility class, but is not started in the production service.
+        self.mjpeg = None
         self.fish_comm = RoboFishComm()
         self.detector = FishDetector(
-            model_path=YOLO_MODEL_PATH,
+            model_path=self.yolo_model_path,
             conf=YOLO_CONF_THRESHOLD,
             imgsz=YOLO_IMG_SIZE,
             device=YOLO_DEVICE,
@@ -302,7 +327,7 @@ class VisionApplication:
                     camera_fps=self.cam.measured_fps,
                     loop_fps=self._loop_fps,
                 )
-                self.mjpeg.update(image)
+                self._publish_frame(image, snapshot["timestamp"])
                 self._publish_preview_metrics(snapshot["frame"], snapshot["timestamp"])
                 self._display(image)
                 self._queue_input_actions()
@@ -456,7 +481,7 @@ class VisionApplication:
             clahe_enabled=self.pipeline.use_clahe,
         )
         self.tablet.send(telemetry)
-        self.mjpeg.update(image)
+        self._publish_frame(image, result.frame_time)
         self._publish_web_metrics(result)
         if self.is_recording and self.recorder is not None:
             current = result.current_position
@@ -503,6 +528,14 @@ class VisionApplication:
                 web_action = self.action_source()
                 if web_action is None:
                     return
+                if isinstance(web_action, str):
+                    # Lifecycle commands are queued by VisionService directly.
+                    # They are already runtime actions and must not be treated
+                    # as browser action dictionaries.
+                    self.runtime.pending_actions.append(web_action)
+                    continue
+                if not isinstance(web_action, dict):
+                    continue
                 if web_action.get("deviceId") and self.fish_comm is not None:
                     self.fish_comm.set_device_id(web_action.get("deviceId"))
                 frame_size = None
@@ -511,10 +544,17 @@ class VisionApplication:
                 runtime_action = translate_web_action(web_action, frame_size)
                 if runtime_action is not None:
                     if web_action.get("type") == "camera.exposure":
-                        runtime_action = (runtime_action, {
+                        metadata = {
                             "actionId": web_action.get("actionId"),
                             "type": "camera.exposure",
-                        })
+                        }
+                        if isinstance(runtime_action, tuple):
+                            runtime_action = (
+                                runtime_action[0],
+                                {**metadata, "value": runtime_action[1]},
+                            )
+                        else:
+                            runtime_action = (runtime_action, metadata)
                     self.runtime.pending_actions.append(runtime_action)
             return
         key = cv2.waitKey(1) & 0xFF
@@ -581,6 +621,11 @@ class VisionApplication:
                 self._publish_exposure(self.cam.adjust_exposure(-1), payload)
             elif action == "EXP_UP":
                 self._publish_exposure(self.cam.adjust_exposure(1), payload)
+            elif action == "SET_EXPOSURE":
+                self._publish_exposure(
+                    self.cam.set_exposure(payload["value"]),
+                    payload,
+                )
             elif action == "OVERLAY_OPTIONS":
                 self.presentation.set_overlay_options(payload)
             elif action == "PROCESSING_START":
@@ -604,10 +649,24 @@ class VisionApplication:
             "status": result.status,
             "supported": result.supported,
             "requestedDelta": result.requested_delta,
+            "requestedValue": result.requested_value,
             "previousValue": result.previous_value,
             "actualValue": result.actual_value,
+            "minimum": result.minimum,
+            "maximum": result.maximum,
+            "step": result.step,
             "errorCode": result.error_code,
         })
+
+    def _exposure_metrics(self):
+        return {
+            "supported": bool(getattr(self.cam, "exposure_supported", False)),
+            "actualValue": getattr(self.cam, "exposure_val", None),
+            "minimum": getattr(self.cam, "exposure_min", None),
+            "maximum": getattr(self.cam, "exposure_max", None),
+            "step": getattr(self.cam, "exposure_step", None),
+            "errorCode": getattr(self.cam, "exposure_error_code", None),
+        }
 
     def _publish_web_metrics(self, result):
         if self.action_result_sink is None:
@@ -679,6 +738,7 @@ class VisionApplication:
                 "overlays": dict(self.presentation.overlay_options),
                 "cameraFps": self.cam.measured_fps,
                 "visionFps": self._loop_fps,
+                "exposure": self._exposure_metrics(),
                 "workflow": {
                     "stage": stage,
                     "status": self.status,
@@ -726,6 +786,7 @@ class VisionApplication:
                 "overlays": dict(self.presentation.overlay_options),
                 "cameraFps": self.cam.measured_fps,
                 "visionFps": self._loop_fps,
+                "exposure": self._exposure_metrics(),
                 "workflow": {
                     "stage": "PREVIEW",
                     "status": self.status,
@@ -847,6 +908,7 @@ class VisionApplication:
             state["lost_frames"] += 1
         if now - state["started"] < 3.4:
             return
+        self.fish_comm.stop_now()
         self._forward_calibration = None
         samples = state["samples"]
         if len(samples) < 20:
@@ -1115,6 +1177,10 @@ class VisionApplication:
             self.tablet.close()
         if self.mjpeg is not None:
             self.mjpeg.close()
+        if self.frame_sink is not None:
+            close_session = getattr(self.frame_sink, "close_session", None)
+            if close_session is not None:
+                close_session()
         if self.detector is not None:
             self.detector.close()
         if self.cam is not None:

@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"reflect"
 	"sync"
 	"time"
 )
@@ -46,35 +47,60 @@ type Device struct {
 }
 
 type entry struct {
-	device Device
-	conn   Conn
+	device         Device
+	conn           Conn
+	latestMu       sync.Mutex
+	latest         any
+	latestSequence uint64
+	latestWake     chan struct{}
+	stop           chan struct{}
+	stopOnce       sync.Once
 }
 type Hub struct {
-	mu      sync.RWMutex
-	entries map[string]*entry
-	pending map[string]chan map[string]any
+	mu          sync.RWMutex
+	entries     map[string]*entry
+	order       []string
+	pending     map[string]chan map[string]any
+	subscribers map[chan struct{}]struct{}
 }
 
 func New() *Hub {
-	return &Hub{entries: make(map[string]*entry), pending: make(map[string]chan map[string]any)}
+	return &Hub{
+		entries:     make(map[string]*entry),
+		pending:     make(map[string]chan map[string]any),
+		subscribers: make(map[chan struct{}]struct{}),
+	}
 }
 
 func (h *Hub) Register(d Device, c Conn) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if old := h.entries[d.ID]; old != nil && old.conn != nil {
+		old.stopWriter()
 		_ = old.conn.Close()
+	}
+	if !containsDeviceID(h.order, d.ID) {
+		h.order = append(h.order, d.ID)
 	}
 	d.Online = true
 	d.LastSeen = time.Now()
-	h.entries[d.ID] = &entry{device: d, conn: c}
+	current := &entry{
+		device: d, conn: c,
+		latestWake: make(chan struct{}, 1),
+		stop:       make(chan struct{}),
+	}
+	h.entries[d.ID] = current
+	go current.writeLatestLoop()
+	h.notifyLocked()
 }
 
 func (h *Hub) Remove(id string, c Conn) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if e := h.entries[id]; e != nil && e.conn == c {
+		e.stopWriter()
 		delete(h.entries, id)
+		h.notifyLocked()
 	}
 }
 
@@ -85,6 +111,7 @@ func (h *Hub) Update(id string, values map[string]any) {
 	if e == nil {
 		return
 	}
+	before := deviceDisplaySignature(e.device)
 	e.device.LastSeen = time.Now()
 	if v, ok := values["mode"].(float64); ok {
 		e.device.Mode = int(v)
@@ -172,6 +199,42 @@ func (h *Hub) Update(id string, values map[string]any) {
 	if v, ok := values["rgbBrightness"].(float64); ok {
 		e.device.RGBBrightness = int(v)
 	}
+	if !reflect.DeepEqual(before, deviceDisplaySignature(e.device)) {
+		h.notifyLocked()
+	}
+}
+
+// Subscribe returns a coalescing signal channel for dashboard state changes.
+// Consumers should call the returned unsubscribe function when the request ends.
+func (h *Hub) Subscribe() (<-chan struct{}, func()) {
+	updates := make(chan struct{}, 1)
+	h.mu.Lock()
+	h.subscribers[updates] = struct{}{}
+	h.mu.Unlock()
+	return updates, func() {
+		h.mu.Lock()
+		if _, ok := h.subscribers[updates]; ok {
+			delete(h.subscribers, updates)
+			close(updates)
+		}
+		h.mu.Unlock()
+	}
+}
+
+// Notify wakes dashboard subscribers after state outside the Hub changes.
+func (h *Hub) Notify() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.notifyLocked()
+}
+
+func (h *Hub) notifyLocked() {
+	for updates := range h.subscribers {
+		select {
+		case updates <- struct{}{}:
+		default:
+		}
+	}
 }
 
 func (h *Hub) Send(id string, v any) bool {
@@ -182,6 +245,64 @@ func (h *Hub) Send(id string, v any) bool {
 		return false
 	}
 	return e.conn.WriteJSON(v) == nil
+}
+
+// SendLatest queues a low-latency state update. If the device writer is busy,
+// an older update is replaced by the newest one.
+func (h *Hub) SendLatest(id string, v any) bool {
+	return h.SendLatestOrdered(id, 0, v)
+}
+
+// SendLatestOrdered queues a low-latency state update and drops an older
+// sequence that arrived late. Sequence zero keeps the legacy unordered mode.
+func (h *Hub) SendLatestOrdered(id string, sequence uint64, v any) bool {
+	h.mu.RLock()
+	e := h.entries[id]
+	h.mu.RUnlock()
+	if e == nil || e.conn == nil {
+		return false
+	}
+	e.latestMu.Lock()
+	if sequence > 0 && sequence <= e.latestSequence {
+		e.latestMu.Unlock()
+		return false
+	}
+	e.latest = v
+	if sequence > 0 {
+		e.latestSequence = sequence
+	}
+	e.latestMu.Unlock()
+	select {
+	case e.latestWake <- struct{}{}:
+	default:
+	}
+	return true
+}
+
+func (e *entry) stopWriter() {
+	e.stopOnce.Do(func() { close(e.stop) })
+}
+
+func (e *entry) writeLatestLoop() {
+	for {
+		select {
+		case <-e.latestWake:
+			for {
+				e.latestMu.Lock()
+				message := e.latest
+				e.latest = nil
+				e.latestMu.Unlock()
+				if message == nil {
+					break
+				}
+				if e.conn.WriteJSON(message) != nil {
+					return
+				}
+			}
+		case <-e.stop:
+			return
+		}
+	}
 }
 
 // SendAndWait routes a command and waits for the matching device result.
@@ -260,8 +381,85 @@ func (h *Hub) List() []Device {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	out := make([]Device, 0, len(h.entries))
-	for _, e := range h.entries {
-		out = append(out, e.device)
+	for _, id := range h.order {
+		if e := h.entries[id]; e != nil {
+			out = append(out, cloneDevice(e.device))
+		}
 	}
 	return out
+}
+
+func cloneDevice(device Device) Device {
+	device.Capabilities = append([]string(nil), device.Capabilities...)
+	device.I2CAddresses = append([]int(nil), device.I2CAddresses...)
+	return device
+}
+
+func containsDeviceID(order []string, id string) bool {
+	for _, deviceID := range order {
+		if deviceID == id {
+			return true
+		}
+	}
+	return false
+}
+
+type deviceDisplayState struct {
+	ID                string
+	Name              string
+	IP                string
+	FirmwareVersion   string
+	Online            bool
+	Mode              int
+	Frequency         float64
+	Amplitude         float64
+	Bias              float64
+	StopReason        string
+	BatteryVoltage    float64
+	BatteryPercent    int
+	Capabilities      []string
+	ControlSource     string
+	VisionActive      bool
+	VisionSessionID   string
+	OTAState          string
+	LightSensorOnline bool
+	IlluminanceLux    float64
+	I2CAddresses      []int
+	RGBMode           string
+	RGBOrder          string
+	RGBRed            int
+	RGBGreen          int
+	RGBBlue           int
+	RGBBrightness     int
+}
+
+func deviceDisplaySignature(device Device) deviceDisplayState {
+	return deviceDisplayState{
+		ID:                device.ID,
+		Name:              device.Name,
+		IP:                device.IP,
+		FirmwareVersion:   device.FirmwareVersion,
+		Online:            device.Online,
+		Mode:              device.Mode,
+		Frequency:         device.Frequency,
+		Amplitude:         device.Amplitude,
+		Bias:              device.Bias,
+		StopReason:        device.StopReason,
+		BatteryVoltage:    device.BatteryVoltage,
+		BatteryPercent:    device.BatteryPercent,
+		Capabilities:      append([]string(nil), device.Capabilities...),
+		ControlSource:     device.ControlSource,
+		VisionActive:      device.VisionActive,
+		VisionSessionID:   device.VisionSessionID,
+		OTAState:          device.OTAState,
+		LightSensorOnline: device.LightSensorOnline,
+		IlluminanceLux:    device.IlluminanceLux,
+		I2CAddresses:      append([]int(nil), device.I2CAddresses...),
+		RGBMode:           device.RGBMode,
+		RGBOrder:          device.RGBOrder,
+		RGBRed:            device.RGBRed,
+		RGBGreen:          device.RGBGreen,
+		RGBBlue:           device.RGBBlue,
+		RGBBrightness:     device.RGBBrightness,
+	}
 }

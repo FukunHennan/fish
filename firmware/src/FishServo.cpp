@@ -11,11 +11,10 @@ void FishServo::attach(int pin) {
 }
 
 void FishServo::write(int angle) {
-    int duty = map(constrain(angle, 0, 180), 0, 180, 410, 2048);
+    int duty = map(angle, 0, 180, 410, 2048);
 #if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
     ledcWrite(pin_, duty);
 #else
     ledcWrite(channel_, duty);
 #endif
 }
-

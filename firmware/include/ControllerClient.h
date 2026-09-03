@@ -4,14 +4,14 @@
 #include <ArduinoJson.h>
 #include "CommandProcessor.h"
 #include "DeviceConfig.h"
-#include "VisualController.h"
 #include "BatteryMonitor.h"
 #include "AmbientLightMonitor.h"
 #include "StatusLight.h"
+#include "ConfigStore.h"
 
 class ControllerClient {
 public:
-    ControllerClient(MotionController& motion, CommandProcessor& commands, VisualController& visual, BatteryMonitor& battery, AmbientLightMonitor& ambientLight, StatusLight& statusLight);
+    ControllerClient(MotionController& motion, CommandProcessor& commands, BatteryMonitor& battery, AmbientLightMonitor& ambientLight, StatusLight& statusLight, ConfigStore& configStore);
     void begin(const DeviceConfig& config);
     void setEndpoint(const IPAddress& host, uint16_t port);
     void clearEndpoint();
@@ -30,17 +30,17 @@ private:
     WebSocketsClient socket_;
     MotionController& motion_;
     CommandProcessor& commands_;
-    VisualController& visual_;
     BatteryMonitor& battery_;
     AmbientLightMonitor& ambientLight_;
     StatusLight& statusLight_;
+    ConfigStore& configStore_;
     DeviceConfig config_;
     bool started_=false,registered_=false;
     bool endpointReady_=false;
     IPAddress controllerIP_;
     uint32_t lastHeartbeat_=0,lastReport_=0;
     uint32_t lastControlMs_=0;
-    uint32_t calibrationStopAtMs_=0;
     String stopReason_="BOOT";
     String otaState_="IDLE";
+    String controlSource_="";
 };

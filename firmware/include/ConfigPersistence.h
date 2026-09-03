@@ -7,9 +7,11 @@ bool writeAndVerifyDeviceConfig(PreferencesLike& preferences, const ConfigLike& 
     preferences.putString("host", config.controllerHost);
     preferences.putUShort("port", config.controllerPort);
     preferences.putString("name", config.displayName);
+    preferences.putFloat("center", config.servoCenter);
     return preferences.getString("ssid") == config.ssid &&
            preferences.getString("pass") == config.password &&
            preferences.getString("host") == config.controllerHost &&
            preferences.getUShort("port", 0) == config.controllerPort &&
-           preferences.getString("name") == config.displayName;
+           preferences.getString("name") == config.displayName &&
+           preferences.getFloat("center", 90.0f) == config.servoCenter;
 }
