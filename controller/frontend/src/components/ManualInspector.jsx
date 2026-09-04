@@ -1,3 +1,4 @@
+import TelemetryIcon from "./TelemetryIcon.jsx";
 import { batteryLevel, deviceLabel, formatTime, leaseIsMine, leaseSummary } from "../ui/devicePresentation.js";
 
 const MODE_LABELS = {
@@ -29,35 +30,39 @@ export default function ManualInspector({
   const lease = leaseSummary(device, user);
   const canControl = lease.mine;
   const battery = batteryLevel(device);
+  const rssi = device?.rssi != null && device.rssi !== "" && Number.isFinite(Number(device.rssi)) && Number(device.rssi) < 0 ? Number(device.rssi) : null;
   const keyboardDevice = devices.find((item) => item.deviceId === keyboardStatus.deviceId);
   return (
     <aside className="inspector" aria-label="当前设备检查器">
       <header className="inspector-header">
         <div>
-          <span className="section-kicker">ACTIVE DEVICE</span>
           <h2>{device ? deviceLabel(device) : "未选择设备"}</h2>
-          <p>{device ? `${device.deviceId}${device.ip ? ` · ${device.ip}` : ""}` : "从左侧选择一台在线设备"}</p>
         </div>
         <span className={`inspector-state ${device?.online ? "online" : ""}`}>{device?.online ? "● 在线" : "○ 离线"}</span>
       </header>
 
       {!device ? (
-        <section className="inspector-section"><p className="inspector-empty">选择设备后显示控制权和实时状态。</p></section>
+        <section className="inspector-section"><p className="inspector-empty">请选择设备</p></section>
       ) : (
         <>
           <section className="inspector-section">
-            <h3>实时状态</h3>
-            <div className="metric-grid">
-              <div className="metric"><span>设备动作</span><strong>{MODE_LABELS[device.mode] || "未知"}</strong></div>
-              <div className="metric"><span>控制来源</span><strong>{device.controlSource || "—"}</strong></div>
-              <div className="metric"><span>电量</span><strong>{battery == null ? "—" : `${battery}%`}</strong></div>
-              <div className="metric"><span>信号</span><strong>{device.rssi ? `${device.rssi} dBm` : "—"}</strong></div>
+            <div className="metric-grid compact-telemetry">
+              <div className="metric icon-metric motion-metric">
+                <TelemetryIcon kind="motion" value={device.mode} />
+                <span>动作</span><strong>{MODE_LABELS[device.mode] || "未知"}</strong>
+              </div>
+              <div className={`metric icon-metric ${battery != null && battery <= 20 ? "telemetry-low" : ""}`}>
+                <TelemetryIcon kind="battery" value={battery} />
+                <span>电量</span><strong>{battery == null ? "—" : `${battery}%`}</strong>
+              </div>
+              <div className="metric icon-metric" title="图标表示信号强弱，数值为设备上报 RSSI">
+                <TelemetryIcon kind="signal" value={rssi} />
+                <span>信号</span><strong>{rssi == null ? "—" : <>{rssi}<small> dBm</small></>}</strong>
+              </div>
             </div>
-            <p className="inspector-note">状态来自 ESP32 heartbeat / state / command.result。</p>
           </section>
 
           <section className="inspector-section">
-            <h3>运动控制</h3>
             <div className="control-pad" aria-label="运动控制">
               <span className="empty" />
               <button type="button" disabled={!canControl || leaseBusy} className={device.mode === 2 ? "selected" : ""} onClick={() => onMotion("forward")}>前进</button>
@@ -71,26 +76,24 @@ export default function ManualInspector({
           </section>
 
           <section className={`inspector-section manual-lease-panel ${lease.className}`}>
-            <div className="manual-lease-head"><div><span className="section-kicker">CONTROL LEASE</span><strong>控制权</strong></div><b>{lease.label}</b></div>
-            <div className="manual-lease-grid">
-              <div><span>控制者</span><strong>{lease.owner}</strong></div>
-              <div><span>账户</span><strong>{lease.account}</strong></div>
-              <div><span>租约状态</span><strong>{device.lease ? `有效至 ${formatTime(device.lease.expiresAt)}` : "等待接管"}</strong></div>
-              <div><span>设备动作</span><strong>{MODE_LABELS[device.mode] || "未知"}</strong></div>
-            </div>
+            <div className="manual-lease-head"><strong>控制权</strong><b>{lease.label}</b></div>
             {lease.mine && <button className="lease-button release" type="button" disabled={leaseBusy} onClick={onRelease}>停止并释放控制权</button>}
             {!device.lease && <button className="lease-button claim" type="button" disabled={leaseBusy} onClick={onClaim}>接管当前设备</button>}
-            {device.lease && !lease.mine && <p className="lease-note">当前设备由 {lease.owner} 控制。你可以查看状态，但不能发送运动指令。</p>}
+            {device.lease && !lease.mine && <p className="lease-note">{lease.owner} 正在控制</p>}
           </section>
 
-          <section className="inspector-section">
-            <h3>命令反馈</h3>
+          <section className="inspector-section inspector-detail-section">
+            <details className="device-details"><summary>设备详情</summary>
+              <dl><dt>设备 ID</dt><dd>{device.deviceId}</dd><dt>IP</dt><dd>{device.ip || "—"}</dd><dt>控制来源</dt><dd>{device.controlSource || "—"}</dd><dt>控制者</dt><dd>{lease.owner}</dd><dt>账户</dt><dd>{lease.account}</dd><dt>有效至</dt><dd>{device.lease ? formatTime(device.lease.expiresAt) : "—"}</dd></dl>
+            </details>
+            {keyboardStatus.phase !== "idle" &&
             <div className={`keyboard-status ${keyboardStatus.phase}`}>
               <span className="keyboard-status-dot" />
               <span>{keyboardDevice ? `${deviceLabel(keyboardDevice)} · ` : ""}{keyboardStatus.message || "键盘控制待命"}</span>
               {keyboardStatus.mode && keyboardStatus.mode !== "stop" && <b>{MODE_LABELS[keyboardStatus.mode] || keyboardStatus.mode}</b>}
             </div>
-            <p className="feedback">{feedback || "命令只表达控制意图，实际动作以设备状态为准。"}</p>
+            }
+            {feedback && <p className="feedback" role="status">{feedback}</p>}
           </section>
         </>
       )}

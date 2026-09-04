@@ -1,11 +1,16 @@
 export const ROLE_LABELS = { Admin: "管理员", User: "普通用户" };
 
+// Per-page identity distinguishes two browsers logged into the same account.
+export const CONTROL_CLIENT_ID = globalThis.crypto?.randomUUID?.()
+  || Array.from(globalThis.crypto.getRandomValues(new Uint8Array(16)), value => value.toString(16).padStart(2, "0")).join("");
+
 export function deviceLabel(device) {
   return device?.name || device?.deviceId || "未命名机器鱼";
 }
 
 export function leaseIsMine(lease, user) {
   if (!lease || !user) return false;
+  if (lease.clientId && lease.clientId !== CONTROL_CLIENT_ID) return false;
   return Boolean(
     (user.id && lease.ownerId === user.id)
     || (user.email && lease.ownerEmail === user.email),

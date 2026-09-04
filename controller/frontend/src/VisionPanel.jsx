@@ -1,3 +1,4 @@
+import { createExposureSync } from "./exposureSync.js";
 import { useEffect, useRef, useState } from "react";
 import { chooseCameraIndex, toVideoPoint } from "./coordinates.js";
 import { transitionVisionTool } from "./visionTools.js";
@@ -81,10 +82,16 @@ export default function VisionPanel({
   const [serverUtcOffsetMinutes, setServerUtcOffsetMinutes] = useState(0);
   const [serverTimeReceivedAt, setServerTimeReceivedAt] = useState(0);
   const [exposurePercent, setExposurePercent] = useState(50);
+  const [videoToggleBusy, setVideoToggleBusy] = useState(false);
   const [exposureMaxInput, setExposureMaxInput] = useState("");
   const imageRef = useRef(null);
   const retryTimerRef = useRef(null);
-  const exposurePendingRef = useRef(null);
+  const exposurePendingRef = useRef(createExposureSync());
+  const exposureTimerRef = useRef(null);
+  useEffect(() => {
+    exposurePendingRef.current = createExposureSync();
+    return () => window.clearTimeout(exposureTimerRef.current);
+  }, [status.sessionId, status.cameraIndex]);
   const camerasRef = useRef([]);
   const targetDeviceIdRef = useRef(targetDeviceId);
   const targetTrackIdRef = useRef(targetTrackId);
@@ -157,17 +164,40 @@ export default function VisionPanel({
 
   const sharedOverlayPanel = (
     <section className="overlay-panel">
-      <header><strong>画面叠加</strong><span>只影响显示，不影响识别/控制</span></header>
+      <header><strong>画面显示</strong></header>
       <div className="overlay-toggle-row compact">
-        <label><input type="checkbox" checked={overlays.detections} disabled={!running} onChange={(event) => setOverlay("detections", event.target.checked)} /> YOLO 识别</label>
-        <label><input type="checkbox" checked={overlays.paths} disabled={!running} onChange={(event) => setOverlay("paths", event.target.checked)} /> 路径/轨迹</label>
+        <label><input type="checkbox" role="switch" checked={overlays.detections} disabled={!running} onChange={(event) => setOverlay("detections", event.target.checked)} /> YOLO 识别</label>
+        <label><input type="checkbox" role="switch" checked={overlays.paths} disabled={!running} onChange={(event) => setOverlay("paths", event.target.checked)} /> 路径/轨迹</label>
       </div>
     </section>
   );
 
   const sharedExposurePanel = (
     <section className="exposure-control">
-      <header><strong>摄像头曝光</strong><span>实际 {exposure.actualValue ?? "—"}</span></header>
+      <label className="exposure-slider-row">
+        <span>曝光</span>
+        <input
+          type="range"
+          min="0"
+          max="100"
+          step="1"
+          value={exposurePercent}
+          disabled={!running || !exposureRangeReady}
+          onPointerDown={() => exposurePendingRef.current.begin()}
+          onPointerCancel={() => { exposurePendingRef.current.editing = false; }}
+          onChange={(event) => { exposurePendingRef.current.begin(); setExposurePercent(Number(event.target.value)); }}
+          onPointerUp={(event) => commitExposurePercent(event.currentTarget.value)}
+          onKeyUp={(event) => {
+            if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"].includes(event.key)) {
+              commitExposurePercent(event.currentTarget.value);
+            }
+          }}
+          onBlur={(event) => commitExposurePercent(event.currentTarget.value)}
+          aria-label="曝光百分比"
+        />
+        <output title={`目标值 ${previewExposureValue ?? "—"} · 实际值 ${exposure.actualValue ?? "—"}`}>{Math.round(exposurePercent)}%</output>
+      </label>
+      <details className="exposure-advanced"><summary>高级</summary>
       <label className="exposure-limit-row">
         <span>曝光上限</span>
         <input
@@ -185,28 +215,9 @@ export default function VisionPanel({
           aria-label="曝光上限"
         />
       </label>
-      <label className="exposure-slider-row">
-        <span>曝光百分比 <b>{Math.round(exposurePercent)}%</b></span>
-        <input
-          type="range"
-          min="0"
-          max="100"
-          step="1"
-          value={exposurePercent}
-          disabled={!running || !exposureRangeReady}
-          onChange={(event) => setExposurePercent(Number(event.target.value))}
-          onPointerUp={(event) => commitExposurePercent(event.currentTarget.value)}
-          onKeyUp={(event) => {
-            if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
-              commitExposurePercent(event.currentTarget.value);
-            }
-          }}
-          onBlur={(event) => commitExposurePercent(event.currentTarget.value)}
-          aria-label="曝光百分比"
-        />
-        <output>{previewExposureValue ?? "—"}</output>
-      </label>
-      <small>{exposureHelp}</small>
+      <small>目标 {previewExposureValue ?? "—"} · 实际 {exposure.actualValue ?? "—"} · {exposureHelp}</small>
+      </details>
+      {exposure.errorCode && <small role="status">{exposureHelp}</small>}
     </section>
   );
 
@@ -269,8 +280,7 @@ export default function VisionPanel({
 
   useEffect(() => {
     if (
-      manual
-      || (
+      (
         targetDeviceIdRef.current === targetDeviceId
         && targetTrackIdRef.current === selectedTrackId
       )
@@ -314,7 +324,6 @@ export default function VisionPanel({
   ]);
 
   useEffect(() => {
-    if (manual) return;
     onVisionStateChange({
       state: status.state,
       sessionId: status.sessionId || null,
@@ -366,7 +375,8 @@ export default function VisionPanel({
   useEffect(() => {
     const action = status.lastAction;
     if (action?.type !== "camera.exposure" || action.status === undefined) return;
-    exposurePendingRef.current = null;
+    if (!exposurePendingRef.current.finish(action)) return;
+    window.clearTimeout(exposureTimerRef.current);
     if (action.status === "completed") {
       setFeedback(`实际曝光：${action.actualValue}`);
       if (Number.isFinite(Number(action.actualValue))) {
@@ -383,7 +393,7 @@ export default function VisionPanel({
 
   useEffect(() => {
     if (!exposureRangeReady) return;
-    if (exposurePendingRef.current !== null) return;
+    if (exposurePendingRef.current.blocked()) return;
     setExposureMaxInput((current) => {
       const currentValue = Number(current);
       if (!current || !Number.isFinite(currentValue)) return String(exposureDriverMax);
@@ -469,6 +479,7 @@ export default function VisionPanel({
 
   async function changeTargetDevice(event) {
     const nextTargetDeviceId = event.target.value;
+    if (nextTargetDeviceId !== targetDeviceId) onTargetTrackChange(null);
     onTargetDeviceChange(nextTargetDeviceId);
     setFeedback(nextTargetDeviceId ? "正在绑定视觉目标设备…" : "正在取消设备绑定…");
   }
@@ -494,7 +505,7 @@ export default function VisionPanel({
   }
 
   async function sendAction(action, report = true) {
-    const actionId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+    const actionId = action.actionId || globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
     const result = await visionRequest(`/sessions/${encodeURIComponent(status.sessionId)}/actions`, { method: "POST", body: JSON.stringify({ ...action, actionId }) });
     if (report) setFeedback(result.data.accepted ? "操作已确认" : "操作未接受");
     return result;
@@ -502,15 +513,26 @@ export default function VisionPanel({
 
   function commitExposurePercent(percent) {
     const value = legalExposureValue(percent);
-    if (!running || value === null || exposurePendingRef.current === value) return;
-    exposurePendingRef.current = value;
-    sendAction(
-      { type: "camera.exposure", mode: "absolute", value },
-      false,
-    ).catch((error) => {
-      exposurePendingRef.current = null;
-      setFeedback(error.message);
-    });
+    const sync = exposurePendingRef.current;
+    const edited = sync.editing;
+    sync.editing = false;
+    if (!running || value === null || sync.pending?.value === value || !edited) return;
+    const actionId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+    sync.submit(actionId, value);
+    window.clearTimeout(exposureTimerRef.current);
+    exposureTimerRef.current = window.setTimeout(() => {
+      if (sync.fail(actionId)) setFeedback("曝光确认超时，请重试");
+    }, 5000);
+    sendAction({ type: "camera.exposure", mode: "absolute", value, actionId }, false)
+      .then((result) => {
+        if (result.data.accepted === false) throw new Error("曝光设置未接受");
+      })
+      .catch((error) => {
+        if (exposurePendingRef.current === sync && sync.fail(actionId)) {
+          window.clearTimeout(exposureTimerRef.current);
+          setFeedback(error.message);
+        }
+      });
   }
 
   function normalizeExposureMax() {
@@ -589,20 +611,70 @@ export default function VisionPanel({
   return (
     <section className={`vision-card panel-surface ${manual ? "manual-mode" : ""} ${showControls ? "" : "stage-only"}`} aria-label={manual ? "视频监看" : "视觉控制"}>
       <header className="vision-header">
-        <div><span className="eyebrow">{manual ? "DRIVER VIEW" : "FISH VISION"}</span><h2>{manual ? "视频监看" : "视觉识别"}</h2><small>{manual ? "手动和视觉模式共用当前视频会话" : "摄像头画面、YOLO 识别框、跟踪结果"}</small></div>
+        <div><h2>视频</h2></div>
         <div className="vision-header-status">
           <span className={`status ${running ? "online" : "offline"}`}><i />{running ? "运行中" : "已停止"}</span>
           <span className={`status ${yolo?.ready ? "online" : "offline"}`}><i />{yoloLabel}</span>
           {running && <span className="status online"><i />{coordinateLabel}</span>}
         </div>
       </header>
+      <details className="video-common-settings"><summary>视频设置</summary>
       <div className="vision-setup-bar">
-        {!manual && showTargetDeviceSelector && <label className="camera-select">视觉目标设备<select value={targetDeviceId} disabled={switchingCamera} onChange={changeTargetDevice}><option value="">不指定目标鱼（仅预览/识别）</option>{devices.filter((device) => device.online).map((device) => <option key={device.deviceId} value={device.deviceId}>{device.name || device.deviceId} · {device.deviceId}</option>)}</select><small className="camera-hint">{targetDeviceId ? "自动/循迹会控制所选机器鱼" : "无鱼在线也可以先开启摄像头预览和视觉识别"}</small></label>}
-        <label className="camera-select">摄像头<select value={cameraIndex} disabled={switchingCamera} onChange={changeCamera}><option value="">请选择摄像头</option>{cameras.map((camera) => <option key={camera.index} value={camera.index}>{cameraLabel(camera)}</option>)}</select><small className="camera-hint">{selectedCamera ? cameraLabel(selectedCamera) : "选择要用于视觉识别的 USB 摄像头"}</small></label>
-        {!manual && <label className="camera-select">YOLO 模型<select value={selectedYoloModel} disabled={running || switchingCamera || !yoloModels.length} onChange={(event) => setSelectedYoloModel(event.target.value)}><option value="">{yoloModels.length ? "请选择 .pt 模型" : "未找到 .pt 模型"}</option>{yoloModels.map((model) => <option key={model} value={model}>{model}</option>)}</select><small className="camera-hint">{running ? `当前会话：${status.yoloModel || selectedYoloModel || "默认模型"}` : "选择本地 vision/assets 下的 .pt 模型"}</small></label>}
-        <div className="vision-primary setup-actions"><button disabled={running || cameraIndex === "" || switchingCamera} onClick={start}>{running ? "视频已开启" : "开始预览"}</button><button disabled={!running || switchingCamera} onClick={toggleProcessing}>{processing ? "停止识别" : "启动识别"}</button><button className="stop" disabled={!running || switchingCamera} onClick={stop}>关闭视频</button></div>
+
+        <label className="camera-select">摄像头<select value={cameraIndex} disabled={switchingCamera} onChange={changeCamera}><option value="">请选择摄像头</option>{cameras.map((camera) => <option key={camera.index} value={camera.index}>{cameraLabel(camera)}</option>)}</select></label>
+        {<label className="camera-select">YOLO 模型<select value={selectedYoloModel} disabled={running || switchingCamera || !yoloModels.length} onChange={(event) => setSelectedYoloModel(event.target.value)}><option value="">{yoloModels.length ? "请选择 .pt 模型" : "未找到 .pt 模型"}</option>{yoloModels.map((model) => <option key={model} value={model}>{model}</option>)}</select><small className="camera-hint">{running ? `当前会话：${status.yoloModel || selectedYoloModel || "默认模型"}` : "选择本地 vision/assets 下的 .pt 模型"}</small></label>}
+        <div className="video-switches">
+          <label className="video-switch-row"><span>视频<small>{running ? "已开启" : "已关闭"}</small></span>
+            <input type="checkbox" role="switch" aria-label="视频开关" checked={running}
+              disabled={switchingCamera || videoToggleBusy || (!running && cameraIndex === "")}
+              onChange={async () => { setVideoToggleBusy(true); try { await (running ? stop() : start()); } finally { setVideoToggleBusy(false); } }} />
+          </label>
+          <label className="video-switch-row"><span>识别<small>{processing ? "运行中" : "未开启"}</small></span>
+            <input type="checkbox" role="switch" aria-label="识别开关" checked={processing}
+              disabled={!running || switchingCamera || videoToggleBusy}
+              onChange={async () => { setVideoToggleBusy(true); try { await toggleProcessing(); } finally { setVideoToggleBusy(false); } }} />
+          </label>
+        </div>
       </div>
+      {sharedExposurePanel}{sharedOverlayPanel}
+      </details>
       <div className="vision-layout">
+        {showTargetDeviceSelector && <aside className="vision-binding-rail" aria-label="识别对象与设备绑定">
+          <div className="fish-binding-heading"><h2>在线机器鱼</h2><span>{devices.filter((fish) => fish.online).length} 台</span></div>
+          <div className="fish-binding-list">
+            {devices.filter((fish) => fish.online).map((fish) => {
+              const active = fish.deviceId === targetDeviceId;
+              const confirmed = active && selectedTrackId !== null
+                && status.targetDeviceId === fish.deviceId && status.targetTrackId === selectedTrackId;
+              return <section key={fish.deviceId} className={`fish-binding-card ${active ? "selected" : ""}`}>
+                <button type="button" className="fish-binding-select" aria-pressed={active}
+                  disabled={switchingCamera} onClick={() => changeTargetDevice({ target: { value: fish.deviceId } })}>
+                  <i className="signal online" /><span><strong>{fish.name || fish.deviceId}</strong><small>{fish.ip || fish.deviceId}</small></span>
+                  <b>{active ? "已选" : "在线"}</b>
+                </button>
+                {active && <div className="fish-binding-target">
+                  <label>识别目标
+                    <select aria-label={`${fish.name || fish.deviceId}的识别目标`} value={selectedTrackId ?? ""} disabled={switchingCamera}
+                      onChange={(event) => onTargetTrackChange(event.target.value === "" ? null : Number(event.target.value))}>
+                      <option value="">不绑定目标</option>
+                      {selectedTrackId !== null && !detections.some((target) => target.trackId === selectedTrackId) && <option value={selectedTrackId}>目标 #{selectedTrackId} · 暂时丢失</option>}
+                      {detections.map((target) => <option key={target.trackId} value={target.trackId}>目标 #{target.trackId} · {target.color} · {Math.round(target.confidence * 100)}%</option>)}
+                    </select>
+                  </label>
+                  <span className="fish-binding-state" role="status">{selectedTrackId !== null
+                    ? !selectedDetection ? "目标暂时丢失" : confirmed ? `已绑定目标 #${selectedTrackId}` : "等待绑定确认"
+                    : status.targetDeviceId === fish.deviceId && status.targetTrackId != null
+                      ? "正在取消绑定…"
+                      : detections.length ? "未绑定 · 可手动控制" : "未绑定 · 暂无识别目标"}</span>
+                </div>}
+              </section>;
+            })}
+            {!devices.some((fish) => fish.online) && <p className="rail-empty">暂无在线机器鱼</p>}
+          </div>
+          {devices.some((fish) => !fish.online) && <details className="offline-fish-list"><summary>离线设备 · {devices.filter((fish) => !fish.online).length}</summary>
+            {devices.filter((fish) => !fish.online).map((fish) => <div key={fish.deviceId}>{fish.name || fish.deviceId}<small>离线</small></div>)}
+          </details>}
+        </aside>}
         <div className="shared-video-stage video-stage" style={{ "--video-aspect": `${videoWidth} / ${videoHeight}` }} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp}>
           {running ? <>
             <VideoStream
@@ -622,37 +694,12 @@ export default function VisionPanel({
           {running && <div className="video-badge">服务器 {serverClock}<br />本机 {clock}{latencyLabel}<br />{videoWidth} × {videoHeight}</div>}
         </div>
         {!showControls ? null : manual ? <aside className="vision-controls manual-video-controls-panel">
-          <div className="vision-control-head"><h2>视频设置</h2><small>摄像头、曝光和识别框在两个模式中保持一致</small></div>
+          <div className="vision-control-head"><h2>视频设置</h2></div>
           {sharedOverlayPanel}
           {sharedExposurePanel}
           <p className="feedback manual-shared-feedback" aria-live="polite">{streamFeedback || feedback || (running ? `摄像头 ${status.cameraIndex} · ${yoloLabel}` : "视频服务未启动")}</p>
         </aside> : <aside className="vision-controls">
-          <div className="vision-control-head"><h2>识别状态</h2><small>当前：{controlModeLabel}</small></div>
-          <section className="vision-targets">
-            <header>
-              <strong>识别目标 · {detections.length}</strong>
-              <span>{selectedTrackId === null ? "未锁定" : `当前目标 #${selectedTrackId}`}</span>
-            </header>
-            <small className="vision-target-hint">识别错了时，点击正确的目标编号即可切换；切换会先停止旧目标控制。</small>
-            {detections.length ? detections.map((target) => {
-              const selected = target.trackId === selectedTrackId;
-              return <button
-                key={target.trackId}
-                type="button"
-                className={`vision-target-row ${selected ? "selected" : ""}`}
-                onClick={() => changeTargetTrack(target.trackId)}
-                aria-pressed={selected}
-              >
-                <i style={{ background: target.colorHex }} />
-                <span><b>目标 #{target.trackId}</b><small>{target.color} · {Math.round(target.confidence * 100)}%</small></span>
-                <strong>{selected ? "当前目标" : "选择"}</strong>
-              </button>;
-            }) : <p>{processing ? "暂未检测到机器鱼" : "启动视觉处理后显示目标"}</p>}
-            {selectedTrackId !== null && <p className={`vision-target-binding ${selectedDetection ? "found" : "missing"}`}>
-              {selectedDetection ? `已锁定目标 #${selectedTrackId}，${targetDeviceId ? "可绑定设备后启动控制。" : "请选择对应设备。"}` : `目标 #${selectedTrackId} 当前未出现在画面中，自动控制已禁用。`}
-            </p>}
-          </section>
-          {sharedOverlayPanel}
+          <div className="vision-control-head"><h2>视觉控制</h2><small>{controlModeLabel}</small></div>
           <section className="vision-mode-panel">
             <div className="mode-grid">{CONTROL_MODES.map(([name, label, description]) => <button key={name} type="button" className={controlMode === name ? "active" : ""} aria-pressed={controlMode === name} onClick={() => { setControlMode(name); setFeedback(`视觉模式：${description}`); }}>{label}</button>)}</div>
             <div className="param-panel auto-param-panel" aria-label="自动控制参数">
@@ -661,9 +708,7 @@ export default function VisionPanel({
               <label className="slider-row"><span>最大幅度</span><input type="range" min="0" max="90" value={autoAmplitude} onChange={(event) => setAutoAmplitude(Number(event.target.value))} /><output>{autoAmplitude}°</output></label>
               <label className="slider-row"><span>置信度</span><input type="range" min="50" max="99" value={autoConfidence} onChange={(event) => setAutoConfidence(Number(event.target.value))} /><output>{autoConfidence}%</output></label>
             </div>
-            <p className="logic-box"><strong>控制逻辑</strong>只识别不会下发运动；辅助/自动模式仍受控制权、限速、限幅约束，正式运动由循迹启动按钮接管。未选择目标鱼时只运行预览和识别。</p>
           </section>
-          {sharedExposurePanel}
           <section className={`vision-workflow ${workflow.trackingActive ? "active" : ""}`}>
             <header><strong>循迹流程</strong><span>{workflowLabel}</span></header>
             <div>{WORKFLOW_STAGES.map(([key, label], index) => {

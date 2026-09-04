@@ -19,6 +19,7 @@
 - [Python 视觉服务](../vision/README.md)
 - [WebSocket 通信协议](../protocol/websocket-protocol.md)
 - [诊断日志](../controller/diagnostics/README.md)
+- [2026-09-04 控制可靠性维护记录](2026-09-04维护记录.md)
 
 ## 对外展示
 
@@ -39,3 +40,7 @@
 - **Device**：运行 `firmware/` 固件的 ESP32 机器鱼。
 - **控制权**：一台设备在同一时间只允许一个用户或视觉会话发送运动命令。
 - **真实状态**：以 ESP32 的 heartbeat、state 和 command.result 为准，不以网页请求是否返回为准。
+
+## 当前文档与历史设计
+
+本目录的架构、部署和统一参数说明当前实现及其验证边界。`superpowers/specs/` 和 `superpowers/plans/` 保存历史设计与开发计划，其中的超时数值、角色或待办不能直接当作当前实现；发生冲突时以当前模块代码和本目录说明为准，安全要求的差距应列入维护计划。

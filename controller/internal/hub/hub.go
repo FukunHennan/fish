@@ -57,16 +57,19 @@ type entry struct {
 	nextOrder       uint64
 	outboundWake    chan struct{}
 	outboundStopped bool
+	visionDeadline  time.Time
+	visionSession   string
 
 	stop     chan struct{}
 	stopOnce sync.Once
 }
 
 type outboundMessage struct {
-	value  any
-	order  uint64
-	done   chan error
-	latest bool
+	value         any
+	order         uint64
+	done          chan error
+	latest        bool
+	motionExpires time.Time
 }
 type Hub struct {
 	mu          sync.RWMutex
@@ -251,12 +254,16 @@ func (h *Hub) notifyLocked() {
 }
 
 func (h *Hub) Send(id string, v any) bool {
+	return h.sendWithMotionTimeout(id, v, 0)
+}
+
+func (h *Hub) sendWithMotionTimeout(id string, v any, lifetime time.Duration) bool {
 	e := h.entry(id)
 	if e == nil {
 		return false
 	}
 	done := make(chan error, 1)
-	if !e.enqueue(v, done) {
+	if !e.enqueueWithMotionTimeout(v, done, lifetime) {
 		return false
 	}
 	return <-done == nil
@@ -276,6 +283,21 @@ func (h *Hub) SendLatestOrdered(id string, sequence uint64, v any) bool {
 		return false
 	}
 	if !e.enqueueLatest(sequence, v) {
+		return false
+	}
+	select {
+	case e.outboundWake <- struct{}{}:
+	default:
+	}
+	return true
+}
+
+func (h *Hub) SendLatestStop(id string, sequence uint64, v any) bool {
+	e := h.entry(id)
+	if e == nil {
+		return false
+	}
+	if !e.enqueueLatestFrame(sequence, v, true) {
 		return false
 	}
 	select {
@@ -313,6 +335,7 @@ func (e *entry) writeOutboundLoop() {
 				completeOutbound(message, err)
 				if err != nil {
 					e.stopWriter()
+					_ = e.conn.Close()
 					return
 				}
 			}
@@ -336,16 +359,43 @@ func completeOutbound(message *outboundMessage, err error) {
 }
 
 func (e *entry) enqueue(value any, done chan error) bool {
+	return e.enqueueWithMotionTimeout(value, done, 0)
+}
+
+func (e *entry) enqueueWithMotionTimeout(value any, done chan error, lifetime time.Duration) bool {
+	return e.enqueueVision(value, done, lifetime, "", "")
+}
+
+func (e *entry) enqueueVision(value any, done chan error, lifetime time.Duration, session, operation string) bool {
 	e.outboundMu.Lock()
 	defer e.outboundMu.Unlock()
 	if e.outboundStopped {
 		return false
 	}
+	if operation != "" && operation != "start" {
+		if session == "" || session != e.visionSession || (!e.visionDeadline.IsZero() && !time.Now().Before(e.visionDeadline)) {
+			return false
+		}
+	}
+	if operation == "start" || (lifetime == 0 && replacesMotion(value)) {
+		e.invalidateVisionLocked()
+	}
+	if operation == "start" {
+		e.visionSession = session
+	}
 	e.nextOrder++
+	var expires time.Time
+	if lifetime > 0 {
+		expires = time.Now().Add(lifetime)
+		e.visionDeadline = expires
+	} else if replacesMotion(value) {
+		e.visionDeadline = time.Time{}
+	}
 	e.outbound = append(e.outbound, &outboundMessage{
-		value: value,
-		order: e.nextOrder,
-		done:  done,
+		value:         value,
+		order:         e.nextOrder,
+		done:          done,
+		motionExpires: expires,
 	})
 	select {
 	case e.outboundWake <- struct{}{}:
@@ -355,16 +405,23 @@ func (e *entry) enqueue(value any, done chan error) bool {
 }
 
 func (e *entry) enqueueLatest(sequence uint64, value any) bool {
+	return e.enqueueLatestFrame(sequence, value, false)
+}
+
+func (e *entry) enqueueLatestFrame(sequence uint64, value any, stop bool) bool {
 	e.outboundMu.Lock()
 	defer e.outboundMu.Unlock()
 	if e.outboundStopped {
 		return false
 	}
-	if sequence > 0 && sequence <= e.latestSequence {
+	if !stop && sequence > 0 && sequence <= e.latestSequence {
 		return false
 	}
-	if sequence > 0 {
+	if sequence > e.latestSequence {
 		e.latestSequence = sequence
+	}
+	if replacesMotion(value) {
+		e.invalidateVisionLocked()
 	}
 	e.nextOrder++
 	if e.latestPending != nil {
@@ -385,6 +442,7 @@ func (e *entry) enqueueLatest(sequence uint64, value any) bool {
 func (e *entry) popNext() *outboundMessage {
 	e.outboundMu.Lock()
 	defer e.outboundMu.Unlock()
+	e.dropExpiredMotionLocked(time.Now())
 	if len(e.outbound) == 0 {
 		return nil
 	}
@@ -411,22 +469,54 @@ func (h *Hub) entry(id string) *entry {
 // SendAndWait routes a command and waits for the matching device result.
 // The waiter is installed before the write so an immediate reply cannot be missed.
 func (h *Hub) SendAndWait(id, requestID string, v any, timeout time.Duration) (map[string]any, bool, bool) {
-	result := make(chan map[string]any, 1)
+	return h.SendAndWaitWithMotionTimeout(id, requestID, v, timeout, 0)
+}
+
+// SendAndWaitWithMotionTimeout arms a motion deadline before queueing, even if
+// the device ACK is subsequently lost. A zero lifetime preserves normal sends.
+func (h *Hub) SendAndWaitWithMotionTimeout(id, requestID string, v any, timeout, lifetime time.Duration) (map[string]any, bool, bool) {
+	return h.QueueCommand(id, requestID, v, lifetime).Wait(timeout)
+}
+
+// Receipt separates atomic admission/queueing from potentially slow network I/O.
+type Receipt struct {
+	h         *Hub
+	requestID string
+	written   chan error
+	result    chan map[string]any
+	queued    bool
+}
+
+func (h *Hub) QueueCommand(id, requestID string, value any, lifetime time.Duration) *Receipt {
+	return h.QueueVisionCommand(id, requestID, value, lifetime, "", "")
+}
+
+func (h *Hub) QueueVisionCommand(id, requestID string, value any, lifetime time.Duration, session, operation string) *Receipt {
+	r := &Receipt{h: h, requestID: requestID, written: make(chan error, 1), result: make(chan map[string]any, 1)}
 	h.mu.Lock()
-	h.pending[requestID] = result
+	h.pending[requestID] = r.result
+	e := h.entries[id]
 	h.mu.Unlock()
-	defer func() {
-		h.mu.Lock()
-		delete(h.pending, requestID)
-		h.mu.Unlock()
-	}()
-	if !h.Send(id, v) {
+	r.queued = e != nil && e.enqueueVision(value, r.written, lifetime, session, operation)
+	return r
+}
+
+func (r *Receipt) Queued() bool { return r.queued }
+
+func (r *Receipt) Wait(timeout time.Duration) (map[string]any, bool, bool) {
+	defer func() { r.h.mu.Lock(); delete(r.h.pending, r.requestID); r.h.mu.Unlock() }()
+	if !r.queued {
 		return nil, false, false
 	}
+	if <-r.written != nil {
+		return nil, false, false
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
-	case acknowledgement := <-result:
-		return acknowledgement, true, true
-	case <-time.After(timeout):
+	case ack := <-r.result:
+		return ack, true, true
+	case <-timer.C:
 		return nil, true, false
 	}
 }

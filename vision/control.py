@@ -8,6 +8,7 @@ import queue
 import threading
 import time
 import urllib.request
+import urllib.error
 from dataclasses import dataclass
 
 
@@ -97,8 +98,18 @@ class RoboFishComm:
         internal_token = os.environ.get("FISH_VISION_INTERNAL_TOKEN", "").strip()
         if internal_token:
             request.add_header("X-Fish-Vision-Internal", internal_token)
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            result = json.loads(response.read().decode("utf-8"))
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                result = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as error:
+            if error.code == 409 and payload.get("operation") in ("motion", "calibrate-forward"):
+                with self._state_lock:
+                    if payload.get("sessionId") == self._session_id:
+                        self._motion_enabled = False
+                        self._control_session += 1
+                        self._clear_queue()
+            error.close()
+            raise
         if not result.get("sent"):
             raise RuntimeError("没有唯一在线机器鱼可接收运动命令")
         if not result.get("acknowledged"):
@@ -113,6 +124,12 @@ class RoboFishComm:
         self._device_id = str(device_id or "").strip()
 
     def _request_motion(self, mode, frequency, amplitude, bias, timeout=0.3):
+        if str(mode).lower() == "stop":
+            with self._state_lock:
+                self._motion_enabled = False
+                self._control_session += 1
+            self._clear_queue()
+            return self._post({"operation": "stop", "sessionId": self._session_id}, timeout=timeout)
         return self._post({
             "operation": "motion",
             "sessionId": self._session_id,

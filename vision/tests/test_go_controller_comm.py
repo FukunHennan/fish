@@ -2,12 +2,14 @@ import json
 import threading
 import time
 import unittest
+from urllib.error import HTTPError
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from control import RoboFishComm
 
 
 class CaptureHandler(BaseHTTPRequestHandler):
+    status = 200
     messages = []
     event = threading.Event()
     response = {"sent": True, "acknowledged": True, "success": True, "code": "OK"}
@@ -17,7 +19,7 @@ class CaptureHandler(BaseHTTPRequestHandler):
         self.__class__.messages.append(json.loads(body))
         self.__class__.event.set()
         payload = json.dumps(self.__class__.response).encode()
-        self.send_response(200)
+        self.send_response(self.__class__.status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
@@ -29,6 +31,7 @@ class CaptureHandler(BaseHTTPRequestHandler):
 
 class GoControllerCommTests(unittest.TestCase):
     def setUp(self):
+        CaptureHandler.status = 200
         CaptureHandler.messages = []
         CaptureHandler.event.clear()
         CaptureHandler.response = {"sent": True, "acknowledged": True, "success": True, "code": "OK"}
@@ -40,6 +43,29 @@ class GoControllerCommTests(unittest.TestCase):
     def tearDown(self):
         self.server.shutdown()
         self.server.server_close()
+
+    def test_rejected_session_disables_further_motion(self):
+        comm = RoboFishComm(controller_url=self.url)
+        try:
+            self.assertTrue(comm.ensure_hybrid_mode())
+            CaptureHandler.status = 409
+            with self.assertRaises(HTTPError):
+                comm._request_motion("forward", 2.5, 20, 0)
+            self.assertFalse(comm._motion_enabled)
+            self.assertFalse(comm._send_async({"kind": "motion", "mode": "forward"}))
+        finally:
+            CaptureHandler.status = 200
+            comm.close()
+
+    def test_braking_stop_uses_stop_operation(self):
+        comm = RoboFishComm(controller_url=self.url)
+        try:
+            self.assertTrue(comm.ensure_hybrid_mode())
+            comm._request_motion("stop", 0, 0, 0)
+            self.assertEqual(CaptureHandler.messages[-1]["operation"], "stop")
+            self.assertFalse(comm._motion_enabled)
+        finally:
+            comm.close()
 
     def test_start_update_and_stop_use_go_json_contract(self):
         comm = RoboFishComm(controller_url=self.url)

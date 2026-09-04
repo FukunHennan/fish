@@ -30,6 +30,7 @@ var frontendFiles embed.FS
 
 const maxFirmwareSize int64 = 8 << 20
 const deviceHeartbeatTimeout = 3 * time.Second
+const visionMotionTimeout = 3 * time.Second
 
 type server struct {
 	hub             *hub.Hub
@@ -81,6 +82,10 @@ type deviceConn struct {
 func (c *deviceConn) WriteJSON(value any) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	// A blocked write must not hold a timeout STOP behind it indefinitely.
+	if err := c.conn.SetWriteDeadline(time.Now().Add(time.Second)); err != nil {
+		return err
+	}
 	return c.conn.WriteJSON(value)
 }
 func (c *deviceConn) Close() error { return c.conn.Close() }
@@ -139,10 +144,12 @@ func newHandler(h *hub.Hub, key []byte, apiAddress, streamAddress, firmwarePath 
 		calibrationPath: motionCalibrationPath(), auth: newAuthStore(authStorePath()),
 		leases: newLeaseStore(60 * time.Second),
 	}
+	s.leases.onRelease = func(id string) { s.hub.StopAndReset(id) }
 	if firmwarePath != "" {
 		s.firmwareName = filepath.Base(firmwarePath)
 	}
 	go s.leaseWatchdog()
+	go s.visionMotionWatchdog()
 	m := http.NewServeMux()
 	visionHandler, err := visionproxy.New(apiAddress, streamAddress)
 	if err != nil {
@@ -190,9 +197,6 @@ func (s *server) leaseWatchdog() {
 			if len(staleDevices) == 0 {
 				continue
 			}
-		}
-		for _, deviceID := range expired {
-			_ = s.stopDevice(deviceID)
 		}
 		s.hub.Notify()
 	}
@@ -403,13 +407,14 @@ func (s *server) visionDeviceCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var command struct {
-		Operation string  `json:"operation"`
-		DeviceID  string  `json:"deviceId"`
-		SessionID string  `json:"sessionId"`
-		Mode      string  `json:"mode"`
-		Frequency float64 `json:"frequency"`
-		Amplitude float64 `json:"amplitude"`
-		Bias      float64 `json:"bias"`
+		Operation  string  `json:"operation"`
+		DeviceID   string  `json:"deviceId"`
+		SessionID  string  `json:"sessionId"`
+		Mode       string  `json:"mode"`
+		Frequency  float64 `json:"frequency"`
+		Amplitude  float64 `json:"amplitude"`
+		Bias       float64 `json:"bias"`
+		DurationMs int     `json:"durationMs"`
 	}
 	if json.NewDecoder(r.Body).Decode(&command) != nil {
 		http.Error(w, "请求格式错误", http.StatusBadRequest)
@@ -422,6 +427,19 @@ func (s *server) visionDeviceCommand(w http.ResponseWriter, r *http.Request) {
 	if command.Operation != "stop" && command.SessionID == "" {
 		http.Error(w, "控制会话不能为空", http.StatusBadRequest)
 		return
+	}
+	lifetime := time.Duration(0)
+	if command.Operation == "motion" || command.Operation == "start" {
+		lifetime = visionMotionTimeout
+	} else if command.Operation == "calibrate-forward" {
+		if command.DurationMs == 0 {
+			command.DurationMs = 3200
+		}
+		if command.DurationMs < 1 || command.DurationMs > 5000 {
+			http.Error(w, "标定时长必须为 1–5000 ms", http.StatusBadRequest)
+			return
+		}
+		lifetime = time.Duration(command.DurationMs) * time.Millisecond
 	}
 	if s.authActive() && !s.isVisionInternalRequest(r) {
 		user, ok := s.requireUser(w, r)
@@ -480,24 +498,11 @@ func (s *server) visionDeviceCommand(w http.ResponseWriter, r *http.Request) {
 		payload["frequency"] = command.Frequency
 		payload["amplitude"] = command.Amplitude
 		payload["bias"] = command.Bias
-	}
-	if s.authActive() {
-		if command.Operation == "start" || command.Operation == "calibrate-forward" || command.Operation == "motion" {
-			if _, acquired := s.leases.acquireBot(deviceID, "vision-bot", "motion"); !acquired {
-				w.WriteHeader(http.StatusConflict)
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"sent": false, "acknowledged": false, "success": false,
-					"requestId": requestID, "message": "device is controlled by another user",
-				})
-				return
-			}
-			s.hub.Notify()
-			_ = s.leases.touchBot(deviceID, "vision-bot")
-		}
-		if command.Operation == "stop" {
-			s.leases.releaseBot(deviceID, "vision-bot")
-			s.hub.Notify()
-		}
+	} else if command.Operation == "calibrate-forward" {
+		frequency, amplitude, bias, _ := s.applyMotionGeometry(deviceID, "forward", 2.0, 22.0, 0, true, nil)
+		payload["frequency"] = frequency
+		payload["amplitude"] = amplitude
+		payload["bias"] = bias
 	}
 	payload["deviceId"] = deviceID
 	payload["controlSource"] = "vision-bot"
@@ -509,7 +514,20 @@ func (s *server) visionDeviceCommand(w http.ResponseWriter, r *http.Request) {
 	if command.Operation == "motion" {
 		wait = 250 * time.Millisecond
 	}
-	ack, sent, acknowledged := s.hub.SendAndWait(deviceID, requestID, message, wait)
+	var receipt *hub.Receipt
+	admitted := s.leases.admitVision(deviceID, command.Operation, func() bool {
+		receipt = s.hub.QueueVisionCommand(deviceID, requestID, message, lifetime, command.SessionID, command.Operation)
+		return receipt.Queued()
+	})
+	if !admitted {
+		if receipt != nil {
+			receipt.Wait(0)
+		}
+		writeAuthError(w, http.StatusConflict, "视觉会话已失效、设备离线或控制权已转移，请重新启动视觉控制")
+		return
+	}
+	s.hub.Notify()
+	ack, sent, acknowledged := receipt.Wait(wait)
 	if !sent {
 		w.WriteHeader(http.StatusConflict)
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -630,6 +648,7 @@ func (s *server) leasesAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	var input struct {
 		DeviceID string `json:"deviceId"`
+		ClientID string `json:"clientId"`
 		Mode     string `json:"mode"`
 		Force    bool   `json:"force"`
 	}
@@ -643,30 +662,32 @@ func (s *server) leasesAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	switch r.Method {
+	case http.MethodPatch:
+		if !s.leases.admit(input.DeviceID, user, input.ClientID, true, func() bool { return true }) {
+			writeAuthError(w, http.StatusConflict, "控制权已失效，请重新获取控制权")
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"renewed": true})
 	case http.MethodPost:
-		lease, releasedIDs, acquired := s.leases.acquireExclusive(input.DeviceID, user, input.Mode, input.Force && canAdmin(user))
+		lease, _, acquired := s.leases.acquireExclusive(input.DeviceID, user, input.Mode, input.Force && canAdmin(user), input.ClientID)
 		if !acquired {
 			w.WriteHeader(http.StatusConflict)
 			_ = json.NewEncoder(w).Encode(map[string]any{"acquired": false, "lease": lease, "message": "这条鱼正在被其他用户控制"})
 			return
 		}
-		for _, deviceID := range releasedIDs {
-			_ = s.stopDevice(deviceID)
-		}
 		s.hub.Notify()
 		_ = json.NewEncoder(w).Encode(map[string]any{"acquired": true, "lease": lease})
 	case http.MethodDelete:
-		released := s.leases.release(input.DeviceID, user, input.Force && canAdmin(user))
+		released := s.leases.release(input.DeviceID, user, input.Force && canAdmin(user), input.ClientID)
 		if !released {
 			w.WriteHeader(http.StatusConflict)
 			_ = json.NewEncoder(w).Encode(map[string]any{"released": false, "message": "只能释放自己的控制权，管理员可强制释放"})
 			return
 		}
-		_ = s.stopDevice(input.DeviceID)
 		s.hub.Notify()
 		_ = json.NewEncoder(w).Encode(map[string]any{"released": true})
 	default:
-		http.Error(w, "仅支持 POST / DELETE", http.StatusMethodNotAllowed)
+		http.Error(w, "仅支持 POST / PATCH / DELETE", http.StatusMethodNotAllowed)
 	}
 }
 
@@ -688,17 +709,25 @@ func (s *server) emergencyStop(w http.ResponseWriter, r *http.Request) {
 		Message      string `json:"message,omitempty"`
 	}
 	results := make([]result, 0, len(devices))
+	receipts := make([]*hub.Receipt, 0, len(devices))
 	for _, device := range devices {
 		requestID := fmt.Sprintf("emergency-%d", time.Now().UnixNano())
 		message := map[string]any{"type": "command", "requestId": requestID, "command": "emergency.stop", "payload": map[string]any{"operator": user.Email}}
-		ack, sent, acknowledged := s.hub.SendAndWait(device.ID, requestID, message, 1200*time.Millisecond)
-		item := result{DeviceID: device.ID, Sent: sent, Acknowledged: acknowledged}
+		s.leases.mu.Lock()
+		s.hub.StopAndReset(device.ID)
+		delete(s.leases.leases, device.ID)
+		receipts = append(receipts, s.hub.QueueCommand(device.ID, requestID, message, 0))
+		s.leases.mu.Unlock()
+	}
+	s.hub.Notify()
+	for i, receipt := range receipts {
+		ack, sent, acknowledged := receipt.Wait(1200 * time.Millisecond)
+		item := result{DeviceID: devices[i].ID, Sent: sent, Acknowledged: acknowledged}
 		if acknowledged {
 			item.Success, _ = ack["success"].(bool)
 			item.Message, _ = ack["message"].(string)
 		}
 		results = append(results, item)
-		_ = s.leases.release(device.ID, user, true)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"results": results})
@@ -888,9 +917,16 @@ func (s *server) applyMotionGeometry(deviceID, mode string, frequency, amplitude
 		return frequency, amplitude, bias, hasBias
 	}
 	profile := s.motionProfileForDevice(deviceID)
+	straightCenter := motionStraightCenter(profile)
+	minimum, maximum := 0.0, 180.0
+	if profile.ServoMax != 0 || profile.StraightCenter != 0 || profile.ForwardFrequency != 0 {
+		minimum, maximum, _ = profileServoRange(profile)
+	}
 	center, maxSwing, ok := centerSwingForMode(profile, mode)
 	if !ok {
-		return frequency, amplitude, bias, hasBias
+		// Legacy profiles have no forward/idle geometry or calibrated limits.
+		// Preserve their requested swing, subject to the physical 0–180° range.
+		center, maxSwing = straightCenter, 90
 	}
 
 	if mode == "stop" {
@@ -904,16 +940,18 @@ func (s *server) applyMotionGeometry(deviceID, mode string, frequency, amplitude
 	if !hasBias {
 		// The firmware stores the straight center as its neutral position.
 		// Motion bias is therefore relative to that calibrated center, not 90°.
-		bias = center - motionStraightCenter(profile)
-		if bias < -90 {
-			bias = -90
-		}
-		if bias > 90 {
-			bias = 90
-		}
-		hasBias = true
+		bias = center - straightCenter
 	}
-	return frequency, amplitude, bias, hasBias
+	if mode == "stop" {
+		bias = 0
+	}
+	// Explicit PID/manual bias changes the actual swing center. Limit that
+	// center first, then fit the whole oscillation within the servo envelope.
+	bias = limitMotionValue(bias, math.Max(-90, minimum-straightCenter), math.Min(90, maximum-straightCenter))
+	actualCenter := straightCenter + bias
+	availableSwing := math.Max(0, math.Min(actualCenter-minimum, maximum-actualCenter))
+	amplitude = limitMotionValue(amplitude, 0, availableSwing)
+	return frequency, amplitude, bias, true
 }
 
 func (s *server) motionCalibrations(w http.ResponseWriter, r *http.Request) {
@@ -970,9 +1008,9 @@ func (s *server) command(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var x struct {
-		DeviceID, Mode         string
-		Frequency, Amplitude   float64
-		AmplitudePercent, Bias *float64
+		DeviceID, Mode, ClientID string
+		Frequency, Amplitude     float64
+		AmplitudePercent, Bias   *float64
 	}
 	if json.NewDecoder(r.Body).Decode(&x) != nil {
 		http.Error(w, "请求格式错误", http.StatusBadRequest)
@@ -985,11 +1023,6 @@ func (s *server) command(w http.ResponseWriter, r *http.Request) {
 	mode := strings.ToLower(x.Mode)
 	if mode != "center" && !isMotionMode(mode) {
 		http.Error(w, "运动模式无效", http.StatusBadRequest)
-		return
-	}
-	if mode != "stop" && s.authActive() && !s.leases.touch(x.DeviceID, user) && !canAdmin(user) {
-		w.WriteHeader(http.StatusConflict)
-		_ = json.NewEncoder(w).Encode(map[string]any{"sent": false, "acknowledged": false, "success": false, "message": "请先获取这条鱼的控制权"})
 		return
 	}
 	var bias float64
@@ -1021,7 +1054,19 @@ func (s *server) command(w http.ResponseWriter, r *http.Request) {
 		"payload": payload,
 	}
 	w.Header().Set("Content-Type", "application/json")
-	ack, sent, acknowledged := s.hub.SendAndWait(x.DeviceID, requestID, msg, 2500*time.Millisecond)
+	var receipt *hub.Receipt
+	required := mode != "stop" && (x.ClientID != "" || s.authActive())
+	if !s.leases.admit(x.DeviceID, user, x.ClientID, required, func() bool {
+		receipt = s.hub.QueueCommand(x.DeviceID, requestID, msg, 0)
+		return receipt.Queued()
+	}) {
+		if receipt != nil {
+			receipt.Wait(0)
+		}
+		writeAuthError(w, http.StatusConflict, "设备离线或控制权已转移，请重新获取控制权")
+		return
+	}
+	ack, sent, acknowledged := receipt.Wait(2500 * time.Millisecond)
 	if !sent {
 		w.WriteHeader(http.StatusConflict)
 		_ = json.NewEncoder(w).Encode(map[string]any{"sent": false, "acknowledged": false, "requestId": requestID, "message": "device offline"})
@@ -1056,10 +1101,10 @@ func (s *server) realtimeCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var x struct {
-		DeviceID, Mode         string
-		Frequency, Amplitude   float64
-		AmplitudePercent, Bias *float64
-		Sequence               uint64
+		DeviceID, Mode, ClientID string
+		Frequency, Amplitude     float64
+		AmplitudePercent, Bias   *float64
+		Sequence                 uint64
 	}
 	if json.NewDecoder(r.Body).Decode(&x) != nil {
 		http.Error(w, "请求格式错误", http.StatusBadRequest)
@@ -1075,15 +1120,6 @@ func (s *server) realtimeCommand(w http.ResponseWriter, r *http.Request) {
 	mode := strings.ToLower(x.Mode)
 	if !isMotionMode(mode) {
 		http.Error(w, "运动模式无效", http.StatusBadRequest)
-		return
-	}
-	if mode != "stop" && s.authActive() &&
-		!s.leases.touch(x.DeviceID, user) && !canAdmin(user) {
-		w.WriteHeader(http.StatusConflict)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"sent": false, "queued": false, "success": false,
-			"message": "请先获取这条鱼的控制权",
-		})
 		return
 	}
 	var bias float64
@@ -1113,7 +1149,17 @@ func (s *server) realtimeCommand(w http.ResponseWriter, r *http.Request) {
 		"type": "command", "requestId": requestID, "deviceId": x.DeviceID,
 		"command": "motion.set", "payload": payload,
 	}
-	if !s.hub.SendLatestOrdered(x.DeviceID, x.Sequence, message) {
+	required := mode != "stop" && (x.ClientID != "" || s.authActive())
+	if !s.leases.admit(x.DeviceID, user, x.ClientID, required, func() bool {
+		if mode == "stop" {
+			lease, exists := s.leases.leases[x.DeviceID]
+			if (exists && (lease.ClientID != x.ClientID || lease.OwnerID != user.ID)) || (!exists && x.ClientID != "") {
+				x.Sequence = 0 // Another browser's STOP cannot poison this owner's sequence.
+			}
+			return s.hub.SendLatestStop(x.DeviceID, x.Sequence, message)
+		}
+		return s.hub.SendLatestOrdered(x.DeviceID, x.Sequence, message)
+	}) {
 		w.WriteHeader(http.StatusConflict)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"sent": false, "queued": false, "success": false,

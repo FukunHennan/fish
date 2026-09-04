@@ -40,7 +40,6 @@ export default function DeviceRail({
         <span className="section-kicker">{page === "vision" ? "VISION TARGETS" : "DEVICES"}</span>
         <span className="device-count">{onlineCount} 在线</span>
         <h2>设备列表</h2>
-        <p>{page === "vision" ? "选择设备作为视觉身份绑定目标。" : "固定注册顺序，状态变化不会重新排列。"}</p>
       </header>
       <div className="device-list" role="list">
         {devices.map((device) => {
@@ -82,10 +81,6 @@ export default function DeviceRail({
           );
         })}
         {!devices.length && <div className="rail-empty">暂无设备</div>}
-      </div>
-      <div className="rail-summary">
-        <strong>列表状态</strong><br />
-        设备按首次注册顺序保留，离线设备也不会被移动。
       </div>
     </aside>
   );

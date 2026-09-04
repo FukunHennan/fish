@@ -57,6 +57,7 @@ export function deviceStateSignature(devices) {
           ownerId: lease.ownerId,
           ownerName: lease.ownerName,
           ownerEmail: lease.ownerEmail,
+          clientId: lease.clientId,
           mode: lease.mode,
         } : null,
       })),

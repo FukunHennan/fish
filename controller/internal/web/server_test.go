@@ -405,6 +405,7 @@ func TestVisionDeviceCommandRoutesToOnlyConnectedFish(t *testing.T) {
 		})
 	}}
 	h.Register(hub.Device{ID: "fish-1"}, connection)
+	prepareVisionSession(t, h, "fish-1", "session-1", connection)
 	handler := NewHandler(h, testKey())
 	body := `{"operation":"motion","sessionId":"session-1","mode":"forward","frequency":2.8,"amplitude":31,"bias":-12}`
 	r := httptest.NewRequest(http.MethodPost, "/api/vision/device-command", strings.NewReader(body))
@@ -439,6 +440,7 @@ func TestVisionDeviceCommandNormalizesOutOfRangeMotion(t *testing.T) {
 		})
 	}}
 	h.Register(hub.Device{ID: "fish-1"}, connection)
+	prepareVisionSession(t, h, "fish-1", "session-1", connection)
 	handler := NewHandler(h, testKey())
 	request := httptest.NewRequest(http.MethodPost, "/api/vision/device-command", strings.NewReader(
 		`{"operation":"motion","deviceId":"fish-1","sessionId":"session-1","mode":"left","frequency":8,"amplitude":100,"bias":120}`,
@@ -450,14 +452,16 @@ func TestVisionDeviceCommandNormalizesOutOfRangeMotion(t *testing.T) {
 	}
 	message := connection.sent[0].(map[string]any)
 	payload := message["payload"].(map[string]any)
-	if payload["frequency"] != 5.0 || payload["amplitude"] != 45.0 || payload["bias"] != 90.0 {
+	if payload["frequency"] != 5.0 || payload["amplitude"] != 0.0 || payload["bias"] != 90.0 {
 		t.Fatalf("视觉参数没有被控制器归一化: %#v", payload)
 	}
 }
 
 func TestVisionDeviceCommandFailsWhenDeviceDoesNotAcknowledge(t *testing.T) {
 	h := hub.New()
-	h.Register(hub.Device{ID: "fish-1"}, &captureConn{})
+	noAck := &captureConn{}
+	h.Register(hub.Device{ID: "fish-1"}, noAck)
+	prepareVisionSession(t, h, "fish-1", "session-1", noAck)
 	handler := NewHandler(h, testKey())
 	r := httptest.NewRequest(http.MethodPost, "/api/vision/device-command", strings.NewReader(
 		`{"operation":"calibrate-forward","sessionId":"session-1"}`,
@@ -478,6 +482,7 @@ func TestVisionDeviceCommandRoutesToExplicitTargetAmongMultipleFish(t *testing.T
 	}}
 	h.Register(hub.Device{ID: "fish-1"}, first)
 	h.Register(hub.Device{ID: "fish-2"}, second)
+	prepareVisionSession(t, h, "fish-2", "session-1", second)
 	handler := NewHandler(h, testKey())
 	r := httptest.NewRequest(http.MethodPost, "/api/vision/device-command", strings.NewReader(
 		`{"operation":"calibrate-forward","deviceId":"fish-2","sessionId":"session-1","durationMs":3600}`,
@@ -834,4 +839,15 @@ func TestAuthAndLeaseProtectMotionCommand(t *testing.T) {
 	if authed.Code != http.StatusOK {
 		t.Fatalf("已登录且持有控制权应可控制: %d %s", authed.Code, authed.Body.String())
 	}
+}
+
+func prepareVisionSession(t *testing.T, h *hub.Hub, id, session string, c *captureConn) {
+	t.Helper()
+	requestID := fmt.Sprintf("setup-%d", time.Now().UnixNano())
+	receipt := h.QueueVisionCommand(id, requestID, map[string]any{"type": "command", "command": "motion.set", "requestId": requestID, "payload": map[string]any{"mode": "stop"}}, 3*time.Second, session, "start")
+	_, sent, _ := receipt.Wait(time.Millisecond)
+	if !sent {
+		t.Fatal("vision session setup failed")
+	}
+	c.sent = nil
 }

@@ -8,6 +8,7 @@ import (
 
 type controlLease struct {
 	DeviceID      string    `json:"deviceId"`
+	ClientID      string    `json:"clientId,omitempty"`
 	OwnerID       string    `json:"ownerId"`
 	OwnerName     string    `json:"ownerName"`
 	OwnerEmail    string    `json:"ownerEmail"`
@@ -18,9 +19,10 @@ type controlLease struct {
 }
 
 type leaseStore struct {
-	mu     sync.Mutex
-	ttl    time.Duration
-	leases map[string]controlLease
+	mu        sync.Mutex
+	ttl       time.Duration
+	leases    map[string]controlLease
+	onRelease func(string)
 }
 
 func newLeaseStore(ttl time.Duration) *leaseStore {
@@ -31,11 +33,72 @@ func (l *leaseStore) cleanupLocked(now time.Time) []string {
 	var expired []string
 	for id, lease := range l.leases {
 		if now.After(lease.ExpiresAt) {
+			l.stopLocked(id)
 			delete(l.leases, id)
 			expired = append(expired, id)
 		}
 	}
 	return expired
+}
+
+// Called while admission is locked: STOP must enter the device queue before a
+// new owner can submit motion. The callback must never wait for device I/O.
+func (l *leaseStore) stopLocked(id string) {
+	if l.onRelease != nil {
+		l.onRelease(id)
+	}
+}
+
+func (l *leaseStore) admit(deviceID string, user authUser, clientID string, required bool, queue func() bool) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := time.Now()
+	l.cleanupLocked(now)
+	lease, exists := l.leases[deviceID]
+	if required && (!exists || lease.OwnerID != user.ID || lease.ClientID != clientID) {
+		return false
+	}
+	if !queue() {
+		return false
+	}
+	if exists && lease.OwnerID == user.ID && lease.ClientID == clientID {
+		lease.ExpiresAt, lease.LastCommandAt = now.Add(l.ttl), now
+		l.leases[deviceID] = lease
+	}
+	return true
+}
+
+func (l *leaseStore) admitVision(deviceID, operation string, queue func() bool) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := time.Now()
+	l.cleanupLocked(now)
+	current, exists := l.leases[deviceID]
+	if exists && current.OwnerID != "vision-bot" {
+		return false
+	}
+	if !queue() {
+		return false
+	}
+	if operation == "stop" {
+		delete(l.leases, deviceID)
+	} else {
+		l.leases[deviceID] = controlLease{DeviceID: deviceID, OwnerID: "vision-bot", OwnerName: "vision-bot", OwnerEmail: "vision-bot", Mode: "vision", AcquiredAt: now, LastCommandAt: now, ExpiresAt: now.Add(l.ttl)}
+	}
+	return true
+}
+
+func (l *leaseStore) releaseIdleVision(active func(string) bool) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	changed := false
+	for id, lease := range l.leases {
+		if lease.OwnerID == "vision-bot" && !active(id) {
+			delete(l.leases, id)
+			changed = true
+		}
+	}
+	return changed
 }
 
 func (l *leaseStore) snapshot() map[string]controlLease {
@@ -72,11 +135,15 @@ func (l *leaseStore) acquire(deviceID string, user authUser, mode string, force 
 	return lease, true
 }
 
-func (l *leaseStore) acquireExclusive(deviceID string, user authUser, mode string, force bool) (controlLease, []string, bool) {
+func (l *leaseStore) acquireExclusive(deviceID string, user authUser, mode string, force bool, clients ...string) (controlLease, []string, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := time.Now()
 	l.cleanupLocked(now)
+	clientID := ""
+	if len(clients) > 0 {
+		clientID = clients[0]
+	}
 	mode = strings.ToLower(strings.TrimSpace(mode))
 	if mode == "" {
 		mode = "manual"
@@ -84,15 +151,20 @@ func (l *leaseStore) acquireExclusive(deviceID string, user authUser, mode strin
 	if current, ok := l.leases[deviceID]; ok && current.OwnerID != user.ID && !force {
 		return current, nil, false
 	}
+	if current, ok := l.leases[deviceID]; !ok || current.OwnerID != user.ID || current.ClientID != clientID {
+		l.stopLocked(deviceID)
+	}
 	released := make([]string, 0, 1)
 	for id, lease := range l.leases {
 		if id == deviceID || lease.OwnerID != user.ID {
 			continue
 		}
 		delete(l.leases, id)
+		l.stopLocked(id)
 		released = append(released, id)
 	}
 	lease := controlLease{
+		ClientID: clientID,
 		DeviceID: deviceID, OwnerID: user.ID, OwnerName: user.Name, OwnerEmail: user.Email,
 		Mode: mode, AcquiredAt: now, ExpiresAt: now.Add(l.ttl), LastCommandAt: now,
 	}
@@ -104,7 +176,7 @@ func (l *leaseStore) acquireBot(deviceID, botName, mode string) (controlLease, b
 	return l.acquire(deviceID, authUser{ID: botName, Name: botName, Email: botName, Role: "User", Status: "active"}, mode, false)
 }
 
-func (l *leaseStore) release(deviceID string, user authUser, force bool) bool {
+func (l *leaseStore) release(deviceID string, user authUser, force bool, clients ...string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.cleanupLocked(time.Now())
@@ -115,6 +187,10 @@ func (l *leaseStore) release(deviceID string, user authUser, force bool) bool {
 	if current.OwnerID != user.ID && !force {
 		return false
 	}
+	if len(clients) > 0 && current.ClientID != clients[0] && !force {
+		return false
+	}
+	l.stopLocked(deviceID)
 	delete(l.leases, deviceID)
 	return true
 }

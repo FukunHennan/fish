@@ -1,8 +1,10 @@
+import { startLeaseRenewal } from "./leaseRenewal.js";
 import { Component, StrictMode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 import "./maintenance.css";
 import "./rename.css";
+import "./console-theme.css";
 import VisionPanel from "./VisionPanel.jsx";
 import AuthScreen from "./components/AuthScreen.jsx";
 import DeviceRail from "./components/DeviceRail.jsx";
@@ -14,6 +16,7 @@ import {
   deviceLabel,
   formatBytes,
   leaseIsMine,
+  CONTROL_CLIENT_ID,
   leaseSummary,
   roleLabel,
 } from "./ui/devicePresentation.js";
@@ -80,14 +83,10 @@ function CommandStrip({ page, device, feedback, keyboardStatus, pressedKeys }) {
     ? MODE_LABELS[keyboardStatus.mode] || keyboardStatus.mode
     : "停止";
   const primary = keyboardStatus.message || feedback || (device ? `${deviceLabel(device)} 等待控制指令` : "等待控制指令");
-  const secondary = page === "vision"
-    ? "视觉命令只在目标、身份绑定和控制权都确认后下发。"
-    : "命令只表达控制意图，设备状态由 ESP32 反馈。";
   return (
     <section className="command-strip" aria-live="polite">
       <div>
         <strong>{primary}</strong>
-        <span>{secondary}</span>
       </div>
       <div className="key-hints" aria-label="键盘状态">
         {["W", "A", "S", "D"].map((key) => (
@@ -140,7 +139,7 @@ function App() {
     lastDeviceId: "",
     intentVersion: 0,
     lastErrorAt: 0,
-    sequence: Date.now() * 1000,
+    sequence: 0,
   });
   const manualControlRef = useRef(null);
   const devicesRef = useRef([]);
@@ -192,6 +191,7 @@ function App() {
     page,
     authenticated: auth.authenticated,
     currentUserEmail: auth.user?.email,
+    user: auth.user,
     selectedDevice,
     manualMotionByDevice,
     selectedManualMotion,
@@ -361,7 +361,7 @@ function App() {
     const response = await fetch("/api/leases", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ deviceId: device.deviceId, mode, force }),
+      body: JSON.stringify({ deviceId: device.deviceId, mode, force, clientId: CONTROL_CLIENT_ID }),
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok || result.acquired !== true || !result.lease || typeof result.lease !== "object") {
@@ -402,6 +402,15 @@ function App() {
     );
   }
 
+  useEffect(() => {
+    const device = devicesRef.current.find((item) => item.deviceId === visionDeviceId);
+    if (device) selectDevice(device);
+    else {
+      stopKeyboardControl();
+      setSelectedDeviceId("");
+    }
+  }, [visionDeviceId]);
+
   async function claimDevice(device) {
     if (!device?.deviceId || leaseBusy || !device.online) return;
     setLeaseBusy(true);
@@ -420,7 +429,7 @@ function App() {
     const response = await fetch("/api/leases", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ deviceId: device.deviceId, force }),
+      body: JSON.stringify({ deviceId: device.deviceId, force, clientId: CONTROL_CLIENT_ID }),
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok || result.released === false) {
@@ -489,7 +498,7 @@ function App() {
     }
     const params = override || { frequency: device.frequency ?? 2.5, amplitudePercent: DEFAULT_AMPLITUDE_PERCENT };
     const payload = {
-      deviceId: device.deviceId, mode,
+      deviceId: device.deviceId, mode, clientId: CONTROL_CLIENT_ID,
       frequency: clamp(params.frequency, 0.3, 5, 2.5),
       amplitudePercent: clamp(params.amplitudePercent ?? params.amplitude, 0, 100, DEFAULT_AMPLITUDE_PERCENT),
     };
@@ -533,12 +542,14 @@ function App() {
     };
     const payload = isStop ? {
       deviceId: device.deviceId,
+      clientId: CONTROL_CLIENT_ID,
       mode: "stop",
       frequency: 0.3,
       amplitudePercent: 0,
       bias: 0,
     } : {
       deviceId: device.deviceId,
+      clientId: CONTROL_CLIENT_ID,
       mode,
       frequency: clamp(motion.frequency, 0.3, 5, DEFAULT_FREQUENCY),
       amplitudePercent: clamp(motion.amplitudePercent, 0, 100, DEFAULT_AMPLITUDE_PERCENT),
@@ -548,7 +559,7 @@ function App() {
     }
     const nextSequence = sequence ?? (() => {
       const state = keyboardRef.current;
-      state.sequence = Math.max(state.sequence + 1, Date.now() * 1000);
+      state.sequence += 1;
       return state.sequence;
     })();
     payload.sequence = nextSequence;
@@ -698,6 +709,29 @@ function App() {
       setPressedKeys(new Set());
       stopKeyboardControl();
     }
+    const stopRenewal = startLeaseRenewal({
+      getTarget: () => {
+        const current = manualControlRef.current;
+        const state = keyboardRef.current;
+        const device = current.selectedDevice;
+        return current.authenticated && current.page === "manual" && !document.hidden
+          && state.active && device?.deviceId === state.lastDeviceId
+          && leaseIsMine(device.lease, current.user)
+          ? device : null;
+      },
+      renew: async (device) => {
+        const response = await fetch("/api/leases", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ deviceId: device.deviceId, clientId: CONTROL_CLIENT_ID }),
+        });
+        if (!response.ok) throw new Error("控制权续期失败，已停止键盘控制");
+      },
+      onError: (error) => {
+        releaseKeyboard();
+        reportKeyboardError(error);
+      },
+    });
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("blur", releaseKeyboard);
@@ -706,6 +740,7 @@ function App() {
     }
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
+      stopRenewal();
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", releaseKeyboard);
@@ -857,7 +892,7 @@ function App() {
         <div className="system-status top-actions">
           <span className="status online"><i />服务器在线</span>
           <span className="user">{roleLabel(auth.user)} <strong>{auth.user?.name || auth.user?.email}</strong></span>
-          {isAdmin && <button className="top-stop" disabled={!onlineDevices.length || sending} onClick={stopAll}>ALL STOP</button>}
+          {isAdmin && <button className="top-stop" disabled={!onlineDevices.length || sending} onClick={stopAll}>全部停止</button>}
           <button className="logout-button" onClick={logout}>退出</button>
         </div>
       </header>
@@ -866,44 +901,17 @@ function App() {
 
       {page !== "settings" ? (
         <div className={`workspace ${page}-workspace`}>
-          <DeviceRail
-            devices={devices}
-            selectedId={page === "manual" ? selectedDeviceId : visionDeviceId}
-            onSelect={(device) => page === "manual" ? selectDevice(device) : setVisionDeviceId(device.deviceId)}
-            page={page}
-            user={auth.user}
-            visionState={visionState}
-            disabled={page === "manual" ? leaseBusy : false}
-          />
           <section className={`stage-column ${page === "vision" ? "vision-stage-column" : ""}`}>
-            <div className="stage-toolbar">
-              <div>
-                <span className="section-kicker">{page === "vision" ? "VISION WORKSPACE" : "MANUAL WORKSPACE"}</span>
-                <h1>{page === "vision" ? "视觉识别与控制" : "手动驾驶"}</h1>
-                <p>{page === "vision" ? "先选择识别目标，再绑定对应的物理设备。" : selectedDevice ? `${deviceLabel(selectedDevice)} · 键盘和按钮共用同一控制权。` : "从左侧选择一台在线设备开始控制。"}</p>
-              </div>
-              <div className="toolbar-status">
-                <span className={`status-chip ${onlineDevices.length ? "good" : "warn"}`}><i className="dot" />{onlineDevices.length ? `${onlineDevices.length} 台在线` : "没有在线设备"}</span>
-                <span className={`status-chip ${page === "vision" ? "warn" : ""}`}>{page === "vision" ? "身份绑定与控制权分离" : "转弯优先于直行"}</span>
-              </div>
-            </div>
             <VisionPanel
               devices={devices}
-              targetDeviceId={page === "vision" ? visionDeviceId : ""}
-              targetTrackId={page === "vision" ? visionTrackId : null}
+              targetDeviceId={visionDeviceId}
+              targetTrackId={visionTrackId}
               onTargetDeviceChange={setVisionDeviceId}
               onTargetTrackChange={setVisionTrackId}
               onVisionStateChange={handleVisionStateChange}
               mode={page === "manual" ? "manual" : "vision"}
-              showTargetDeviceSelector={page === "vision"}
+              showTargetDeviceSelector={true}
               showControls={page === "vision"}
-            />
-            <CommandStrip
-              page={page}
-              device={selectedDevice}
-              feedback={feedback}
-              keyboardStatus={keyboardStatus}
-              pressedKeys={pressedKeys}
             />
           </section>
           {page === "manual" && <ManualInspector

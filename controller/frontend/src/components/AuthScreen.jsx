@@ -51,14 +51,14 @@ export default function AuthScreen({ onAuthenticated, bootstrap }) {
               <div><small>FISH CONTROL</small><strong>多鱼控制平台</strong></div>
             </div>
             <div className="auth-copy-main">
-              <h1>安全进入控制台</h1>
-              <p>登录只保留必要信息。通过身份校验后，才显示手动、视觉、设置界面，并记录每条鱼的控制者。</p>
+              <h1>连接每一次探索</h1>
+              <p>从实时观察到精准控制，在同一个工作台管理你的机器鱼。</p>
             </div>
             <div className="auth-side-bottom">
               <div className="auth-mini-pond" aria-label="Fish status preview">
                 <div className="auth-fish-dot">鱼 A</div><div className="auth-fish-dot">鱼 B</div><div className="auth-fish-dot">鱼 C</div>
               </div>
-              <div className="auth-pills"><span><i />Cloudflare</span><span>多条鱼在线</span><span>控制互斥</span></div>
+              <div className="auth-pills"><span>实时观察</span><span>多设备管理</span><span>视觉循迹</span></div>
             </div>
           </section>
           <section className="auth-card" aria-label={bootstrap ? "登录或初始化管理员" : "登录"}>
@@ -71,10 +71,6 @@ export default function AuthScreen({ onAuthenticated, bootstrap }) {
               <p>{mode === "login" ? (bootstrap ? "系统尚未初始化；也可以先创建首个管理员账户。" : "账户由管理员创建和管理，请使用已有账号登录。") : "首次启动时创建唯一的初始管理员；之后所有账户都必须由管理员建立。"}</p>
             </div>
             <form className="auth-form" onSubmit={submitAuth}>
-              {mode === "login" && <>
-                <button className="auth-primary" type="button" onClick={() => setFeedback("Cloudflare Access 入口已预留；如果要正式启用，我下一步可以接 Cloudflare Zero Trust。")}>使用 Cloudflare Access 登录</button>
-                <div className="auth-divider">或使用本地账号</div>
-              </>}
               {mode === "bootstrap" ? <div className="auth-two-col">
                 <label className="auth-field"><span>姓名</span><input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" /></label>
                 <label className="auth-field"><span>邮箱</span><input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" /></label>
