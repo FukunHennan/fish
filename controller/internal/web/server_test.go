@@ -195,6 +195,15 @@ func TestAdminBootstrapAndUserManagement(t *testing.T) {
 	if created.Code != http.StatusOK || !strings.Contains(created.Body.String(), `"created":true`) {
 		t.Fatalf("管理员创建账户失败: %d %s", created.Code, created.Body.String())
 	}
+	if strings.Contains(created.Body.String(), "passwordHash") || strings.Contains(created.Body.String(), "passwordSalt") {
+		t.Fatalf("创建账户响应泄露密码资料: %s", created.Body.String())
+	}
+	var createdPublic struct {
+		User map[string]any `json:"user"`
+	}
+	if json.Unmarshal(created.Body.Bytes(), &createdPublic) != nil || createdPublic.User["role"] != "User" || createdPublic.User["roleLabel"] != "普通用户" {
+		t.Fatalf("历史 Operator 应统一为普通用户: %s", created.Body.String())
+	}
 
 	loginOperator := httptest.NewRecorder()
 	handler.ServeHTTP(loginOperator, httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(
@@ -269,6 +278,101 @@ func TestAdminBootstrapAndUserManagement(t *testing.T) {
 	}
 }
 
+func TestUserCannotAccessAdminOnlyEndpoints(t *testing.T) {
+	t.Setenv("FISH_AUTH_DISABLED", "false")
+	t.Setenv("FISH_AUTH_USERS", filepath.Join(t.TempDir(), "users.json"))
+	t.Setenv("FISH_MOTION_CALIBRATIONS", filepath.Join(t.TempDir(), "motion-calibrations.json"))
+	h := hub.New()
+	connection := &captureConn{onWrite: func(value any) {
+		message := value.(map[string]any)
+		h.ResolveCommandResult(map[string]any{
+			"type": "command.result", "requestId": message["requestId"],
+			"success": true, "code": "OK", "message": "applied",
+		})
+	}}
+	h.Register(hub.Device{ID: "fish-1"}, connection)
+	handler := NewHandler(h, testKey())
+
+	register := httptest.NewRecorder()
+	handler.ServeHTTP(register, httptest.NewRequest(http.MethodPost, "/api/auth/register", strings.NewReader(
+		`{"name":"管理员","email":"admin@example.com","password":"admin-pass-123"}`,
+	)))
+	if register.Code != http.StatusOK || len(register.Result().Cookies()) == 0 {
+		t.Fatalf("初始化管理员失败: %d %s", register.Code, register.Body.String())
+	}
+	adminCookie := register.Result().Cookies()[0]
+
+	create := httptest.NewRequest(http.MethodPost, "/api/auth/users", strings.NewReader(
+		`{"name":"普通用户","email":"user@example.com","password":"user-pass-123","role":"User"}`,
+	))
+	create.AddCookie(adminCookie)
+	created := httptest.NewRecorder()
+	handler.ServeHTTP(created, create)
+	if created.Code != http.StatusOK {
+		t.Fatalf("创建普通用户失败: %d %s", created.Code, created.Body.String())
+	}
+
+	login := httptest.NewRecorder()
+	handler.ServeHTTP(login, httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(
+		`{"email":"user@example.com","password":"user-pass-123"}`,
+	)))
+	if login.Code != http.StatusOK || len(login.Result().Cookies()) == 0 {
+		t.Fatalf("普通用户登录失败: %d %s", login.Code, login.Body.String())
+	}
+	userCookie := login.Result().Cookies()[0]
+
+	adminOnly := []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{http.MethodGet, "/api/auth/users", ""},
+		{http.MethodGet, "/api/firmware", ""},
+		{http.MethodGet, "/api/firmware/current.bin", ""},
+		{http.MethodPost, "/api/ota", `{}`},
+		{http.MethodPost, "/api/emergency-stop", `{}`},
+	}
+	for _, endpoint := range adminOnly {
+		t.Run(endpoint.method+" "+endpoint.path, func(t *testing.T) {
+			request := httptest.NewRequest(endpoint.method, endpoint.path, strings.NewReader(endpoint.body))
+			request.AddCookie(userCookie)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("普通用户不应访问管理员接口: %d %s", response.Code, response.Body.String())
+			}
+		})
+	}
+
+	calibration := httptest.NewRequest(http.MethodPut, "/api/motion-calibrations", strings.NewReader(
+		`{"deviceId":"fish-1","centerDeg":94,"frequency":2.4,"amplitude":26,"leftSign":-1,"leftMaxOffset":22,"rightSign":1,"rightMaxOffset":19,"turnPercent":65}`,
+	))
+	calibration.AddCookie(userCookie)
+	calibrationResponse := httptest.NewRecorder()
+	handler.ServeHTTP(calibrationResponse, calibration)
+	if calibrationResponse.Code != http.StatusOK {
+		t.Fatalf("普通用户应能保存舵机标定: %d %s", calibrationResponse.Code, calibrationResponse.Body.String())
+	}
+
+	rgb := httptest.NewRequest(http.MethodPost, "/api/rgb", strings.NewReader(
+		`{"deviceId":"fish-1","mode":"SOLID","order":"GRB","red":0,"green":255,"blue":80,"brightness":32}`,
+	))
+	rgb.AddCookie(userCookie)
+	rgbResponse := httptest.NewRecorder()
+	handler.ServeHTTP(rgbResponse, rgb)
+	if rgbResponse.Code != http.StatusOK {
+		t.Fatalf("普通用户应能设置 RGB: %d %s", rgbResponse.Code, rgbResponse.Body.String())
+	}
+
+	devices := httptest.NewRecorder()
+	deviceRequest := httptest.NewRequest(http.MethodGet, "/api/devices", nil)
+	deviceRequest.AddCookie(userCookie)
+	handler.ServeHTTP(devices, deviceRequest)
+	if devices.Code != http.StatusOK {
+		t.Fatalf("普通用户应能读取设备状态: %d %s", devices.Code, devices.Body.String())
+	}
+}
+
 func TestVisionRoutesUseConfiguredProxy(t *testing.T) {
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/status" {
@@ -320,8 +424,34 @@ func TestVisionDeviceCommandRoutesToOnlyConnectedFish(t *testing.T) {
 		t.Fatalf("命令=%v", message["command"])
 	}
 	payload := message["payload"].(map[string]any)
-	if payload["mode"] != "forward" || payload["frequency"] != 2.8 || payload["amplitude"] != 31.0 || payload["bias"] != 0.0 {
+	if payload["mode"] != "forward" || payload["frequency"] != 2.8 || payload["amplitude"] != 31.0 || payload["bias"] != -12.0 {
 		t.Fatalf("载荷=%+v", payload)
+	}
+}
+
+func TestVisionDeviceCommandNormalizesOutOfRangeMotion(t *testing.T) {
+	h := hub.New()
+	connection := &captureConn{onWrite: func(value any) {
+		message := value.(map[string]any)
+		h.ResolveCommandResult(map[string]any{
+			"type": "command.result", "requestId": message["requestId"],
+			"success": true, "code": "OK", "message": "applied",
+		})
+	}}
+	h.Register(hub.Device{ID: "fish-1"}, connection)
+	handler := NewHandler(h, testKey())
+	request := httptest.NewRequest(http.MethodPost, "/api/vision/device-command", strings.NewReader(
+		`{"operation":"motion","deviceId":"fish-1","sessionId":"session-1","mode":"left","frequency":8,"amplitude":100,"bias":120}`,
+	))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("视觉超范围参数不应整帧失败: %d %s", response.Code, response.Body.String())
+	}
+	message := connection.sent[0].(map[string]any)
+	payload := message["payload"].(map[string]any)
+	if payload["frequency"] != 5.0 || payload["amplitude"] != 45.0 || payload["bias"] != 90.0 {
+		t.Fatalf("视觉参数没有被控制器归一化: %#v", payload)
 	}
 }
 

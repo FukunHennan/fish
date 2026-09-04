@@ -536,6 +536,9 @@ class VisionApplication:
                     continue
                 if not isinstance(web_action, dict):
                     continue
+                if web_action.get("type") == "target.select":
+                    self.runtime.pending_actions.append(web_action)
+                    continue
                 if web_action.get("deviceId") and self.fish_comm is not None:
                     self.fish_comm.set_device_id(web_action.get("deviceId"))
                 frame_size = None
@@ -578,6 +581,16 @@ class VisionApplication:
         while self.runtime.pending_actions:
             item = self.runtime.pending_actions.popleft()
             action, payload = item if isinstance(item, tuple) else (item, None)
+            if isinstance(action, dict) and action.get("type") == "target.select":
+                self._safe_stop("TARGET CHANGED", force=True)
+                self.pipeline.set_target_track(action.get("trackId"))
+                self._heading_calibration_result = {
+                    "status": "idle",
+                    "progress": 0.0,
+                    "sampleCount": 0,
+                    "message": "目标已切换，请重新确认方向",
+                }
+                continue
             if action == "EXIT":
                 self._safe_stop("EXIT", force=True)
                 self._exit_requested = True
@@ -682,9 +695,16 @@ class VisionApplication:
         yolo["inferFps"] = result.yolo_result.get("infer_fps", 0.0)
         yolo["detections"] = result.yolo_result.get("detections", [])
         yolo["detectionCount"] = len(yolo["detections"])
+        yolo["targetTrackId"] = result.yolo_result.get("targetTrackId")
+        yolo["targetFound"] = result.yolo_result.get("targetFound")
         calibration_ready = self.runtime.calibration["H"] is not None
         path_ready = len(self.runtime.drawn_path["pixels"]) >= 2
-        target_detected = yolo["detectionCount"] == 1
+        selected_track_id = yolo.get("targetTrackId")
+        target_detected = (
+            bool(yolo.get("targetFound"))
+            if selected_track_id is not None
+            else yolo["detectionCount"] == 1
+        )
         position_ready = result.control_position is not None
         heading_ready = (
             self.runtime.heading["world_unit_vector"] is not None
@@ -707,7 +727,9 @@ class VisionApplication:
             blockers.append("等待 YOLO 就绪")
         if yolo["detectionCount"] == 0:
             blockers.append("未检测到机器鱼")
-        elif yolo["detectionCount"] > 1:
+        elif selected_track_id is not None and not target_detected:
+            blockers.append(f"目标 #{selected_track_id} 暂未识别")
+        elif selected_track_id is None and yolo["detectionCount"] > 1:
             blockers.append("检测到多条鱼，请锁定单一目标")
         if not calibration_ready:
             blockers.append("场地尚未标定")
@@ -877,8 +899,12 @@ class VisionApplication:
         if result.pixel is None:
             print("Cannot calibrate heading: no single fish is locked.")
             return
-        if len(result.yolo_result.get("detections", [])) != 1:
+        selected_track_id = result.yolo_result.get("targetTrackId")
+        if selected_track_id is None and len(result.yolo_result.get("detections", [])) != 1:
             print("Cannot calibrate heading: exactly one fish must be detected.")
+            return
+        if selected_track_id is not None and not result.yolo_result.get("targetFound"):
+            print(f"Cannot calibrate heading: target #{selected_track_id} is not visible.")
             return
         if not self.fish_comm.ensure_hybrid_mode():
             print("Cannot calibrate heading: device did not acknowledge vision session.")
@@ -902,7 +928,13 @@ class VisionApplication:
             return
         now = time.monotonic()
         detections = result.yolo_result.get("detections", [])
-        if result.pixel is not None and len(detections) == 1:
+        selected_track_id = result.yolo_result.get("targetTrackId")
+        target_valid = (
+            bool(result.yolo_result.get("targetFound"))
+            if selected_track_id is not None
+            else len(detections) == 1
+        )
+        if result.pixel is not None and target_valid:
             state["samples"].append((now, np.asarray(result.pixel, dtype=np.float64), np.asarray(result.control_position, dtype=np.float64) if result.control_position is not None else None))
         else:
             state["lost_frames"] += 1

@@ -209,3 +209,66 @@ func TestSendLatestKeepsOnlyNewestPendingCommand(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 }
+
+func TestNormalAndRealtimeMessagesShareOneOrderedWriter(t *testing.T) {
+	h := New()
+	c := &blockingConn{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+		first:   true,
+	}
+	h.Register(Device{ID: "fish-1"}, c)
+
+	if !h.SendLatest("fish-1", map[string]any{"kind": "realtime", "sequence": 1}) {
+		t.Fatal("实时命令没有进入队列")
+	}
+	select {
+	case <-c.started:
+	case <-time.After(time.Second):
+		t.Fatal("统一设备写入循环没有启动")
+	}
+
+	done := make(chan bool, 1)
+	go func() {
+		done <- h.Send("fish-1", map[string]any{"kind": "normal", "mode": "stop"})
+	}()
+	select {
+	case <-done:
+		t.Fatal("普通命令不应绕过正在发送的实时命令")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(c.release)
+
+	select {
+	case ok := <-done:
+		if !ok {
+			t.Fatal("普通命令没有完成发送")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("普通命令发送超时")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.sent) != 2 {
+		t.Fatalf("统一出口应按顺序发送两条消息: %#v", c.sent)
+	}
+	first, _ := c.sent[0].(map[string]any)
+	second, _ := c.sent[1].(map[string]any)
+	if first["sequence"] != 1 || second["mode"] != "stop" {
+		t.Fatalf("普通命令改变了实时命令顺序: %#v", c.sent)
+	}
+}
+
+func TestRemoveInactiveDevice(t *testing.T) {
+	h := New()
+	h.Register(Device{ID: "fish-1"}, &fakeConn{})
+
+	removed := h.RemoveInactive(time.Nanosecond)
+	if len(removed) != 1 || removed[0] != "fish-1" {
+		t.Fatalf("过期设备没有被移除: %v", removed)
+	}
+	if devices := h.List(); len(devices) != 0 {
+		t.Fatalf("过期设备仍在在线列表: %+v", devices)
+	}
+}

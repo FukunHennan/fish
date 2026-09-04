@@ -36,9 +36,6 @@ func (s *server) currentUser(r *http.Request) (authUser, bool) {
 				name = email
 			}
 			role := normalizeRole(r.Header.Get("X-Fish-Role"))
-			if role == "Viewer" {
-				role = "Operator"
-			}
 			return authUser{ID: "cf:" + email, Name: name, Email: email, Role: role, Status: "active"}, true
 		}
 	}
@@ -63,6 +60,18 @@ func (s *server) requireUser(w http.ResponseWriter, r *http.Request) (authUser, 
 	w.WriteHeader(http.StatusUnauthorized)
 	_ = json.NewEncoder(w).Encode(map[string]any{"authenticated": false, "message": "请先登录"})
 	return authUser{}, false
+}
+
+func (s *server) requireAdmin(w http.ResponseWriter, r *http.Request) (authUser, bool) {
+	user, ok := s.requireUser(w, r)
+	if !ok {
+		return authUser{}, false
+	}
+	if !canAdmin(user) {
+		writeAuthError(w, http.StatusForbidden, "需要管理员权限")
+		return authUser{}, false
+	}
+	return user, true
 }
 
 func (s *server) authMe(w http.ResponseWriter, r *http.Request) {
@@ -170,12 +179,8 @@ func (s *server) authLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) authUsers(w http.ResponseWriter, r *http.Request) {
-	user, ok := s.requireUser(w, r)
+	user, ok := s.requireAdmin(w, r)
 	if !ok {
-		return
-	}
-	if !canAdmin(user) {
-		writeAuthError(w, http.StatusForbidden, "需要管理员权限")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

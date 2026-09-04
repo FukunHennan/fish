@@ -121,10 +121,11 @@ class VisionWebApiTests(unittest.TestCase):
 
         target = self.client.post(
             f"/sessions/{session_id}/target",
-            json={"targetDeviceId": "fish-2"},
+            json={"targetDeviceId": "fish-2", "targetTrackId": 7},
         )
         self.assertEqual(target.status_code, 200)
         self.assertEqual(target.get_json()["data"]["targetDeviceId"], "fish-2")
+        self.assertEqual(target.get_json()["data"]["targetTrackId"], 7)
 
         switched = self.client.post(
             f"/sessions/{session_id}/camera",

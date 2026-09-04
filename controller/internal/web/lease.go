@@ -101,7 +101,7 @@ func (l *leaseStore) acquireExclusive(deviceID string, user authUser, mode strin
 }
 
 func (l *leaseStore) acquireBot(deviceID, botName, mode string) (controlLease, bool) {
-	return l.acquire(deviceID, authUser{ID: botName, Name: botName, Email: botName, Role: "Operator", Status: "active"}, mode, false)
+	return l.acquire(deviceID, authUser{ID: botName, Name: botName, Email: botName, Role: "User", Status: "active"}, mode, false)
 }
 
 func (l *leaseStore) release(deviceID string, user authUser, force bool) bool {
@@ -153,7 +153,7 @@ func (l *leaseStore) touchBot(deviceID, botName string) bool {
 }
 
 func canControl(user authUser) bool {
-	return user.Status == "active" && (user.Role == "Operator" || user.Role == "Admin")
+	return user.Status == "active" && (user.Role == "User" || user.Role == "Admin")
 }
 
 func canAdmin(user authUser) bool {

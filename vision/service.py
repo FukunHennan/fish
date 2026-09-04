@@ -15,6 +15,8 @@ import cv2
 from camera_stream import _open_working_capture, _safe_get, _safe_release
 from session import SessionMismatch, VisionSession, VisionState
 
+UNSET = object()
+
 
 @dataclass(frozen=True)
 class CameraInfo:
@@ -228,12 +230,23 @@ class VisionService:
         self._subscribers = set()
         self._last_metrics_notify = 0.0
 
-    def create_session(self, camera_id, camera_index, target_device_id=None, yolo_model=None):
+    def create_session(
+        self,
+        camera_id,
+        camera_index,
+        target_device_id=None,
+        yolo_model=None,
+        target_track_id=None,
+    ):
         with self._lock:
             if self._stop_runner is not None:
                 return None
             session = VisionSession.new(
-                camera_id, camera_index, target_device_id, yolo_model
+                camera_id,
+                camera_index,
+                target_device_id,
+                target_track_id,
+                yolo_model,
             )
             self._error = ""
             try:
@@ -257,6 +270,11 @@ class VisionService:
             self._stop_runner = stop_runner
             self._camera_index = camera_index
             self._session = session
+            if target_track_id is not None:
+                self._actions.put({
+                    "type": "target.select",
+                    "trackId": target_track_id,
+                })
             session.transition(VisionState.PREVIEWING)
             self._notify()
             return session.snapshot()
@@ -267,6 +285,7 @@ class VisionService:
                 return {
                     "state": "idle", "sessionId": None,
                     "cameraId": None, "cameraIndex": None, "targetDeviceId": None,
+                    "targetTrackId": None,
                     "yoloModel": None,
                     "error": None, "metrics": {}, "lastAction": None,
                 }
@@ -339,7 +358,7 @@ class VisionService:
     def start(self, camera_index):
         return self.create_session(f"camera-{camera_index}", camera_index) is not None
 
-    def set_target_device(self, session_id, target_device_id):
+    def set_target_device(self, session_id, target_device_id, target_track_id=UNSET):
         with self._lock:
             session = self._require_session(session_id)
             if session.state not in (
@@ -348,9 +367,26 @@ class VisionService:
                 VisionState.TRACKING,
             ):
                 return None
+            previous_device_id = session.target_device_id
+            previous_track_id = session.target_track_id
             session.target_device_id = (
                 target_device_id.strip() if target_device_id else None
             )
+            if target_track_id is not UNSET:
+                session.target_track_id = target_track_id
+            target_changed = (
+                session.target_device_id != previous_device_id
+                or session.target_track_id != previous_track_id
+            )
+            if target_changed:
+                if session.state == VisionState.TRACKING:
+                    session.transition(VisionState.PROCESSING)
+                    self._actions.put("STOP")
+            if session.target_track_id != previous_track_id:
+                self._actions.put({
+                    "type": "target.select",
+                    "trackId": session.target_track_id,
+                })
             self._notify()
             return session.snapshot()
 
@@ -358,6 +394,7 @@ class VisionService:
         with self._lock:
             session = self._require_session(session_id)
             target_device_id = session.target_device_id
+            target_track_id = session.target_track_id
             if session.camera_index == camera_index:
                 return session.snapshot()
 
@@ -370,7 +407,11 @@ class VisionService:
                 self._session = None
 
         snapshot = self.create_session(
-            camera_id, camera_index, target_device_id, session.yolo_model
+            camera_id,
+            camera_index,
+            target_device_id,
+            session.yolo_model,
+            target_track_id,
         )
         if snapshot is None:
             return self.current_session()

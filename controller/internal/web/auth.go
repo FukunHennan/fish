@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -69,7 +70,20 @@ func (a *authStore) load() error {
 	if err := json.Unmarshal(data, &users); err != nil {
 		return err
 	}
+	changed := false
+	for email, user := range users {
+		canonicalRole := normalizeRole(user.Role)
+		if user.Role != canonicalRole {
+			user.Role = canonicalRole
+			users[email] = user
+			changed = true
+		}
+	}
 	a.users = users
+	if changed {
+		// Migrate legacy Operator/Viewer records to the two-role model.
+		_ = a.saveLocked()
+	}
 	return nil
 }
 
@@ -104,19 +118,26 @@ func passwordDigest(salt, password string) string {
 func publicUser(user authUser) map[string]any {
 	return map[string]any{
 		"id": user.ID, "name": user.Name, "email": user.Email,
-		"role": user.Role, "status": user.Status,
+		"role": user.Role, "roleLabel": roleLabel(user.Role), "status": user.Status,
 		"createdAt": user.CreatedAt, "lastLoginAt": user.LastLoginAt,
 	}
+}
+
+func roleLabel(role string) string {
+	if normalizeRole(role) == "Admin" {
+		return "管理员"
+	}
+	return "普通用户"
 }
 
 func normalizeRole(role string) string {
 	switch strings.ToLower(strings.TrimSpace(role)) {
 	case "admin":
 		return "Admin"
-	case "operator":
-		return "Operator"
+	case "user", "普通用户", "normal", "operator", "viewer":
+		return "User"
 	default:
-		return "Viewer"
+		return "User"
 	}
 }
 
@@ -374,8 +395,18 @@ func (a *authStore) userBySession(token string) (authUser, bool) {
 func (a *authStore) listUsers() []map[string]any {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	users := make([]map[string]any, 0, len(a.users))
+	records := make([]authUser, 0, len(a.users))
 	for _, user := range a.users {
+		records = append(records, user)
+	}
+	sort.Slice(records, func(i, j int) bool {
+		if records[i].CreatedAt.Equal(records[j].CreatedAt) {
+			return records[i].Email < records[j].Email
+		}
+		return records[i].CreatedAt.Before(records[j].CreatedAt)
+	})
+	users := make([]map[string]any, 0, len(records))
+	for _, user := range records {
 		users = append(users, publicUser(user))
 	}
 	return users

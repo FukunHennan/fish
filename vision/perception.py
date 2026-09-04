@@ -1543,6 +1543,7 @@ class VisionPipeline:
         self._last_position_frame_time = None
         self.velocity_estimator = velocity_estimator
         self._latency_compensator = latency_compensator
+        self.target_track_id = None
 
     def toggle_clahe(self) -> bool:
         self.use_clahe = not self.use_clahe
@@ -1554,6 +1555,44 @@ class VisionPipeline:
         self._last_position_frame_time = None
         self.velocity_estimator.reset()
 
+    def set_target_track(self, track_id) -> None:
+        self.target_track_id = (
+            int(track_id) if track_id is not None else None
+        )
+        self.reset_motion()
+
+    def _select_target(self, yolo_result):
+        selected = dict(yolo_result)
+        detections = list(yolo_result.get("detections") or [])
+        selected["targetTrackId"] = self.target_track_id
+        if self.target_track_id is None:
+            selected["targetFound"] = bool(detections)
+            return selected
+
+        target = next(
+            (
+                item for item in detections
+                if item.get("trackId") == self.target_track_id
+            ),
+            None,
+        )
+        selected["targetFound"] = target is not None
+        if target is None:
+            selected.update({
+                "pixel": None,
+                "bbox": None,
+                "confidence": 0.0,
+                "track_id": self.target_track_id,
+            })
+            return selected
+        selected.update({
+            "pixel": list(target["center"]),
+            "bbox": list(target["bbox"]),
+            "confidence": float(target.get("confidence", 0.0)),
+            "track_id": target.get("trackId"),
+        })
+        return selected
+
     def process(self, frame, frame_time: float, homography=None) -> VisionFrameResult:
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         if self.use_clahe:
@@ -1564,7 +1603,7 @@ class VisionPipeline:
             self._last_yolo_submit_t = frame_time
 
         corner_pixels = self._detect_pool_corners(gray) if homography is None else {}
-        yolo_result = self.fish_detector.get_latest()
+        yolo_result = self._select_target(self.fish_detector.get_latest())
         yolo_status = self.fish_detector.get_status()
         reference = self.reference_tracker.update(
             frame=frame,

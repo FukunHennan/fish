@@ -50,10 +50,13 @@ function cameraLabel(camera) {
 export default function VisionPanel({
   devices = [],
   targetDeviceId = "",
+  targetTrackId = null,
   onTargetDeviceChange = () => {},
+  onTargetTrackChange = () => {},
   onVisionStateChange = () => {},
   mode = "vision",
   showTargetDeviceSelector = true,
+  showControls = true,
 }) {
   const [cameras, setCameras] = useState([]);
   const [cameraIndex, setCameraIndex] = useState("");
@@ -84,6 +87,7 @@ export default function VisionPanel({
   const exposurePendingRef = useRef(null);
   const camerasRef = useRef([]);
   const targetDeviceIdRef = useRef(targetDeviceId);
+  const targetTrackIdRef = useRef(targetTrackId);
 
   const manual = mode === "manual";
   const running = ["previewing", "processing", "tracking"].includes(status.state);
@@ -99,7 +103,13 @@ export default function VisionPanel({
   const workflowLabel = STAGE_LABELS[workflow.stage] || "等待视觉状态";
   const yoloLabel = yolo?.ready ? "YOLO 就绪" : yolo?.loading ? "YOLO 加载中" : yolo?.error ? "YOLO 异常" : "YOLO 等待启动";
   const coordinateLabel = workflow.controlCoordinateMode === "FIELD" ? "场地坐标" : "画面坐标";
-  const targetRequiredForMotion = !targetDeviceId;
+  const selectedTrackId = targetTrackId ?? status.targetTrackId ?? null;
+  const selectedDetection = detections.find((target) => target.trackId === selectedTrackId);
+  const targetRequiredForMotion = (
+    !targetDeviceId
+    || (Number(yolo?.detectionCount) > 1 && selectedTrackId === null)
+    || (selectedTrackId !== null && !yolo?.targetFound && processing)
+  );
   const exposure = status.metrics?.exposure || {};
   const controlModeLabel = CONTROL_MODES.find(([name]) => name === controlMode)?.[2] || "只识别，不自动控制";
   const latencyLabel = formatFrameLatency(status.metrics);
@@ -258,16 +268,27 @@ export default function VisionPanel({
   }, []);
 
   useEffect(() => {
-    if (manual || targetDeviceIdRef.current === targetDeviceId) return undefined;
+    if (
+      manual
+      || (
+        targetDeviceIdRef.current === targetDeviceId
+        && targetTrackIdRef.current === selectedTrackId
+      )
+    ) return undefined;
     const previousTargetDeviceId = targetDeviceIdRef.current;
+    const previousTargetTrackId = targetTrackIdRef.current;
     targetDeviceIdRef.current = targetDeviceId;
+    targetTrackIdRef.current = selectedTrackId;
     if (!running || !status.sessionId) return undefined;
     let active = true;
     visionRequest(
       `/sessions/${encodeURIComponent(status.sessionId)}/target`,
       {
         method: "POST",
-        body: JSON.stringify({ targetDeviceId }),
+        body: JSON.stringify({
+          targetDeviceId,
+          targetTrackId: selectedTrackId,
+        }),
       },
     ).then((result) => {
       if (!active) return;
@@ -276,11 +297,21 @@ export default function VisionPanel({
     }).catch((error) => {
       if (!active) return;
       targetDeviceIdRef.current = previousTargetDeviceId;
+      targetTrackIdRef.current = previousTargetTrackId;
       onTargetDeviceChange(previousTargetDeviceId);
+      onTargetTrackChange(previousTargetTrackId);
       setFeedback(error.message);
     });
     return () => { active = false; };
-  }, [manual, onTargetDeviceChange, running, status.sessionId, targetDeviceId]);
+  }, [
+    manual,
+    onTargetDeviceChange,
+    onTargetTrackChange,
+    running,
+    selectedTrackId,
+    status.sessionId,
+    targetDeviceId,
+  ]);
 
   useEffect(() => {
     if (manual) return;
@@ -288,9 +319,10 @@ export default function VisionPanel({
       state: status.state,
       sessionId: status.sessionId || null,
       targetDeviceId: status.targetDeviceId || targetDeviceId || "",
+      targetTrackId: status.targetTrackId ?? selectedTrackId,
       metrics: status.metrics || {},
     });
-  }, [manual, onVisionStateChange, status, targetDeviceId]);
+  }, [manual, onVisionStateChange, selectedTrackId, status, targetDeviceId]);
 
   useEffect(() => {
     let active = true;
@@ -389,6 +421,7 @@ export default function VisionPanel({
       if (cameraIndex === "") throw new Error("请选择摄像头");
       const payload = { cameraId: `camera-${cameraIndex}`, cameraIndex: Number(cameraIndex) };
       if (targetDeviceId) payload.targetDeviceId = targetDeviceId;
+      if (selectedTrackId !== null) payload.targetTrackId = selectedTrackId;
       if (selectedYoloModel) payload.yoloModel = selectedYoloModel;
       const result = await visionRequest("/sessions", { method: "POST", body: JSON.stringify(payload) });
       setStatus(result.data);
@@ -437,21 +470,17 @@ export default function VisionPanel({
   async function changeTargetDevice(event) {
     const nextTargetDeviceId = event.target.value;
     onTargetDeviceChange(nextTargetDeviceId);
-    if (!running) return;
-    try {
-      const result = await visionRequest(
-        `/sessions/${encodeURIComponent(status.sessionId)}/target`,
-        {
-          method: "POST",
-          body: JSON.stringify({ targetDeviceId: nextTargetDeviceId }),
-        },
-      );
-      setStatus(result.data);
-      setFeedback(nextTargetDeviceId ? "目标机器鱼已绑定。" : "已取消目标机器鱼，当前只预览和识别。");
-    } catch (error) {
-      onTargetDeviceChange(targetDeviceId);
-      setFeedback(error.message);
-    }
+    setFeedback(nextTargetDeviceId ? "正在绑定视觉目标设备…" : "正在取消设备绑定…");
+  }
+
+  function changeTargetTrack(trackId) {
+    const nextTrackId = selectedTrackId === trackId ? null : trackId;
+    onTargetTrackChange(nextTrackId);
+    setFeedback(
+      nextTrackId === null
+        ? "已取消目标锁定；当前只识别，不会自动控制。"
+        : `已选择目标 #${nextTrackId}，正在切换视觉目标…`,
+    );
   }
 
   async function stop() {
@@ -558,7 +587,7 @@ export default function VisionPanel({
   }
 
   return (
-    <section className={`vision-card panel-surface ${manual ? "manual-mode" : ""}`} aria-label={manual ? "视频监看" : "视觉控制"}>
+    <section className={`vision-card panel-surface ${manual ? "manual-mode" : ""} ${showControls ? "" : "stage-only"}`} aria-label={manual ? "视频监看" : "视觉控制"}>
       <header className="vision-header">
         <div><span className="eyebrow">{manual ? "DRIVER VIEW" : "FISH VISION"}</span><h2>{manual ? "视频监看" : "视觉识别"}</h2><small>{manual ? "手动和视觉模式共用当前视频会话" : "摄像头画面、YOLO 识别框、跟踪结果"}</small></div>
         <div className="vision-header-status">
@@ -592,14 +621,37 @@ export default function VisionPanel({
           </> : <div className={`video-placeholder ${status.state === "error" ? "has-error" : ""}`}><strong>{status.state === "error" ? "摄像头启动失败" : "视觉画面未启动"}</strong><span>{sessionErrorMessage(status) || "选择摄像头后开始预览"}</span></div>}
           {running && <div className="video-badge">服务器 {serverClock}<br />本机 {clock}{latencyLabel}<br />{videoWidth} × {videoHeight}</div>}
         </div>
-        {manual ? <aside className="vision-controls manual-video-controls-panel">
+        {!showControls ? null : manual ? <aside className="vision-controls manual-video-controls-panel">
           <div className="vision-control-head"><h2>视频设置</h2><small>摄像头、曝光和识别框在两个模式中保持一致</small></div>
           {sharedOverlayPanel}
           {sharedExposurePanel}
           <p className="feedback manual-shared-feedback" aria-live="polite">{streamFeedback || feedback || (running ? `摄像头 ${status.cameraIndex} · ${yoloLabel}` : "视频服务未启动")}</p>
         </aside> : <aside className="vision-controls">
           <div className="vision-control-head"><h2>识别状态</h2><small>当前：{controlModeLabel}</small></div>
-          <section className="vision-targets"><strong>检测目标 · {detections.length}</strong>{detections.length ? detections.map((target) => <div key={target.trackId}><i style={{ background: target.colorHex }} /><span>目标 #{target.trackId}</span><b>{target.color}</b><small>{Math.round(target.confidence * 100)}%</small></div>) : <p>{processing ? "暂未检测到机器鱼" : "启动视觉处理后显示目标"}</p>}</section>
+          <section className="vision-targets">
+            <header>
+              <strong>识别目标 · {detections.length}</strong>
+              <span>{selectedTrackId === null ? "未锁定" : `当前目标 #${selectedTrackId}`}</span>
+            </header>
+            <small className="vision-target-hint">识别错了时，点击正确的目标编号即可切换；切换会先停止旧目标控制。</small>
+            {detections.length ? detections.map((target) => {
+              const selected = target.trackId === selectedTrackId;
+              return <button
+                key={target.trackId}
+                type="button"
+                className={`vision-target-row ${selected ? "selected" : ""}`}
+                onClick={() => changeTargetTrack(target.trackId)}
+                aria-pressed={selected}
+              >
+                <i style={{ background: target.colorHex }} />
+                <span><b>目标 #{target.trackId}</b><small>{target.color} · {Math.round(target.confidence * 100)}%</small></span>
+                <strong>{selected ? "当前目标" : "选择"}</strong>
+              </button>;
+            }) : <p>{processing ? "暂未检测到机器鱼" : "启动视觉处理后显示目标"}</p>}
+            {selectedTrackId !== null && <p className={`vision-target-binding ${selectedDetection ? "found" : "missing"}`}>
+              {selectedDetection ? `已锁定目标 #${selectedTrackId}，${targetDeviceId ? "可绑定设备后启动控制。" : "请选择对应设备。"}` : `目标 #${selectedTrackId} 当前未出现在画面中，自动控制已禁用。`}
+            </p>}
+          </section>
           {sharedOverlayPanel}
           <section className="vision-mode-panel">
             <div className="mode-grid">{CONTROL_MODES.map(([name, label, description]) => <button key={name} type="button" className={controlMode === name ? "active" : ""} aria-pressed={controlMode === name} onClick={() => { setControlMode(name); setFeedback(`视觉模式：${description}`); }}>{label}</button>)}</div>

@@ -8,7 +8,7 @@ import os
 
 from flask import Flask, Response, jsonify, request, stream_with_context
 
-from service import CameraCatalog, enumerate_cameras
+from service import CameraCatalog, UNSET, enumerate_cameras
 from config import YOLO_MODEL_PATH, list_yolo_models, resolve_yolo_model
 from session import InvalidTransition, SessionMismatch
 from webrtc import WebRTCServer, WebRTCUnavailable
@@ -157,6 +157,7 @@ def create_app(service, camera_provider=None, camera_catalog=None, webrtc_server
         camera_index = body.get("cameraIndex")
         camera_id = body.get("cameraId")
         target_device_id = body.get("targetDeviceId")
+        target_track_id = body.get("targetTrackId")
         yolo_model = body.get("yoloModel")
         if not isinstance(camera_index, int) or camera_index < 0 or not camera_id:
             snapshot = service.current_session()
@@ -165,9 +166,16 @@ def create_app(service, camera_provider=None, camera_catalog=None, webrtc_server
                 error={"code": "invalid_camera", "message": "摄像头参数无效"},
                 status=400,
             )
-        if target_device_id is not None and (not isinstance(target_device_id, str) or not target_device_id.strip()):
+        if target_device_id is not None and not isinstance(target_device_id, str):
             snapshot = service.current_session()
             return envelope(snapshot, ok=False, error={"code": "invalid_target_device", "message": "目标设备 ID 无效"}, status=400)
+        if target_track_id is not None and (
+            isinstance(target_track_id, bool)
+            or not isinstance(target_track_id, int)
+            or target_track_id < 0
+        ):
+            snapshot = service.current_session()
+            return envelope(snapshot, ok=False, error={"code": "invalid_target_track", "message": "目标编号无效"}, status=400)
         if yolo_model is not None and not isinstance(yolo_model, str):
             snapshot = service.current_session()
             return envelope(snapshot, ok=False, error={"code": "invalid_yolo_model", "message": "YOLO 模型参数无效"}, status=400)
@@ -181,6 +189,7 @@ def create_app(service, camera_provider=None, camera_catalog=None, webrtc_server
             camera_index,
             target_device_id.strip() if target_device_id else None,
             yolo_model_path or YOLO_MODEL_PATH,
+            target_track_id,
         )
         if snapshot is not None:
             snapshot["yoloModel"] = (
@@ -253,20 +262,30 @@ def create_app(service, camera_provider=None, camera_catalog=None, webrtc_server
     def set_target_device(session_id):
         body = request.get_json(silent=True) or {}
         target_device_id = body.get("targetDeviceId")
-        if target_device_id is not None and (
-            not isinstance(target_device_id, str)
-            or not target_device_id.strip()
-        ):
+        target_track_id = body.get("targetTrackId")
+        if target_device_id is not None and not isinstance(target_device_id, str):
             return envelope(
                 service.current_session(),
                 ok=False,
                 error={"code": "invalid_target_device", "message": "目标设备 ID 无效"},
                 status=400,
             )
+        if target_track_id is not None and (
+            isinstance(target_track_id, bool)
+            or not isinstance(target_track_id, int)
+            or target_track_id < 0
+        ):
+            return envelope(
+                service.current_session(),
+                ok=False,
+                error={"code": "invalid_target_track", "message": "目标编号无效"},
+                status=400,
+            )
         try:
             snapshot = service.set_target_device(
                 session_id,
                 target_device_id.strip() if target_device_id else None,
+                target_track_id=target_track_id if "targetTrackId" in body else UNSET,
             )
             if snapshot is None:
                 return envelope(

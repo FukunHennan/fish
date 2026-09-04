@@ -280,6 +280,24 @@ class VisionServiceLifecycleTests(unittest.TestCase):
 
         self.assertEqual(updated["targetDeviceId"], "fish-2")
 
+    def test_target_track_change_is_published_to_runtime(self):
+        service = VisionService(
+            runner_factory=lambda _index, _publish: lambda: None
+        )
+        snapshot = service.create_session("camera-1", 1)
+
+        updated = service.set_target_device(
+            snapshot["sessionId"],
+            "fish-2",
+            target_track_id=7,
+        )
+
+        self.assertEqual(updated["targetTrackId"], 7)
+        self.assertEqual(
+            service.next_action(),
+            {"type": "target.select", "trackId": 7},
+        )
+
     def test_exposure_is_accepted_during_preview(self):
         service = VisionService(runner_factory=lambda _index, _publish: lambda: None)
         snapshot = service.create_session("camera-1", 1)

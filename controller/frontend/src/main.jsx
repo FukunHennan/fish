@@ -1,11 +1,22 @@
-import { Component, StrictMode, useEffect, useMemo, useRef, useState } from "react";
+import { Component, StrictMode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 import "./maintenance.css";
 import "./rename.css";
 import VisionPanel from "./VisionPanel.jsx";
+import AuthScreen from "./components/AuthScreen.jsx";
+import DeviceRail from "./components/DeviceRail.jsx";
+import ManualInspector from "./components/ManualInspector.jsx";
+import SettingsWorkspace from "./components/SettingsWorkspace.jsx";
 import { deviceStateSignature, keyboardMode, mergeDevicesInStableOrder } from "./deviceState.js";
-import { motionRange } from "./motionCalibration.js";
+import {
+  batteryLevel,
+  deviceLabel,
+  formatBytes,
+  leaseIsMine,
+  leaseSummary,
+  roleLabel,
+} from "./ui/devicePresentation.js";
 
 const MODE_LABELS = {
   stop: "停止", idle: "待机", forward: "前进", left: "左转", right: "右转",
@@ -23,19 +34,6 @@ function clamp(value, min, max, fallback) {
   const number = Number(value);
   if (!Number.isFinite(number)) return fallback;
   return Math.min(max, Math.max(min, number));
-}
-function deviceLabel(device) { return device.name || device.deviceId || "未命名机器鱼"; }
-function formatBytes(bytes = 0) {
-  const n = Number(bytes);
-  if (!Number.isFinite(n) || n <= 0) return "0 B";
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(2)} MB`;
-}
-function formatTime(value) {
-  if (!value) return "—";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString("zh-CN", { hour12: false });
 }
 function loadAliases() {
   try {
@@ -56,11 +54,6 @@ function loadManualMotionProfiles() {
   } catch { return {}; }
 }
 function normalizeDeviceName(value) { return String(value || "").trim().toLocaleLowerCase(); }
-function batteryLevel(device) {
-  const value = Number(device?.batteryPercent);
-  return Number.isFinite(value) && Number(device?.batteryVoltage) > 0 ? value : null;
-}
-function batteryTone(percent) { return percent == null ? "unknown" : percent < 20 ? "critical" : percent < 40 ? "low" : "normal"; }
 function isTypingTarget(target) {
   const tag = target?.tagName?.toLowerCase();
   return tag === "input" || tag === "textarea" || tag === "select" || target?.isContentEditable;
@@ -72,313 +65,37 @@ function sameStringSet(first, second) {
   }
   return true;
 }
-function cameraLabel(camera) {
-  const model = camera.model || camera.name || `摄像头 ${camera.index}`;
-  const size = camera.width && camera.height ? `${camera.width}×${camera.height}` : "";
-  const fps = camera.fps ? `${camera.fps}FPS` : "";
-  return [`#${camera.index}`, model, [size, fps].filter(Boolean).join(" @ ")].filter(Boolean).join(" · ");
+function visionStateSignature(state) {
+  return JSON.stringify({
+    state: state?.state || "idle",
+    sessionId: state?.sessionId || null,
+    targetDeviceId: state?.targetDeviceId || "",
+    targetTrackId: state?.targetTrackId ?? null,
+    metrics: state?.metrics || {},
+  });
 }
 
-function OnlineFishSidebar({ devices, selectedId, onSelect, disabled = false, vision = false, visionState = null }) {
-  const onlineDevices = devices.filter((device) => device.online);
-  const visionTargetId = visionState?.targetDeviceId || selectedId;
-  const visionMetrics = visionState?.metrics || {};
-  const visionYolo = visionMetrics.yolo || {};
-  const visionWorkflow = visionMetrics.workflow || {};
-
-  function visionDeviceStatus(device) {
-    if (visionTargetId !== device.deviceId) return ["online", "在线"];
-    if (visionWorkflow.trackingActive || visionState?.state === "tracking") return ["vision-active", "视觉控制"];
-    if (visionState?.state === "processing") {
-      if (Number(visionYolo.detectionCount) > 1) return ["vision-warning", "多目标"];
-      if (Number(visionYolo.detectionCount) === 1) return ["vision-detected", "已识别"];
-      return ["vision-target", "待识别"];
-    }
-    return ["vision-target", "视觉目标"];
-  }
-
+function CommandStrip({ page, device, feedback, keyboardStatus, pressedKeys }) {
+  const modeLabel = keyboardStatus.mode && keyboardStatus.mode !== "stop"
+    ? MODE_LABELS[keyboardStatus.mode] || keyboardStatus.mode
+    : "停止";
+  const primary = keyboardStatus.message || feedback || (device ? `${deviceLabel(device)} 等待控制指令` : "等待控制指令");
+  const secondary = page === "vision"
+    ? "视觉命令只在目标、身份绑定和控制权都确认后下发。"
+    : "命令只表达控制意图，设备状态由 ESP32 反馈。";
   return (
-    <aside className="control-sidebar panel-surface">
-      <section className="control-section manual-list-section">
-        <div className="panel-heading compact">
-          <div><span className="eyebrow">{vision ? "VISION" : "MANUAL"}</span><h2>在线鱼列表</h2><small>{vision ? "点击一条鱼设为视觉目标，不会接管手动控制。" : "点击一条鱼即可接管，系统会自动释放你上一条鱼。"}</small></div>
-          <span className="fish-status-pill"><i />{onlineDevices.length} 条在线</span>
-        </div>
-        <div className="manual-fish-table" role="list" aria-label={vision ? "视觉目标机器鱼" : "在线机器鱼"}>
-          <div className="manual-fish-table-head" aria-hidden="true">
-            <span>鱼名</span>
-            <span>状态</span>
-            <span>控制者</span>
-            <span>电量</span>
-          </div>
-          {onlineDevices.length ? onlineDevices.map((device) => {
-            const selected = vision ? visionTargetId === device.deviceId : selectedId === device.deviceId;
-            const owner = device.lease ? (device.lease.ownerName || device.lease.ownerEmail) : "空闲";
-            const battery = batteryLevel(device);
-            const [visionStatusClass, visionStatusLabel] = visionDeviceStatus(device);
-            return <button
-              key={device.deviceId}
-              type="button"
-              className={`manual-fish-row ${selected ? "selected" : ""}`}
-              onClick={() => onSelect(device)}
-              disabled={disabled}
-              role="listitem"
-            >
-              <span className="manual-fish-name">{deviceLabel(device)}</span>
-              <span className={`manual-fish-state ${vision ? visionStatusClass : device.lease ? "busy" : "free"}`}>{vision ? visionStatusLabel : device.lease ? "被控" : "空闲"}</span>
-              <span className="manual-fish-owner">{owner}</span>
-              <span className="manual-fish-battery">{battery != null ? `${battery}%` : "—"}</span>
-            </button>;
-          }) : <div className="list-row"><strong>暂无在线鱼</strong><span>设备上线后会出现在这里。</span></div>}
-        </div>
-        {vision && <p className="feedback vision-target-feedback" aria-live="polite">{visionTargetId ? (visionWorkflow.trackingActive ? "YOLO 目标已绑定，视觉控制正在下发。" : Number(visionYolo.detectionCount) === 1 ? "YOLO 已识别当前目标，可执行视觉控制。" : "当前设备已绑定，等待 YOLO 锁定目标。") : "未选择目标时只运行预览和识别。"}</p>}
-      </section>
-    </aside>
-  );
-}
-
-function AuthScreen({ onAuthenticated, bootstrap }) {
-  const [mode, setMode] = useState(bootstrap ? "bootstrap" : "login");
-  const [name, setName] = useState("陈富坤");
-  const [email, setEmail] = useState("chenfukun@example.com");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [remember, setRemember] = useState(true);
-  const [feedback, setFeedback] = useState("当前：电脑/平板/手机会自动适配；请使用本地账号登录。");
-  const [busy, setBusy] = useState(false);
-
-  async function submitAuth(event) {
-    event.preventDefault();
-    if (busy) return;
-    if (mode === "bootstrap" && password !== confirmPassword) {
-      setFeedback("两次密码不一致");
-      return;
-    }
-    setBusy(true);
-    setFeedback(mode === "login" ? "正在登录…" : "正在创建管理员账户…");
-    try {
-      const response = await fetch(mode === "login" ? "/api/auth/login" : "/api/auth/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(mode === "login" ? { email, password } : { name, email, password }),
-      });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok || result.authenticated === false) {
-        throw new Error(result.message || (mode === "login" ? "登录失败" : "管理员账户创建失败"));
-      }
-      onAuthenticated(result.user);
-    } catch (authError) {
-      setFeedback(authError.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <main className="auth-page" data-mode={mode}>
-      <div className="auth-frame">
-        <div className="auth-browser-bar" aria-hidden="true">
-          <span className="auth-lamp" />
-          <span className="auth-lamp" />
-          <span className="auth-lamp" />
-          <span className="auth-url">fish.chenfukun.space/login</span>
-        </div>
-
-        <div className="auth-screen">
-          <section className="auth-side">
-            <div className="auth-brand">
-              <div className="auth-logo">鱼</div>
-              <div><small>FISH CONTROL</small><strong>多鱼控制平台</strong></div>
-            </div>
-
-            <div className="auth-copy-main">
-              <h1>安全进入控制台</h1>
-              <p>登录只保留必要信息。通过身份校验后，才显示手动、视觉、设置界面，并记录每条鱼的控制者。</p>
-            </div>
-
-            <div className="auth-side-bottom">
-              <div className="auth-mini-pond" aria-label="Fish status preview">
-                <div className="auth-fish-dot">鱼 A</div>
-                <div className="auth-fish-dot">鱼 B</div>
-                <div className="auth-fish-dot">鱼 C</div>
-              </div>
-              <div className="auth-pills">
-                <span><i />Cloudflare</span>
-                <span>多条鱼在线</span>
-                <span>控制互斥</span>
-              </div>
-            </div>
-          </section>
-
-          <section className="auth-card" aria-label={bootstrap ? "登录或初始化管理员" : "登录"}>
-            {bootstrap && <div className="auth-tabs" role="tablist" aria-label="Login or administrator bootstrap">
-              <button className={mode === "login" ? "active" : ""} aria-selected={mode === "login"} type="button" onClick={() => setMode("login")}>登录</button>
-              <button className={mode === "bootstrap" ? "active" : ""} aria-selected={mode === "bootstrap"} type="button" onClick={() => setMode("bootstrap")}>初始化管理员</button>
-            </div>}
-
-            <div className="auth-form-head">
-              <h2>{mode === "login" ? "登录账号" : "创建管理员账户"}</h2>
-              <p>{mode === "login" ? (bootstrap ? "系统尚未初始化；也可以先创建首个管理员账户。" : "账户由管理员创建和管理，请使用已有账号登录。") : "首次启动时创建唯一的初始管理员；之后所有账户都必须由管理员建立。"}</p>
-            </div>
-
-            <form className="auth-form" onSubmit={submitAuth}>
-              {mode === "login" && <>
-                <button className="auth-primary" type="button" onClick={() => setFeedback("Cloudflare Access 入口已预留；如果要正式启用，我下一步可以接 Cloudflare Zero Trust。")}>使用 Cloudflare Access 登录</button>
-                <div className="auth-divider">或使用本地账号</div>
-              </>}
-
-              {mode === "bootstrap" ? <div className="auth-two-col">
-                <label className="auth-field"><span>姓名</span><input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" /></label>
-                <label className="auth-field"><span>邮箱</span><input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" /></label>
-              </div> : <label className="auth-field"><span>邮箱</span><input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" /></label>}
-
-              {mode === "bootstrap" ? <div className="auth-two-col">
-                <label className="auth-field"><span>设置密码</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" /></label>
-                <label className="auth-field"><span>确认密码</span><input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" /></label>
-              </div> : <label className="auth-field"><span>密码</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></label>}
-
-              {mode === "login" && <div className="auth-helper-row">
-                <label className="auth-check"><input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} /> 保持登录</label>
-                <button type="button" onClick={() => setFeedback("当前版本还没有接入找回密码；管理员可以在服务器端重置账号。")}>忘记密码</button>
-              </div>}
-
-              <button className={mode === "login" ? "auth-secondary" : "auth-primary"} disabled={busy}>{busy ? "请稍候…" : mode === "login" ? "进入控制台" : "创建管理员并进入"}</button>
-              <p className="auth-feedback" aria-live="polite">{feedback}</p>
-            </form>
-          </section>
-        </div>
+    <section className="command-strip" aria-live="polite">
+      <div>
+        <strong>{primary}</strong>
+        <span>{secondary}</span>
       </div>
-    </main>
-  );
-}
-
-function AdminUsers({ currentUser }) {
-  const [users, setUsers] = useState([]);
-  const [form, setForm] = useState({ name: "", email: "", password: "", role: "Operator" });
-  const [drafts, setDrafts] = useState({});
-  const [feedback, setFeedback] = useState("正在读取账户…");
-  const [busy, setBusy] = useState(false);
-
-  async function loadUsers() {
-    const response = await fetch("/api/auth/users", { cache: "no-store" });
-    const result = await response.json().catch(() => []);
-    if (!response.ok) throw new Error(result.message || "无法读取账户");
-    const next = Array.isArray(result) ? result : [];
-    setUsers(next);
-    setDrafts(Object.fromEntries(next.map((user) => [user.id, { name: user.name, role: user.role || "Viewer", status: user.status || "active", password: "" }])));
-  }
-
-  useEffect(() => {
-    loadUsers().then(() => setFeedback("账户由管理员统一管理")).catch((error) => setFeedback(error.message));
-  }, []);
-
-  function updateDraft(id, key, value) {
-    setDrafts((current) => ({ ...current, [id]: { ...current[id], [key]: value } }));
-  }
-
-  async function createUser(event) {
-    event.preventDefault();
-    if (busy) return;
-    setBusy(true);
-    setFeedback("正在创建账户…");
-    try {
-      const response = await fetch("/api/auth/users", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.message || "创建账户失败");
-      setForm({ name: "", email: "", password: "", role: "Operator" });
-      await loadUsers();
-      setFeedback(`已创建 ${result.user?.email || "新账户"}`);
-    } catch (error) {
-      setFeedback(error.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function saveUser(user) {
-    const draft = drafts[user.id];
-    if (!draft || busy) return;
-    setBusy(true);
-    setFeedback(`正在保存 ${user.email}…`);
-    try {
-      const payload = { id: user.id, name: draft.name };
-      if (user.id !== currentUser?.id) {
-        payload.role = draft.role;
-        payload.status = draft.status;
-      }
-      if (draft.password) payload.password = draft.password;
-      const response = await fetch("/api/auth/users", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.message || "保存账户失败");
-      await loadUsers();
-      setFeedback(`已保存 ${result.user?.email || user.email}`);
-    } catch (error) {
-      setFeedback(error.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function deleteUser(user) {
-    if (busy || user.id === currentUser?.id) return;
-    if (!window.confirm(`确定删除账户 ${user.email}？该操作不可撤销。`)) return;
-    setBusy(true);
-    setFeedback(`正在删除 ${user.email}…`);
-    try {
-      const response = await fetch("/api/auth/users", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: user.id }),
-      });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.message || "删除账户失败");
-      await loadUsers();
-      setFeedback(`已删除 ${user.email}`);
-    } catch (error) {
-      setFeedback(error.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <article className="settings-card admin-users-card">
-      <div className="admin-users-heading">
-        <div><span className="eyebrow">ADMINISTRATION</span><h2>账户管理</h2><small>只有管理员可以创建、修改和删除账户。</small></div>
-        <span className="status online"><i />{users.length} 个账户</span>
+      <div className="key-hints" aria-label="键盘状态">
+        {["W", "A", "S", "D"].map((key) => (
+          <kbd className={`key ${pressedKeys.has(`Key${key}`) ? "pressed" : ""}`} key={key}>{key}</kbd>
+        ))}
+        <span className="command-mode">{modeLabel}</span>
       </div>
-      <form className="admin-create-form" onSubmit={createUser}>
-        <label className="setting"><span>姓名</span><input value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} placeholder="例如：张三" required /></label>
-        <label className="setting"><span>邮箱</span><input type="email" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} placeholder="name@example.com" required /></label>
-        <label className="setting"><span>初始密码</span><input type="password" minLength="8" value={form.password} onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} placeholder="至少 8 位" required /></label>
-        <label className="setting"><span>角色</span><select value={form.role} onChange={(event) => setForm((current) => ({ ...current, role: event.target.value }))}><option value="Viewer">Viewer：只能查看</option><option value="Operator">Operator：可以控制设备</option><option value="Admin">Admin：可以管理账户</option></select></label>
-        <button className="action" disabled={busy}>创建账户</button>
-      </form>
-      <div className="admin-user-list">
-        {users.map((user) => {
-          const draft = drafts[user.id] || { name: user.name, role: user.role || "Viewer", status: user.status || "active", password: "" };
-          const isSelf = user.id === currentUser?.id;
-          return <div className="admin-user-row" key={user.id}>
-            <div className="admin-user-identity"><strong>{user.email}</strong><small>{user.createdAt ? `创建于 ${formatTime(user.createdAt)}` : "本地账户"}{user.lastLoginAt ? ` · 最近登录 ${formatTime(user.lastLoginAt)}` : ""}</small></div>
-            <label className="setting"><span>姓名</span><input value={draft.name} onChange={(event) => updateDraft(user.id, "name", event.target.value)} /></label>
-            <label className="setting"><span>角色</span><select value={draft.role} disabled={isSelf || busy} onChange={(event) => updateDraft(user.id, "role", event.target.value)}><option value="Viewer">Viewer</option><option value="Operator">Operator</option><option value="Admin">Admin</option></select></label>
-            <label className="setting"><span>状态</span><select value={draft.status} disabled={isSelf || busy} onChange={(event) => updateDraft(user.id, "status", event.target.value)}><option value="active">启用</option><option value="disabled">停用</option></select></label>
-            <label className="setting"><span>重置密码</span><input type="password" minLength="8" value={draft.password} disabled={isSelf || busy} placeholder={isSelf ? "当前账户不可操作" : "留空表示不修改"} onChange={(event) => updateDraft(user.id, "password", event.target.value)} /></label>
-            <div className="admin-user-actions"><button className="action" type="button" disabled={busy} onClick={() => saveUser(user)}>保存</button><button className="danger" type="button" disabled={busy || isSelf} onClick={() => deleteUser(user)}>删除</button></div>
-          </div>;
-        })}
-        {!users.length && <div className="list-row"><strong>暂无账户</strong><span>创建第一个受管理账户。</span></div>}
-      </div>
-      <p className="feedback" aria-live="polite">{feedback}</p>
-    </article>
+    </section>
   );
 }
 
@@ -392,6 +109,7 @@ function App() {
   const [otaSelectedIds, setOtaSelectedIds] = useState(() => new Set());
   const [feedback, setFeedback] = useState("等待控制指令");
   const [sending, setSending] = useState(false);
+  const [manualCommandBusy, setManualCommandBusy] = useState(false);
   const [leaseBusy, setLeaseBusy] = useState(false);
   const [error, setError] = useState("");
   const [firmwareInfo, setFirmwareInfo] = useState({ available: false });
@@ -405,7 +123,10 @@ function App() {
   const [rgbBrightness, setRgbBrightness] = useState(32);
   const [rgbOrder, setRgbOrder] = useState("GRB");
   const [visionDeviceId, setVisionDeviceId] = useState("");
+  const [visionTrackId, setVisionTrackId] = useState(null);
   const [visionState, setVisionState] = useState({ state: "idle", targetDeviceId: "", metrics: {} });
+  const [keyboardStatus, setKeyboardStatus] = useState({ phase: "idle", mode: "stop", deviceId: "", message: "" });
+  const [pressedKeys, setPressedKeys] = useState(() => new Set());
   const [calibrationProfiles, setCalibrationProfiles] = useState(loadCalibrationProfiles);
   const keyboardRef = useRef({
     pressed: new Set(),
@@ -416,12 +137,15 @@ function App() {
     commandPromise: Promise.resolve(),
     lastMode: "",
     lastSentMode: "",
+    lastDeviceId: "",
+    intentVersion: 0,
     lastErrorAt: 0,
     sequence: Date.now() * 1000,
   });
   const manualControlRef = useRef(null);
   const devicesRef = useRef([]);
   const deviceSignatureRef = useRef("");
+  const visionStateSignatureRef = useRef("");
 
   useEffect(() => {
     let active = true;
@@ -438,6 +162,7 @@ function App() {
   }, []);
 
   const onlineDevices = useMemo(() => devices.filter((device) => device.online), [devices]);
+  const isAdmin = auth.user?.role === "Admin";
   const lowBatteryCount = useMemo(() => onlineDevices.filter((device) => (batteryLevel(device) ?? 101) < 20).length, [onlineDevices]);
   const selectedDevice = useMemo(() => devices.find((device) => device.deviceId === selectedDeviceId) || null, [devices, selectedDeviceId]);
   const selectedManualMotion = useMemo(() => {
@@ -448,6 +173,21 @@ function App() {
     };
   }, [manualMotionByDevice, selectedDeviceId]);
   const otaSelectedDevices = useMemo(() => devices.filter((device) => otaSelectedIds.has(device.deviceId) && device.online), [devices, otaSelectedIds]);
+
+  useEffect(() => {
+    if (keyboardStatus.phase !== "queued" || !keyboardStatus.deviceId || !keyboardStatus.mode) return;
+    const device = devices.find((item) => item.deviceId === keyboardStatus.deviceId);
+    if (!device) return;
+    const mode = MODE_LABELS[device.mode] || "未知";
+    const expected = MODE_LABELS[keyboardStatus.mode] || keyboardStatus.mode;
+    if (mode !== expected) return;
+    setKeyboardStatus((current) => (
+      current.phase === "queued"
+        ? { ...current, phase: "confirmed", message: `${expected} 已由设备状态确认` }
+        : current
+    ));
+  }, [devices, keyboardStatus.deviceId, keyboardStatus.mode, keyboardStatus.phase]);
+
   manualControlRef.current = {
     page,
     authenticated: auth.authenticated,
@@ -456,6 +196,38 @@ function App() {
     manualMotionByDevice,
     selectedManualMotion,
   };
+
+  function commitDeviceSnapshot(next, force = false) {
+    const ordered = mergeDevicesInStableOrder(devicesRef.current, next);
+    const nextSignature = deviceStateSignature(ordered);
+    devicesRef.current = ordered;
+    if (!force && nextSignature === deviceSignatureRef.current) return ordered;
+    deviceSignatureRef.current = nextSignature;
+    setDevices(ordered);
+    return ordered;
+  }
+
+  function patchDevice(deviceId, patch) {
+    if (!deviceId) return;
+    commitDeviceSnapshot(devicesRef.current.map((device) => (
+      device.deviceId === deviceId ? { ...device, ...patch } : device
+    )));
+  }
+
+  const handleVisionStateChange = useCallback((next) => {
+    const signature = visionStateSignature(next);
+    if (signature !== visionStateSignatureRef.current) {
+      visionStateSignatureRef.current = signature;
+      setVisionState(next);
+    }
+    if (next?.targetDeviceId !== undefined) {
+      setVisionDeviceId((current) => current === (next.targetDeviceId || "") ? current : (next.targetDeviceId || ""));
+    }
+    if (next?.targetTrackId !== undefined) {
+      setVisionTrackId((current) => current === (next.targetTrackId ?? null) ? current : (next.targetTrackId ?? null));
+    }
+  }, []);
+
   useEffect(() => {
     if (!auth.authenticated) return;
     let active = true;
@@ -477,23 +249,16 @@ function App() {
       const incoming = raw.map((device) => ({ ...device, name: aliases[device.deviceId] || device.name }));
       const previous = devicesRef.current;
       const next = mergeDevicesInStableOrder(previous, incoming);
-      const previousByID = new Map(previous.map((device) => [device.deviceId, device]));
       const nextByID = new Map(next.map((device) => [device.deviceId, device]));
       const lostControl = previous
-        .filter((previousDevice) => previousDevice.lease?.ownerEmail === auth.user?.email)
+        .filter((previousDevice) => leaseIsMine(previousDevice.lease, auth.user))
         .filter((previousDevice) => {
           const currentDevice = nextByID.get(previousDevice.deviceId);
           return !currentDevice
             || !currentDevice.online
-            || currentDevice.lease?.ownerEmail !== auth.user?.email;
+            || !leaseIsMine(currentDevice.lease, auth.user);
         });
-      devicesRef.current = next;
-      const nextSignature = deviceStateSignature(next);
-      const stableChanged = nextSignature !== deviceSignatureRef.current;
-      if (stableChanged) {
-        deviceSignatureRef.current = nextSignature;
-        setDevices(next);
-      }
+      commitDeviceSnapshot(next);
       setError("");
       const valid = new Set(next.map((device) => device.deviceId));
       setSelectedDeviceId((current) => (valid.has(current) ? current : ""));
@@ -525,7 +290,7 @@ function App() {
   }, [auth.authenticated]);
 
   useEffect(() => {
-    if (!auth.authenticated) return;
+    if (!auth.authenticated || !isAdmin) return;
     let active = true;
     async function loadFirmware() {
       try {
@@ -537,7 +302,7 @@ function App() {
     }
     loadFirmware();
     return () => { active = false; };
-  }, [auth.authenticated]);
+  }, [auth.authenticated, isAdmin]);
 
   function toggleSet(setter, deviceId) {
     setter((current) => {
@@ -545,6 +310,13 @@ function App() {
       if (next.has(deviceId)) next.delete(deviceId); else next.add(deviceId);
       return next;
     });
+  }
+  function toggleOtaDevice(deviceId) {
+    if (deviceId === "clear") {
+      setOtaSelectedIds(new Set());
+      return;
+    }
+    toggleSet(setOtaSelectedIds, deviceId);
   }
   function selectOtaOnline() { setOtaSelectedIds(new Set(onlineDevices.map((device) => device.deviceId))); }
 
@@ -569,7 +341,7 @@ function App() {
     const nextAliases = { ...aliases, [renameDevice.deviceId]: nextName };
     localStorage.setItem(ALIAS_STORAGE_KEY, JSON.stringify(nextAliases));
     setAliases(nextAliases);
-    setDevices((current) => current.map((device) => device.deviceId === renameDevice.deviceId ? { ...device, name: nextName } : device));
+    patchDevice(renameDevice.deviceId, { name: nextName });
     setFeedback(`${deviceLabel(renameDevice)} 已重命名为 ${nextName}`);
     closeRename();
   }
@@ -578,6 +350,8 @@ function App() {
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
     setAuth({ loading: false, authenticated: false, bootstrap: false, user: null });
     setDevices([]);
+    devicesRef.current = [];
+    deviceSignatureRef.current = "";
     setSelectedDeviceId("");
     setOtaSelectedIds(new Set());
   }
@@ -594,14 +368,42 @@ function App() {
       throw new Error(result.message || `${deviceLabel(device)} 控制权获取失败`);
     }
     const lease = result.lease;
-    setDevices((current) => current.map((item) => item.deviceId === device.deviceId ? { ...item, lease } : item));
+    patchDevice(device.deviceId, { lease });
     return lease;
   }
 
-  async function selectDevice(device) {
+  function selectDevice(device) {
     if (!device?.deviceId) return;
+    const currentDevice = manualControlRef.current?.selectedDevice;
+    const keyboard = keyboardRef.current;
+    if (
+      currentDevice
+      && currentDevice.deviceId !== device.deviceId
+      && (
+        keyboard.pressed.size > 0
+        || keyboard.active
+        || keyboard.lastMode
+        || (keyboard.lastSentMode && keyboard.lastSentMode !== "stop")
+      )
+    ) {
+      keyboard.pressed.clear();
+      keyboard.turnOrder.clear();
+      setPressedKeys(new Set());
+      stopKeyboardControl(currentDevice, true);
+    }
     setSelectedDeviceId(device.deviceId);
-    if (leaseBusy || !device.online) return;
+    const lease = leaseSummary(device, auth.user);
+    setFeedback(
+      lease.mine
+        ? `${deviceLabel(device)} 是你的当前控制设备。`
+        : lease.className === "other"
+          ? `${deviceLabel(device)} 当前由 ${lease.owner} 控制，只读查看。`
+          : `${deviceLabel(device)} 当前空闲，请在右侧明确接管。`,
+    );
+  }
+
+  async function claimDevice(device) {
+    if (!device?.deviceId || leaseBusy || !device.online) return;
     setLeaseBusy(true);
     setFeedback(`正在接管 ${deviceLabel(device)}…`);
     try {
@@ -624,7 +426,7 @@ function App() {
     if (!response.ok || result.released === false) {
       throw new Error(result.message || `${deviceLabel(device)} 控制权释放失败`);
     }
-    setDevices((current) => current.map((item) => item.deviceId === device.deviceId ? { ...item, lease: null } : item));
+    patchDevice(device.deviceId, { lease: null });
   }
 
   async function releaseSelectedDevice() {
@@ -681,7 +483,7 @@ function App() {
   async function sendCommand(device, mode, override = null) {
     if (auth.authenticated && mode !== "stop") {
       const lease = device.lease;
-      if (!lease || lease.ownerEmail !== auth.user?.email) {
+      if (!leaseIsMine(lease, auth.user)) {
         await acquireLease(device, "manual");
       }
     }
@@ -703,10 +505,23 @@ function App() {
     if (!response.ok || result.sent === false || result.acknowledged !== true || result.success !== true) {
       throw new Error(result.message || `${deviceLabel(device)} 未确认应用`);
     }
-    if (result.applied) {
-      setDevices((current) => current.map((item) => item.deviceId === device.deviceId ? { ...item, ...result.applied } : item));
-    }
+    if (result.applied) patchDevice(device.deviceId, result.applied);
     return result;
+  }
+
+  async function sendManualMotion(mode) {
+    const device = manualControlRef.current.selectedDevice;
+    if (!device || manualCommandBusy || !leaseIsMine(device.lease, auth.user)) return;
+    setManualCommandBusy(true);
+    setFeedback(`${deviceLabel(device)}：正在等待设备确认${MODE_LABELS[mode] || mode}…`);
+    try {
+      await sendCommand(device, mode, selectedManualMotion);
+      setFeedback(`${deviceLabel(device)}：${MODE_LABELS[mode] || mode} 已由设备确认`);
+    } catch (error) {
+      setFeedback(error.message);
+    } finally {
+      setManualCommandBusy(false);
+    }
   }
 
   async function sendRealtimeCommand(device, mode, sequence, override = null) {
@@ -753,21 +568,32 @@ function App() {
     const now = Date.now();
     if (now - keyboardRef.current.lastErrorAt < 1000) return;
     keyboardRef.current.lastErrorAt = now;
+    setKeyboardStatus((current) => ({ ...current, phase: "error", message: error.message }));
     setFeedback(error.message);
   }
 
-  function sendKeyboardFrame(mode, targetDevice = null) {
+  function sendKeyboardFrame(mode, targetDevice = null, requestedVersion = null) {
     const current = manualControlRef.current;
     const device = targetDevice || current.selectedDevice;
-    if (!current.authenticated || current.page !== "manual" || !device) return;
+    const isStop = mode === "stop";
+    if ((!current.authenticated || current.page !== "manual") && !isStop) return;
+    if (!device) return;
     const state = keyboardRef.current;
-    if (mode !== "stop" && state.lastSentMode === mode) return;
+    const version = requestedVersion ?? ++state.intentVersion;
+    if (!isStop && state.lastSentMode === mode && state.lastDeviceId === device.deviceId) return;
     state.commandPromise = state.commandPromise
       .catch(() => {})
       .then(async () => {
-        const latestMode = mode === "stop" ? "stop" : state.lastMode;
-        if (mode !== "stop" && (!state.active || latestMode !== mode)) return;
-        if (mode !== "stop" && (!device.lease || device.lease.ownerEmail !== current.currentUserEmail)) {
+        // A newer keyboard snapshot supersedes an old turn before it reaches
+        // the transport queue. Commands already sent remain ordered by sequence.
+        if (version !== state.intentVersion && (isStop || state.lastMode)) return;
+        if (!isStop && (
+          !state.active
+          || state.lastMode !== mode
+          || state.lastDeviceId !== device.deviceId
+          || version !== state.intentVersion
+        )) return;
+        if (!isStop && !leaseIsMine(device.lease, auth.user)) {
           if (!state.leasePromise) {
             setLeaseBusy(true);
             state.leasePromise = acquireLease(device, "manual")
@@ -777,13 +603,28 @@ function App() {
               });
           }
           await state.leasePromise;
-          if (!state.active || state.lastMode !== mode) return;
+          if (!state.active || state.lastMode !== mode || version !== state.intentVersion) return;
         }
+        setKeyboardStatus({
+          phase: "queued",
+          mode,
+          deviceId: device.deviceId,
+          message: isStop ? "停止命令已排队" : `${MODE_LABELS[mode] || mode} 命令已排队`,
+        });
         await sendRealtimeCommand(device, mode);
-        state.lastSentMode = mode;
+        if (version === state.intentVersion) {
+          state.lastSentMode = mode;
+          state.lastDeviceId = device.deviceId;
+          setKeyboardStatus({
+            phase: "queued",
+            mode,
+            deviceId: device.deviceId,
+            message: isStop ? "停止命令已排队" : `${MODE_LABELS[mode] || mode} 已排队，等待设备状态确认`,
+          });
+        }
       })
       .catch((error) => {
-        if (mode !== "stop") {
+        if (!isStop && version === state.intentVersion) {
           window.setTimeout(() => stopKeyboardControl(device, true), 0);
         }
         reportKeyboardError(error);
@@ -792,14 +633,16 @@ function App() {
 
   function stopKeyboardControl(targetDevice = null, forceStop = false) {
     const state = keyboardRef.current;
-    const shouldStop = forceStop || state.active || state.lastMode || state.lastSentMode;
+    const shouldStop = forceStop || state.active || state.lastMode || (state.lastSentMode && state.lastSentMode !== "stop");
+    const version = ++state.intentVersion;
     state.active = false;
     state.lastMode = "";
+    state.lastDeviceId = "";
+    state.lastSentMode = "stop";
     state.turnOrder.clear();
     if (!shouldStop) return Promise.resolve();
     const targets = Array.isArray(targetDevice) ? targetDevice : [targetDevice || manualControlRef.current.selectedDevice];
-    targets.filter(Boolean).forEach((device) => sendKeyboardFrame("stop", device));
-    state.lastSentMode = "stop";
+    targets.filter(Boolean).forEach((device) => sendKeyboardFrame("stop", device, version));
     return state.commandPromise;
   }
 
@@ -823,6 +666,7 @@ function App() {
     }
     state.active = true;
     state.lastMode = mode;
+    state.lastDeviceId = current.selectedDevice.deviceId;
     sendKeyboardFrame(mode);
   }
 
@@ -836,6 +680,7 @@ function App() {
       if (TURN_CODES.has(event.code)) {
         state.turnOrder.set(event.code, ++state.turnSequence);
       }
+      setPressedKeys(new Set(state.pressed));
       updateKeyboardControl();
     }
     function onKeyUp(event) {
@@ -843,12 +688,14 @@ function App() {
       event.preventDefault();
       const state = keyboardRef.current;
       state.pressed.delete(event.code);
+      setPressedKeys(new Set(state.pressed));
       updateKeyboardControl();
     }
     function releaseKeyboard() {
       const state = keyboardRef.current;
       state.pressed.clear();
       state.turnOrder.clear();
+      setPressedKeys(new Set());
       stopKeyboardControl();
     }
     window.addEventListener("keydown", onKeyDown);
@@ -871,6 +718,7 @@ function App() {
     if (page !== "manual" || !auth.authenticated) {
       keyboardRef.current.pressed.clear();
       keyboardRef.current.turnOrder.clear();
+      setPressedKeys(new Set());
       stopKeyboardControl();
     }
   }, [auth.authenticated, page]);
@@ -918,6 +766,10 @@ function App() {
   }
 
   async function saveDeviceNeutral(device, center) {
+    if (!auth.authenticated) {
+      setOtaFeedback("请先登录后再保存舵机标定");
+      return;
+    }
     const profile = updateLocalNeutral(device, center);
     try {
       const response = await fetch("/api/motion-calibrations", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(profile) });
@@ -995,19 +847,17 @@ function App() {
       <header className="topbar">
         <div className="brand-block">
           <div className="brand-mark">鱼</div>
-          <div><span className="eyebrow">FISH CONTROL</span><h1>多鱼控制平台</h1></div>
+          <div><span className="eyebrow">FISH CONTROL</span><h1>多鱼控制台</h1></div>
         </div>
         <nav className="page-tabs" aria-label="页面切换">
-          <button className={page === "manual" ? "active" : ""} onClick={() => setPage("manual")}>手动</button>
-          <button className={page === "vision" ? "active" : ""} onClick={() => setPage("vision")}>视觉</button>
-          <button className={page === "settings" ? "active" : ""} onClick={() => setPage("settings")}>设置</button>
+          <button className={page === "manual" ? "active" : ""} onClick={() => setPage("manual")}>手动控制</button>
+          <button className={page === "vision" ? "active" : ""} onClick={() => setPage("vision")}>视觉控制</button>
+          <button className={page === "settings" ? "active" : ""} onClick={() => setPage("settings")}>系统设置</button>
         </nav>
         <div className="system-status top-actions">
-          <span className="user-pill">{auth.user?.name || auth.user?.email}<small>{auth.user?.role}</small></span>
-          <span className="top-metric"><b>{onlineDevices.length}</b><small>在线 / {devices.length}</small></span>
-          <span className={`top-metric battery-metric ${lowBatteryCount ? "critical" : ""}`}><b>{lowBatteryCount}</b><small>低电量</small></span>
-          <span className="status online"><i /> Controller</span>
-          <button className="top-stop" disabled={!onlineDevices.length || sending} onClick={stopAll}>ALL STOP</button>
+          <span className="status online"><i />服务器在线</span>
+          <span className="user">{roleLabel(auth.user)} <strong>{auth.user?.name || auth.user?.email}</strong></span>
+          {isAdmin && <button className="top-stop" disabled={!onlineDevices.length || sending} onClick={stopAll}>ALL STOP</button>}
           <button className="logout-button" onClick={logout}>退出</button>
         </div>
       </header>
@@ -1016,158 +866,96 @@ function App() {
 
       {page !== "settings" ? (
         <div className={`workspace ${page}-workspace`}>
-          <section className="center-column">
+          <DeviceRail
+            devices={devices}
+            selectedId={page === "manual" ? selectedDeviceId : visionDeviceId}
+            onSelect={(device) => page === "manual" ? selectDevice(device) : setVisionDeviceId(device.deviceId)}
+            page={page}
+            user={auth.user}
+            visionState={visionState}
+            disabled={page === "manual" ? leaseBusy : false}
+          />
+          <section className={`stage-column ${page === "vision" ? "vision-stage-column" : ""}`}>
+            <div className="stage-toolbar">
+              <div>
+                <span className="section-kicker">{page === "vision" ? "VISION WORKSPACE" : "MANUAL WORKSPACE"}</span>
+                <h1>{page === "vision" ? "视觉识别与控制" : "手动驾驶"}</h1>
+                <p>{page === "vision" ? "先选择识别目标，再绑定对应的物理设备。" : selectedDevice ? `${deviceLabel(selectedDevice)} · 键盘和按钮共用同一控制权。` : "从左侧选择一台在线设备开始控制。"}</p>
+              </div>
+              <div className="toolbar-status">
+                <span className={`status-chip ${onlineDevices.length ? "good" : "warn"}`}><i className="dot" />{onlineDevices.length ? `${onlineDevices.length} 台在线` : "没有在线设备"}</span>
+                <span className={`status-chip ${page === "vision" ? "warn" : ""}`}>{page === "vision" ? "身份绑定与控制权分离" : "转弯优先于直行"}</span>
+              </div>
+            </div>
             <VisionPanel
               devices={devices}
               targetDeviceId={page === "vision" ? visionDeviceId : ""}
+              targetTrackId={page === "vision" ? visionTrackId : null}
               onTargetDeviceChange={setVisionDeviceId}
-              onVisionStateChange={setVisionState}
+              onTargetTrackChange={setVisionTrackId}
+              onVisionStateChange={handleVisionStateChange}
               mode={page === "manual" ? "manual" : "vision"}
-              showTargetDeviceSelector={false}
+              showTargetDeviceSelector={page === "vision"}
+              showControls={page === "vision"}
+            />
+            <CommandStrip
+              page={page}
+              device={selectedDevice}
+              feedback={feedback}
+              keyboardStatus={keyboardStatus}
+              pressedKeys={pressedKeys}
             />
           </section>
-
-          {page === "manual" ? <aside className="control-sidebar panel-surface">
-            <section className="control-section manual-list-section">
-              <div className="panel-heading compact">
-                <div><span className="eyebrow">MANUAL</span><h2>在线鱼列表</h2><small>点击一条鱼即可接管，系统会自动释放你上一条鱼。</small></div>
-                <span className="fish-status-pill"><i />{onlineDevices.length} 条在线</span>
-              </div>
-              <div className="manual-fish-table" role="list" aria-label="在线机器鱼">
-                <div className="manual-fish-table-head" aria-hidden="true">
-                  <span>鱼名</span>
-                  <span>状态</span>
-                  <span>控制者</span>
-                  <span>电量</span>
-                </div>
-                {onlineDevices.length ? onlineDevices.map((device) => {
-                  const selected = selectedDeviceId === device.deviceId;
-                  const owner = device.lease ? (device.lease.ownerName || device.lease.ownerEmail) : "空闲";
-                  const battery = batteryLevel(device);
-                  return <button
-                    key={device.deviceId}
-                    type="button"
-                    className={`manual-fish-row ${selected ? "selected" : ""}`}
-                    onClick={() => selectDevice(device)}
-                    disabled={leaseBusy}
-                    role="listitem"
-                  >
-                    <span className="manual-fish-name">{deviceLabel(device)}</span>
-                    <span className={`manual-fish-state ${device.lease ? "busy" : "free"}`}>{device.lease ? "被控" : "空闲"}</span>
-                    <span className="manual-fish-owner">{owner}</span>
-                    <span className="manual-fish-battery">{battery != null ? `${battery}%` : "—"}</span>
-                  </button>;
-                }) : <div className="list-row"><strong>暂无在线鱼</strong><span>设备上线后会出现在这里。</span></div>}
-              </div>
-              <section className="manual-motion-panel" aria-label="手动运动参数">
-                <header>
-                  <div><strong>运动参数</strong><span>{selectedDevice ? deviceLabel(selectedDevice) : "未选择设备"}</span></div>
-                  <small>W 前进 · A/D 转向 · S 停止</small>
-                </header>
-                <label className="manual-motion-slider">
-                  <span><b>摆动速度</b><output>{selectedManualMotion.frequency.toFixed(1)} Hz</output></span>
-                  <input
-                    type="range"
-                    min="0.3"
-                    max="5"
-                    step="0.1"
-                    value={selectedManualMotion.frequency}
-                    disabled={!selectedDevice || leaseBusy}
-                    onChange={(event) => updateManualMotion(selectedDevice, "frequency", Number(event.target.value))}
-                    aria-label="摆动速度"
-                  />
-                </label>
-                <label className="manual-motion-slider">
-                  <span><b>摆动幅度</b><output>{Math.round(selectedManualMotion.amplitudePercent)}% · {Math.round(selectedManualMotion.amplitudePercent * 0.9)}°</output></span>
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    step="1"
-                    value={selectedManualMotion.amplitudePercent}
-                    disabled={!selectedDevice || leaseBusy}
-                    onChange={(event) => updateManualMotion(selectedDevice, "amplitudePercent", Number(event.target.value))}
-                    aria-label="摆动幅度"
-                  />
-                </label>
-                <small className="manual-motion-note">参数按设备分别保存；运动中调整也会立即生效。</small>
-              </section>
-              {selectedDevice?.lease?.ownerEmail === auth.user?.email && <button
-                className="manual-release-button"
-                type="button"
-                disabled={leaseBusy}
-                onClick={releaseSelectedDevice}
-              >
-                释放当前控制权
-              </button>}
-              <p className="feedback" aria-live="polite">{feedback}</p>
-            </section>
-          </aside> : <OnlineFishSidebar
+          {page === "manual" && <ManualInspector
+            device={selectedDevice}
+            user={auth.user}
             devices={devices}
-            selectedId={visionDeviceId}
-            onSelect={(device) => setVisionDeviceId(device.deviceId)}
-            vision
-            visionState={visionState}
+            leaseBusy={leaseBusy || manualCommandBusy}
+            onClaim={() => selectedDevice && claimDevice(selectedDevice)}
+            onRelease={releaseSelectedDevice}
+            onMotion={sendManualMotion}
+            motion={selectedManualMotion}
+            onMotionChange={updateManualMotion.bind(null, selectedDevice)}
+            feedback={feedback}
+            keyboardStatus={keyboardStatus}
           />}
         </div>
       ) : (
-        <div className="settings-grid">
-          <article className="settings-card">
-            <h2>登录与权限</h2>
-            <div className="settings-list">
-              <div className="list-row"><strong>当前用户 <span>{auth.user?.role || "—"}</span></strong><span>{auth.user?.email || auth.user?.name || "—"}</span></div>
-              <div className="list-row"><strong>控制规则 <span>互斥</span></strong><span>一条鱼同一时间只允许一个人控制；控制者会显示在鱼池和鱼卡上。</span></div>
-              <div className="list-row"><strong>在线状态 <span>{onlineDevices.length}/{devices.length}</span></strong><span>低电量设备：{lowBatteryCount} 台</span></div>
-            </div>
-            <div className="settings-actions">
-              <button className="ghost-action" type="button" onClick={logout}>退出登录</button>
-              <button className="danger" type="button" disabled={!onlineDevices.length || sending} onClick={stopAll}>全部停止</button>
-            </div>
-          </article>
-
-          <article className="settings-card">
-            <h2>设备与固件</h2>
-            <div className="firmware-status">
-              <span className={`firmware-ready ${firmwareInfo.available ? "ready" : ""}`}>{firmwareInfo.available ? "READY" : "NO FIRMWARE"}</span>
-              <small>{firmwareInfo.available ? `${firmwareInfo.name} · ${formatBytes(firmwareInfo.size)}` : "请选择电脑上的 firmware.bin"}</small>
-            </div>
-            <label className="local-bin-picker"><input type="file" accept=".bin,application/octet-stream" onChange={(event) => { setFirmwareFile(event.target.files?.[0] || null); setOtaFeedback("文件已选择，等待上传"); }} /><strong>{firmwareFile ? firmwareFile.name : "选择固件 BIN"}</strong><small>用于 ESP32 OTA 升级</small></label>
-            {firmwareFile && <div className="local-file-meta"><span>本地文件</span><b>{firmwareFile.name}</b><span>大小</span><b>{formatBytes(firmwareFile.size)}</b></div>}
-            {firmwareInfo.available && <div className="firmware-meta compact"><div><span>SHA-256</span><code>{firmwareInfo.sha256}</code></div></div>}
-            <div className="settings-actions">
-              <button className="action" type="button" disabled={!firmwareFile || uploading} onClick={uploadFirmware}>{uploading ? "上传校验中…" : "上传固件"}</button>
-              <button className="ghost-action" type="button" disabled={!firmwareInfo.available || !otaSelectedDevices.length || sending || uploading} onClick={startOta}>OTA 下发 {otaSelectedDevices.length ? `(${otaSelectedDevices.length})` : ""}</button>
-            </div>
-            <div className="ota-target-header"><div><span className="sidebar-label no-pad">升级目标</span><small>已选择 {otaSelectedDevices.length} 台</small></div><div><button onClick={selectOtaOnline}>全选在线</button><button onClick={() => setOtaSelectedIds(new Set())}>取消选择</button></div></div>
-            <div className="ota-device-grid">{devices.map((device) => {
-              const selected = otaSelectedIds.has(device.deviceId);
-              return <button key={device.deviceId} className={`ota-device-card ${selected ? "selected" : ""}`} disabled={!device.online} onClick={() => toggleSet(setOtaSelectedIds, device.deviceId)}>
-                <span className="device-check">{selected ? "✓" : ""}</span><span><strong>{deviceLabel(device)}</strong><small>{device.deviceId}</small></span><em>{device.online ? "在线" : "离线"}</em>
-              </button>;
-            })}</div>
-            <p className="feedback" aria-live="polite">{otaFeedback}</p>
-          </article>
-
-          <article className="settings-card settings-card-wide">
-            <h2>舵机与平台</h2>
-            <div className="device-info-list clean-device-list">{devices.map((device) => <article className="device-info-card clean-device-card" key={device.deviceId}>
-              <header><strong>{deviceLabel(device)}</strong><span className={device.online ? "online-text" : "offline-text"}>{device.online ? "● 在线" : "○ 离线"}</span></header>
-              <div className="settings-list">
-                <div className="list-row"><strong>固件 <span>{device.firmwareVersion || "—"}</span></strong><span>{device.mac || device.deviceId || "—"}</span></div>
-                <div className="list-row"><strong>电量 <span>{device.online && Number.isFinite(device.batteryVoltage) && device.batteryVoltage > 0 ? `${device.batteryPercent}%` : "—"}</span></strong><span>{device.online && device.rssi ? `${device.rssi} dBm` : "信号未知"}</span></div>
-                <div className="list-row"><strong>状态 <span>{MODE_LABELS[device.mode] || "未知"}</span></strong><span>{device.stopReason || `最后在线：${formatTime(device.lastSeen)}`}</span></div>
-              </div>
-              <label className="setting">舵机中位 <b>{Number(deviceNeutralCenter(device)).toFixed(0)}°</b>
-                <input type="range" min="45" max="135" step="1" value={deviceNeutralCenter(device)} disabled={sending} onChange={(event) => updateLocalNeutral(device, event.target.value)} onPointerUp={(event) => saveDeviceNeutral(device, event.currentTarget.value)} onKeyUp={(event) => saveDeviceNeutral(device, event.currentTarget.value)} />
-              </label>
-              <div className="rgb-controls"><label><span>RGB 颜色</span><input type="color" value={rgbColor} onChange={(event) => setRgbColor(event.target.value)} /></label><label><span>灯珠色序</span><select value={rgbOrder} onChange={(event) => setRgbOrder(event.target.value)}>{["RGB","GRB","RBG","GBR","BRG","BGR"].map((order) => <option key={order}>{order}</option>)}</select></label><label><span>亮度 {rgbBrightness}</span><input type="range" min="1" max="255" value={rgbBrightness} onChange={(event) => setRgbBrightness(event.target.value)} onPointerUp={() => setRgb(device, device.rgbMode === "SOLID" ? "SOLID" : "AUTO")} onKeyUp={() => setRgb(device, device.rgbMode === "SOLID" ? "SOLID" : "AUTO")} /></label><small>松开滑块后立即下发，并等待开发板确认。</small><div><button type="button" disabled={!device.online} onClick={() => setRgb(device,"SOLID")}>应用颜色</button><button type="button" disabled={!device.online} onClick={() => setRgb(device,"AUTO")}>自动模式</button></div></div>
-              <div className="device-card-actions"><button type="button" onClick={() => openRename(device)}>✎ 重命名设备</button></div>
-            </article>)}
-            {!devices.length && <div className="list-row"><strong>等待设备 <span>ESP32</span></strong><span>机器鱼上线后这里会显示舵机中位和固件状态。</span></div>}
-            </div>
-          </article>
-          {auth.user?.role === "Admin" && <AdminUsers currentUser={auth.user} />}
-        </div>
+        <SettingsWorkspace
+          authUser={auth.user}
+          isAdmin={isAdmin}
+          devices={devices}
+          onlineDevices={onlineDevices}
+          lowBatteryCount={lowBatteryCount}
+          sending={sending}
+          stopAll={stopAll}
+          onLogout={logout}
+          firmwareInfo={firmwareInfo}
+          firmwareFile={firmwareFile}
+          setFirmwareFile={(file) => {
+            setFirmwareFile(file);
+            setOtaFeedback(file ? "文件已选择，等待上传" : "请选择电脑上的 firmware.bin");
+          }}
+          uploading={uploading}
+          uploadFirmware={uploadFirmware}
+          startOta={startOta}
+          otaFeedback={otaFeedback}
+          otaSelectedDevices={otaSelectedDevices}
+          otaSelectedIds={otaSelectedIds}
+          selectOtaOnline={selectOtaOnline}
+          toggleOtaDevice={toggleOtaDevice}
+          deviceNeutralCenter={deviceNeutralCenter}
+          updateLocalNeutral={updateLocalNeutral}
+          saveDeviceNeutral={saveDeviceNeutral}
+          rgbColor={rgbColor}
+          setRgbColor={setRgbColor}
+          rgbBrightness={rgbBrightness}
+          setRgbBrightness={setRgbBrightness}
+          rgbOrder={rgbOrder}
+          setRgbOrder={setRgbOrder}
+          setRgb={setRgb}
+          openRename={openRename}
+        />
       )}
 
       {renameDevice && <div className="rename-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeRename(); }}>
@@ -1215,4 +1003,10 @@ class AppErrorBoundary extends Component {
   }
 }
 
-createRoot(document.getElementById("root")).render(<StrictMode><AppErrorBoundary><App /></AppErrorBoundary></StrictMode>);
+const rootElement = document.getElementById("root");
+if (rootElement) {
+  const rootKey = "__fishControllerReactRoot";
+  const root = window[rootKey] || createRoot(rootElement);
+  window[rootKey] = root;
+  root.render(<StrictMode><AppErrorBoundary><App /></AppErrorBoundary></StrictMode>);
+}

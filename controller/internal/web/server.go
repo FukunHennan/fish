@@ -29,6 +29,7 @@ import (
 var frontendFiles embed.FS
 
 const maxFirmwareSize int64 = 8 << 20
+const deviceHeartbeatTimeout = 3 * time.Second
 
 type server struct {
 	hub             *hub.Hub
@@ -180,9 +181,15 @@ func (s *server) leaseWatchdog() {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	for range ticker.C {
+		staleDevices := s.hub.RemoveInactive(deviceHeartbeatTimeout)
+		if len(staleDevices) > 0 {
+			log.Printf("device heartbeat timeout: %s", strings.Join(staleDevices, ", "))
+		}
 		expired := s.leases.expire()
 		if len(expired) == 0 {
-			continue
+			if len(staleDevices) == 0 {
+				continue
+			}
 		}
 		for _, deviceID := range expired {
 			_ = s.stopDevice(deviceID)
@@ -226,6 +233,9 @@ func firmwareInfo(path, name string) (map[string]any, error) {
 }
 
 func (s *server) firmwareAPI(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdmin(w, r); !ok {
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		path, name := s.firmwareSnapshot()
@@ -308,6 +318,9 @@ func (s *server) firmware(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "仅支持 GET", http.StatusMethodNotAllowed)
 		return
 	}
+	if _, ok := s.requireAdmin(w, r); !ok {
+		return
+	}
 	path, _ := s.firmwareSnapshot()
 	if _, err := readFirmware(path); err != nil {
 		http.Error(w, "固件尚未上传或构建", http.StatusNotFound)
@@ -323,12 +336,7 @@ func (s *server) ota(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "仅支持 POST", http.StatusMethodNotAllowed)
 		return
 	}
-	user, ok := s.requireUser(w, r)
-	if !ok {
-		return
-	}
-	if !canAdmin(user) {
-		http.Error(w, "需要管理员权限", http.StatusForbidden)
+	if _, ok := s.requireAdmin(w, r); !ok {
 		return
 	}
 	var input struct {
@@ -421,7 +429,7 @@ func (s *server) visionDeviceCommand(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !canControl(user) {
-			http.Error(w, "需要操作员权限", http.StatusForbidden)
+			http.Error(w, "需要普通用户或管理员权限", http.StatusForbidden)
 			return
 		}
 	}
@@ -457,14 +465,17 @@ func (s *server) visionDeviceCommand(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "视觉运动模式无效", http.StatusBadRequest)
 			return
 		}
-		if command.Frequency < 0.3 || command.Frequency > 5 || command.Amplitude < 0 || command.Amplitude > 90 || command.Bias < -90 || command.Bias > 90 {
-			http.Error(w, "视觉运动参数无效", http.StatusBadRequest)
-			return
-		}
+		// Vision PID output is continuous and can briefly exceed the
+		// physical envelope while the target is far from the path. The
+		// controller owns the final device-safe values, so normalize them
+		// here instead of silently dropping a tracking frame.
+		command.Frequency = limitMotionValue(command.Frequency, 0.3, 5)
+		command.Amplitude = limitMotionValue(command.Amplitude, 0, 90)
+		command.Bias = limitMotionValue(command.Bias, -90, 90)
 		// Vision may request a direction, but the controller owns the final
 		// center and amplitude geometry for every control path.
 		command.Frequency, command.Amplitude, command.Bias, _ =
-			s.applyMotionGeometry(deviceID, command.Mode, command.Frequency, command.Amplitude, 0, false, nil)
+			s.applyMotionGeometry(deviceID, command.Mode, command.Frequency, command.Amplitude, command.Bias, true, nil)
 		payload["mode"] = command.Mode
 		payload["frequency"] = command.Frequency
 		payload["amplitude"] = command.Amplitude
@@ -517,9 +528,6 @@ func (s *server) visionDeviceCommand(w http.ResponseWriter, r *http.Request) {
 	}
 	if success, _ := ack["success"].(bool); !success {
 		w.WriteHeader(http.StatusConflict)
-	}
-	if success, _ := ack["success"].(bool); success {
-		s.recordMotionState(deviceID, payload)
 	}
 	ack["sent"] = true
 	ack["acknowledged"] = true
@@ -617,7 +625,7 @@ func (s *server) leasesAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !canControl(user) {
-		http.Error(w, "需要操作员权限", http.StatusForbidden)
+		http.Error(w, "需要普通用户或管理员权限", http.StatusForbidden)
 		return
 	}
 	var input struct {
@@ -667,12 +675,8 @@ func (s *server) emergencyStop(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "仅支持 POST", http.StatusMethodNotAllowed)
 		return
 	}
-	user, ok := s.requireUser(w, r)
+	user, ok := s.requireAdmin(w, r)
 	if !ok {
-		return
-	}
-	if !canAdmin(user) {
-		http.Error(w, "需要管理员权限", http.StatusForbidden)
 		return
 	}
 	devices := s.hub.List()
@@ -740,6 +744,16 @@ func clampMotionValue(value, min, max, fallback float64) float64 {
 	return value
 }
 
+func limitMotionValue(value, min, max float64) float64 {
+	if value < min {
+		return min
+	}
+	if value > max {
+		return max
+	}
+	return value
+}
+
 func (s *server) stopDevice(deviceID string) bool {
 	requestID := fmt.Sprintf("lease-stop-%d", time.Now().UnixNano())
 	message := map[string]any{
@@ -751,9 +765,6 @@ func (s *server) stopDevice(deviceID string) bool {
 		},
 	}
 	_, sent, _ := s.hub.SendAndWait(deviceID, requestID, message, 700*time.Millisecond)
-	if sent {
-		s.recordMotionState(deviceID, message["payload"].(map[string]any))
-	}
 	return sent
 }
 
@@ -779,26 +790,6 @@ func isMotionMode(mode string) bool {
 	default:
 		return false
 	}
-}
-
-func (s *server) recordMotionState(deviceID string, payload map[string]any) {
-	mode, _ := payload["mode"].(string)
-	source, _ := payload["controlSource"].(string)
-	if strings.EqualFold(mode, "stop") {
-		source = ""
-	}
-	values := map[string]any{
-		"mode":          motionModeNumber(mode),
-		"frequency":     payload["frequency"],
-		"amplitude":     payload["amplitude"],
-		"controlSource": source,
-	}
-	if bias, ok := payload["bias"]; ok {
-		values["bias"] = bias
-	} else {
-		values["bias"] = 0.0
-	}
-	s.hub.Update(deviceID, values)
 }
 
 func profileServoRange(profile motionCalibrationProfile) (float64, float64, float64) {
@@ -930,16 +921,16 @@ func (s *server) motionCalibrations(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !canControl(user) {
+		http.Error(w, "需要普通用户或管理员权限", http.StatusForbidden)
+		return
+	}
 	s.calibrationMu.Lock()
 	defer s.calibrationMu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
 	profiles := s.readMotionCalibrations()
 	if r.Method == http.MethodGet {
 		_ = json.NewEncoder(w).Encode(profiles)
-		return
-	}
-	if !canControl(user) {
-		http.Error(w, "需要操作员权限", http.StatusForbidden)
 		return
 	}
 	if r.Method != http.MethodPut {
@@ -975,7 +966,7 @@ func (s *server) command(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !canControl(user) {
-		http.Error(w, "需要操作员权限", http.StatusForbidden)
+		http.Error(w, "需要普通用户或管理员权限", http.StatusForbidden)
 		return
 	}
 	var x struct {
@@ -1044,9 +1035,6 @@ func (s *server) command(w http.ResponseWriter, r *http.Request) {
 	if success, _ := ack["success"].(bool); !success {
 		w.WriteHeader(http.StatusConflict)
 	}
-	if success, _ := ack["success"].(bool); success {
-		s.recordMotionState(x.DeviceID, payload)
-	}
 	ack["sent"] = true
 	ack["acknowledged"] = true
 	_ = json.NewEncoder(w).Encode(ack)
@@ -1064,7 +1052,7 @@ func (s *server) realtimeCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !canControl(user) {
-		http.Error(w, "需要操作员权限", http.StatusForbidden)
+		http.Error(w, "需要普通用户或管理员权限", http.StatusForbidden)
 		return
 	}
 	var x struct {
@@ -1133,7 +1121,6 @@ func (s *server) realtimeCommand(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	s.recordMotionState(x.DeviceID, payload)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"sent": true, "queued": true, "acknowledged": false,
@@ -1168,8 +1155,8 @@ func (s *server) rgb(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !canAdmin(user) {
-		http.Error(w, "需要管理员权限", http.StatusForbidden)
+	if !canControl(user) {
+		http.Error(w, "需要普通用户或管理员权限", http.StatusForbidden)
 		return
 	}
 	var input struct {
@@ -1237,6 +1224,7 @@ func (s *server) deviceSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var reg map[string]any
+	_ = rawConn.SetReadDeadline(time.Now().Add(deviceHeartbeatTimeout))
 	if rawConn.ReadJSON(&reg) != nil {
 		return
 	}
@@ -1248,10 +1236,16 @@ func (s *server) deviceSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d := hub.Device{ID: id, Name: text(reg["name"]), IP: text(reg["ip"]), FirmwareVersion: text(reg["firmwareVersion"]), Capabilities: texts(reg["capabilities"])}
+	// Complete the protocol handshake before exposing the device to command
+	// handlers. Otherwise a concurrent HTTP request could enqueue a command
+	// before the ESP32 has received register.result and it would ignore it.
+	if c.WriteJSON(map[string]any{"type": "register.result", "success": true}) != nil {
+		return
+	}
 	s.hub.Register(d, c)
 	log.Printf("device registered: %s (%s), source %s", id, d.IP, r.RemoteAddr)
 	defer s.hub.Remove(id, c)
-	_ = c.WriteJSON(map[string]any{"type": "register.result", "success": true})
+	_ = rawConn.SetReadDeadline(time.Now().Add(deviceHeartbeatTimeout))
 	done := make(chan struct{})
 	go func() {
 		ticker := time.NewTicker(time.Second)
@@ -1259,8 +1253,9 @@ func (s *server) deviceSocket(w http.ResponseWriter, r *http.Request) {
 		for {
 			select {
 			case <-ticker.C:
-				if err := c.WriteJSON(map[string]any{"type": "heartbeat"}); err != nil {
-					log.Printf("device heartbeat failed: %s: %v", id, err)
+				if !s.hub.Send(id, map[string]any{"type": "heartbeat"}) {
+					log.Printf("device heartbeat failed: %s", id)
+					_ = c.Close()
 					return
 				}
 			case <-done:
@@ -1275,10 +1270,15 @@ func (s *server) deviceSocket(w http.ResponseWriter, r *http.Request) {
 			log.Printf("device disconnected: %s: %v", id, err)
 			return
 		}
-		if messageType, _ := msg["type"].(string); messageType == "command.result" {
+		_ = rawConn.SetReadDeadline(time.Now().Add(deviceHeartbeatTimeout))
+		messageType, _ := msg["type"].(string)
+		if messageType == "command.result" {
 			s.hub.ResolveCommandResult(msg)
 		}
-		s.hub.Update(id, msg)
+		switch messageType {
+		case "heartbeat", "state", "command.result":
+			s.hub.Update(id, msg)
+		}
 	}
 }
 

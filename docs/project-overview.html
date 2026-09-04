@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>机器鱼控制系统</title>
+  <style>
+    :root {
+      --ink: #183238;
+      --muted: #63777a;
+      --paper: #f5f8f4;
+      --white: #fff;
+      --mint: #b9eadc;
+      --green: #2c9b83;
+      --blue: #6c9edb;
+      --orange: #f1b763;
+      --pink: #e88d91;
+      --line: #d8e5df;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font: 16px/1.6 "Microsoft YaHei", "Segoe UI", sans-serif;
+    }
+    .page { width: min(1080px, calc(100% - 32px)); margin: auto; }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 22px 0;
+    }
+    .logo { display: flex; align-items: center; gap: 10px; font-weight: 800; }
+    .logo-mark {
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      color: var(--white);
+      background: var(--green);
+      border-radius: 50%;
+      font-size: 1.1rem;
+    }
+    nav { display: flex; gap: 16px; }
+    nav a { color: var(--muted); text-decoration: none; font-size: .92rem; }
+    nav a:hover { color: var(--green); }
+    .hero {
+      display: grid;
+      grid-template-columns: 1fr 310px;
+      gap: 45px;
+      align-items: center;
+      min-height: 410px;
+      padding: 55px 0 70px;
+    }
+    .eyebrow {
+      margin-bottom: 10px;
+      color: var(--green);
+      font-size: .78rem;
+      font-weight: 800;
+      letter-spacing: .15em;
+    }
+    h1, h2, h3 { line-height: 1.2; }
+    h1 { max-width: 650px; margin: 0; font-size: clamp(2.4rem, 6vw, 4.5rem); letter-spacing: -.05em; }
+    h2 { margin: 0; font-size: clamp(1.7rem, 4vw, 2.5rem); }
+    h3 { margin: 10px 0 5px; }
+    .hero p { max-width: 600px; margin: 20px 0 0; color: var(--muted); font-size: 1.08rem; }
+    .hero-label {
+      display: inline-block;
+      margin-top: 25px;
+      padding: 8px 12px;
+      color: var(--ink);
+      background: var(--mint);
+      border-radius: 20px;
+      font-size: .9rem;
+    }
+    .fish-scene {
+      position: relative;
+      height: 260px;
+      overflow: hidden;
+      background: #dff4ef;
+      border: 1px solid #c7e8df;
+      border-radius: 45% 45% 12px 12px;
+    }
+    .fish-scene::before, .fish-scene::after {
+      content: "";
+      position: absolute;
+      width: 100px;
+      height: 30px;
+      border: 2px solid rgba(44, 155, 131, .25);
+      border-left: 0;
+      border-right: 0;
+      border-radius: 50%;
+      transform: rotate(-12deg);
+    }
+    .fish-scene::before { left: 25px; top: 45px; }
+    .fish-scene::after { right: 20px; bottom: 45px; transform: rotate(10deg); }
+    .fish {
+      position: absolute;
+      top: 95px;
+      left: 54px;
+      width: 180px;
+      height: 82px;
+      background: var(--green);
+      border-radius: 52% 48% 48% 52%;
+      transform: rotate(-8deg);
+      box-shadow: 0 12px 0 rgba(24, 83, 76, .12);
+    }
+    .fish::before {
+      content: "";
+      position: absolute;
+      right: 20px;
+      top: 20px;
+      width: 12px;
+      height: 12px;
+      background: var(--white);
+      border-radius: 50%;
+      box-shadow: inset 0 0 0 4px var(--ink);
+    }
+    .fish::after {
+      content: "";
+      position: absolute;
+      left: -35px;
+      top: 16px;
+      width: 50px;
+      height: 50px;
+      background: var(--orange);
+      clip-path: polygon(100% 50%, 0 0, 25% 50%, 0 100%);
+    }
+    .bubble { position: absolute; border: 2px solid rgba(44, 155, 131, .3); border-radius: 50%; }
+    .bubble.one { top: 55px; right: 55px; width: 14px; height: 14px; }
+    .bubble.two { top: 35px; right: 35px; width: 7px; height: 7px; }
+    section { padding: 60px 0; border-top: 1px solid var(--line); }
+    .intro { max-width: 650px; margin: 10px 0 28px; color: var(--muted); }
+    .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    .card {
+      min-height: 190px;
+      padding: 22px;
+      background: var(--white);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      box-shadow: 0 10px 28px rgba(43, 83, 72, .06);
+    }
+    .card p { margin: 0; color: var(--muted); }
+    .icon {
+      width: 44px;
+      height: 44px;
+      display: grid;
+      place-items: center;
+      color: var(--white);
+      border-radius: 13px;
+      font-weight: 900;
+      font-size: 1.2rem;
+    }
+    .icon.green { background: var(--green); }
+    .icon.blue { background: var(--blue); }
+    .icon.orange { background: var(--orange); color: var(--ink); }
+    .icon.pink { background: var(--pink); }
+    .route {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 0;
+      margin-top: 30px;
+      align-items: center;
+    }
+    .route-item { position: relative; text-align: center; }
+    .route-item:not(:last-child)::after {
+      content: "→";
+      position: absolute;
+      top: 25px;
+      right: -9px;
+      color: var(--green);
+      font-size: 1.4rem;
+    }
+    .route-circle {
+      width: 74px;
+      height: 74px;
+      display: grid;
+      place-items: center;
+      margin: auto;
+      background: var(--white);
+      border: 4px solid var(--mint);
+      border-radius: 50%;
+      font-size: 1.8rem;
+    }
+    .route-item:nth-child(2) .route-circle { border-color: #c8dcf6; }
+    .route-item:nth-child(3) .route-circle { border-color: #f7dfb2; }
+    .route-item:nth-child(4) .route-circle { border-color: #f2c4c6; }
+    .route-item:nth-child(5) .route-circle { border-color: #abd8cc; }
+    .route-item b { display: block; margin-top: 10px; }
+    .route-item small { color: var(--muted); }
+    .protocol {
+      display: grid;
+      grid-template-columns: .8fr 1.2fr;
+      gap: 22px;
+      align-items: stretch;
+      margin-top: 28px;
+    }
+    .protocol-explain {
+      padding: 24px;
+      background: var(--mint);
+      border-radius: 14px;
+    }
+    .protocol-explain p { color: #426661; }
+    pre {
+      position: relative;
+      margin: 0;
+      padding: 22px;
+      overflow: auto;
+      color: #d9f6ee;
+      background: #163238;
+      border-radius: 14px;
+      font: .88rem/1.65 Consolas, monospace;
+    }
+    .copy {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      padding: 5px 9px;
+      color: #d9f6ee;
+      background: #28545a;
+      border: 1px solid #47777a;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    .small-note { margin-top: 22px; color: var(--muted); font-size: .9rem; }
+    footer { padding: 20px 0 55px; color: var(--muted); font-size: .9rem; }
+    @media (max-width: 760px) {
+      header { align-items: flex-start; flex-direction: column; gap: 12px; }
+      .hero { grid-template-columns: 1fr; padding-top: 30px; }
+      .fish-scene { max-width: 420px; }
+      .cards, .protocol { grid-template-columns: 1fr; }
+      .route { grid-template-columns: 1fr; gap: 24px; }
+      .route-item:not(:last-child)::after { content: "↓"; top: 72px; right: calc(50% - 7px); }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <div class="logo"><span class="logo-mark">F</span>机器鱼中央控制系统</div>
+      <nav>
+        <a href="#four-parts">四个部分</a>
+        <a href="#route">数据路径</a>
+        <a href="#protocol">协议范例</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero" style="border-top:0">
+        <div>
+          <div class="eyebrow">PROJECT IN ONE MINUTE</div>
+          <h1>一条鱼，四层协作。</h1>
+          <p>电脑网页负责操作，Go 负责连接和权限，Python 负责看懂画面，ESP32 负责让机器鱼真正动起来。</p>
+          <span class="hero-label">简单理解：上层发意图，底层做执行</span>
+        </div>
+        <div class="fish-scene" aria-label="机器鱼示意图">
+          <span class="bubble one"></span><span class="bubble two"></span>
+          <span class="fish"></span>
+        </div>
+      </section>
+
+      <section id="four-parts">
+        <div class="eyebrow">THE FOUR PARTS</div>
+        <h2>每一层只做好一件事</h2>
+        <p class="intro">模块分开以后，换界面、换算法或换设备，不需要把整个系统一起重写。</p>
+        <div class="cards">
+          <article class="card">
+            <div class="icon green">01</div>
+            <h3>ESP32：动起来</h3>
+            <p>连接 Wi-Fi，完成身份认证，控制舵机、电机和 RGB，并在断线时自动停止。</p>
+          </article>
+          <article class="card">
+            <div class="icon blue">02</div>
+            <h3>Go：管起来</h3>
+            <p>统一接收网页请求，管理设备、控制权、状态和 OTA，是系统唯一的对外入口。</p>
+          </article>
+          <article class="card">
+            <div class="icon orange">03</div>
+            <h3>Python：看得懂</h3>
+            <p>读取摄像头，使用 YOLO 识别目标，计算路径和运动参数，再交给 Go 转发。</p>
+          </article>
+        </div>
+        <div class="cards" style="margin-top:16px">
+          <article class="card">
+            <div class="icon pink">04</div>
+            <h3>协议：说清楚</h3>
+            <p>所有命令和状态使用统一 JSON。发送成功、设备收到、设备执行成功，分别表达。</p>
+          </article>
+          <article class="card">
+            <div class="icon green">UI</div>
+            <h3>电脑端 GUI</h3>
+            <p>实际界面位于 <code>8098</code>，通过 Go 控制器操作设备和视觉，不直连 ESP32。</p>
+          </article>
+          <article class="card">
+            <div class="icon blue">SAFE</div>
+            <h3>安全边界</h3>
+            <p>公网只暴露 Go。Python、ESP32 和部署密钥留在内网，异常和失联都优先停止。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="route">
+        <div class="eyebrow">DATA ROUTE</div>
+        <h2>数据是这样走的</h2>
+        <p class="intro">局域网访问和远程访问使用同一套控制逻辑；FRP 只负责把 Go 的入口转发出去。</p>
+        <div class="route">
+          <div class="route-item"><div class="route-circle">⌨</div><b>浏览器</b><small>8098 / GUI</small></div>
+          <div class="route-item"><div class="route-circle">↗</div><b>FRP</b><small>远程时才经过</small></div>
+          <div class="route-item"><div class="route-circle">⇄</div><b>Go 控制器</b><small>8081 / 统一入口</small></div>
+          <div class="route-item"><div class="route-circle">◉</div><b>Python</b><small>8091 / 视觉服务</small></div>
+          <div class="route-item"><div class="route-circle">🐟</div><b>ESP32</b><small>WebSocket / 执行</small></div>
+        </div>
+        <p class="small-note">本地访问：浏览器 → Go。远程访问：浏览器 → FRP → Go。视觉和设备都由 Go 分别转发：摄像头 → Python → Go → ESP32。</p>
+      </section>
+
+      <section id="protocol">
+        <div class="eyebrow">PROTOCOL EXAMPLE</div>
+        <h2>协议长什么样</h2>
+        <div class="protocol">
+          <div class="protocol-explain">
+            <h3>网页只表达意图</h3>
+            <p>网页说“让 1 号鱼前进”，Go 检查登录、控制权和设备在线状态，再把统一命令发给 ESP32。</p>
+            <h3>设备返回真实结果</h3>
+            <p>ESP32 执行后返回同一个 <code>requestId</code>，GUI 用后续状态确认设备当前动作。</p>
+          </div>
+          <pre id="protocol-example"><button class="copy" type="button">复制</button>{
+  "type": "command",
+  "requestId": "req-1024",
+  "command": "motion.set",
+  "payload": {
+    "deviceId": "A4:CF:12:34:56:78",
+    "controlSource": "manual",
+    "mode": "forward",
+    "frequency": 2.5,
+    "amplitude": 28,
+    "bias": 0
+  }
+}</pre>
+        </div>
+        <p class="small-note">ESP32 收到后返回 <code>command.result</code>，并持续发送 <code>heartbeat</code>；控制器心跳超时，设备会归中停止。</p>
+      </section>
+    </main>
+
+    <footer>项目目录：<code>firmware/</code> · <code>controller/</code> · <code>vision/</code> · <code>protocol/</code></footer>
+  </div>
+
+  <script>
+    const button = document.querySelector(".copy");
+    button.addEventListener("click", async () => {
+      const code = document.getElementById("protocol-example").textContent.replace("复制", "").trim();
+      try {
+        await navigator.clipboard.writeText(code);
+        button.textContent = "已复制";
+        window.setTimeout(() => { button.textContent = "复制"; }, 1000);
+      } catch {
+        button.textContent = "手动复制";
+      }
+    });
+  </script>
+</body>
+</html>

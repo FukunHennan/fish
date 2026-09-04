@@ -1113,6 +1113,7 @@ class VisionPresentation:
 
     def _draw_detection(self, image, result):
         detections = result.yolo_result.get("detections", [])
+        selected_track_id = result.yolo_result.get("targetTrackId")
         if not detections and result.yolo_bbox is not None:
             detections = [{"bbox": result.yolo_bbox, "trackId": result.track_id, "confidence": result.yolo_confidence, "color": "UNKNOWN", "colorHex": "#29d3b2"}]
         if not detections:
@@ -1122,8 +1123,14 @@ class VisionPresentation:
             value = detection.get("colorHex", "#29d3b2").lstrip("#")
             rgb = tuple(int(value[index:index+2], 16) for index in (0, 2, 4))
             colour = (rgb[2], rgb[1], rgb[0])
-            cv2.rectangle(image, (x1, y1), (x2, y2), colour, 2)
-            label = f"#{detection.get('trackId', '-')} {detection.get('color', 'UNKNOWN')} {float(detection.get('confidence', 0))*100:.0f}%"
+            is_selected = (
+                selected_track_id is not None
+                and detection.get("trackId") == selected_track_id
+            )
+            thickness = 4 if is_selected else 2
+            cv2.rectangle(image, (x1, y1), (x2, y2), colour, thickness)
+            selected_label = " 当前目标" if is_selected else ""
+            label = f"#{detection.get('trackId', '-')} {detection.get('color', 'UNKNOWN')} {float(detection.get('confidence', 0))*100:.0f}%{selected_label}"
             draw_unicode_text(image, label, (x1, max(3, y1 - 20)), 13, colour, bold=True, stroke_width=1)
 
     def _draw_reference(self, image, result, draw=True):

@@ -61,6 +61,7 @@ class VisionSession:
     camera_id: Optional[str]
     camera_index: Optional[int]
     target_device_id: Optional[str]
+    target_track_id: Optional[int]
     yolo_model: Optional[str]
     state: VisionState
     error: Optional[dict[str, str]] = None
@@ -73,6 +74,7 @@ class VisionSession:
         camera_id: str,
         camera_index: int,
         target_device_id: Optional[str] = None,
+        target_track_id: Optional[int] = None,
         yolo_model: Optional[str] = None,
     ) -> "VisionSession":
         return cls(
@@ -80,6 +82,7 @@ class VisionSession:
             camera_id=camera_id,
             camera_index=camera_index,
             target_device_id=target_device_id,
+            target_track_id=target_track_id,
             yolo_model=yolo_model,
             state=VisionState.OPENING,
         )
@@ -106,6 +109,7 @@ class VisionSession:
             "cameraId": self.camera_id,
             "cameraIndex": self.camera_index,
             "targetDeviceId": self.target_device_id,
+            "targetTrackId": self.target_track_id,
             "yoloModel": os.path.basename(self.yolo_model) if self.yolo_model else None,
             "error": self.error,
             "metrics": dict(self.metrics),

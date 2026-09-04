@@ -1,100 +1,153 @@
-# RoboFish 视觉代码交接说明
+# Python 视觉服务
 
-## 一、主要功能
+## 1. 作用
 
-- **机器鱼识别与跟踪**：YOLO 负责全局检测和重新捕获，OpenCV HSV 负责逐帧跟踪橙色鱼尾。
-- **场地标定**：支持 ArUco 四角点自动标定，也支持手动点击水池四角，建立像素坐标到米制坐标的转换。
-- **运动状态估计**：计算机器鱼位置、速度和运动方向，并进行相机延迟补偿。
-- **路径循迹**：支持鼠标绘制轨迹，计算路径曲率、航向误差和离轨误差，生成控制量。
-- **机器鱼通信**：服务器计算视觉 PID 后，通过 HTTP 向机器鱼发送最终的频率、幅度、偏置和 STOP 指令。
-- **安全保护**：相机失帧、目标丢失、路径失效、到达终点、清除路径、退出或异常时停止推进。
-- **显示与记录**：提供本地 HUD、平板 TCP 遥测、WebRTC 视频流（MJPEG 回退）、录像、CSV 数据和截图。
-
-## 二、使用方法
-
-### 1. 运行环境
-
-当前使用的 Python 解释器：
+Python 视觉服务负责摄像头、YOLO、目标跟踪、标定、路径和视频。
 
 ```text
-D:\python\venvs\yolo\ultralytics\8.4.118\Scripts\python.exe
+摄像头 → Python → 识别/跟踪/控制计算 → Go → ESP32
 ```
 
-主要版本：Python 3.13.14、OpenCV 5.0.0、Ultralytics 8.4.118、PyTorch 2.11.0+cu128，CUDA 可用。
+Python 不直接访问机器鱼 IP，也不直接判断网页用户权限。设备命令必须经过 Go 控制器。
 
-### 2. 启动程序
+## 2. 启动方式
 
-```powershell
-cd "C:\Users\rlyoulo\Desktop\codeFish(1)\codeFish"
-& "D:\python\venvs\yolo\ultralytics\8.4.118\Scripts\python.exe" .\VISION\main.py
-```
-
-也可以在 VS Code 中选择：
+通常由 Go 控制器自动启动：
 
 ```text
-VISION: YOLO GPU（外置 USB 摄像头）
+Go Controller → vision/server.py
 ```
 
-当前相机索引为 `1`。如果无法打开相机，需要修改 `VISION/main.py` 中的 `camera_index`。
-
-### 3. 操作顺序
+Python 服务监听：
 
 ```text
-启动程序
-→ 确认相机和YOLO正常
-→ 完成场地标定
-→ 标定橙色鱼尾
-→ 点击鱼头方向
-→ 从机器鱼附近绘制轨迹
-→ 点击启动
+127.0.0.1:8091
 ```
 
-常用操作：
+浏览器访问视觉接口和视频时，使用 Go 的代理，不直接访问 `8091`。
 
-| 操作 | 功能 |
+如果需要单独调试：
+
+```bash
+cd vision
+python server.py
+```
+
+项目会优先使用 `vision/.venv` 中的 Python。也可以设置：
+
+```bash
+export FISH_PYTHON=/path/to/python
+```
+
+Windows：
+
+```bat
+set FISH_PYTHON=D:\path\to\python.exe
+```
+
+## 3. 主要模块
+
+| 文件 | 作用 |
 |---|---|
-| `Enter` | 启动循迹 |
-| `Space` | 停止 |
-| `Q` | 退出 |
-| 鼠标左键拖动 | 绘制轨迹 |
-| 鼠标右键 | 清除轨迹 |
-| 工具栏 | 标定、录像、截图、曝光和画面增强 |
+| `server.py` | 无窗口服务入口 |
+| `service.py` | 视觉会话、状态和动作接口 |
+| `perception.py` | YOLO、鱼尾跟踪和目标数据 |
+| `tracking_application.py` | 视觉处理主循环 |
+| `navigation.py` | 路径、航向和控制量 |
+| `web_api.py` | 摄像头、会话、状态和视频接口 |
+| `webrtc.py` | WebRTC 视频服务 |
+| `camera_stream.py` | 摄像头采集和重启 |
+| `assets/best.pt` | YOLO 模型 |
 
-机器鱼默认地址为 `192.168.4.1:80`，电脑端视频服务使用 `640×480 / 30 FPS`，优先通过 WebRTC 访问，兼容回退地址为 `http://<电脑IP>:8090/video.mjpg`，平板 TCP 端口为 `9998`。
-
-
-## 三、目录说明
+## 4. 视觉流程
 
 ```text
-VISION/
-├─ main.py             主入口、生命周期和功能调度
-├─ config.py           相机、模型、网络和物理尺寸配置
-├─ perception.py       YOLO、鱼尾跟踪、ArUco和坐标转换
-├─ navigation.py       速度、航向、路径引导和转圈标定
-├─ control.py          控制状态机和机器鱼HTTP通信
-├─ interface.py        相机、平板TCP、MJPEG和录像
-├─ ui.py               输入、工具栏、HUD和遥测
-├─ requirements.txt    Python运行依赖
-└─ assets/
-   ├─ best.pt          YOLO模型
-   └─ marker_profile.local.json
-                       鱼尾颜色配置
-
-tests/vision/           视觉离线测试
-docs/VISION_ARCHITECTURE.md
-                        视觉架构说明
-output/vision/          运行生成的录像、CSV和截图
+选择摄像头
+  → 启动预览
+  → 选择 YOLO 模型
+  → 识别机器鱼
+  → 选择正确目标
+  → 绑定物理设备
+  → 绘制或加载路径
+  → 启动视觉控制
 ```
 
-只有 `main.py` 负责组合各功能模块，其他模块之间不直接互相依赖。
+识别目标编号是视觉身份，`deviceId` 是 ESP32 物理身份。两者必须明确绑定，不能因为识别到某个目标就自动控制一台设备。
 
-## 四、后续优化方向
+## 5. 视频
 
-1. **重新完成整机验证**：测试真实 USB 相机、机器鱼、平板和 MJPEG 的联合运行，以及所有 STOP 场景。
-2. **持续检查场地标定**：控制过程中低频复核 ArUco，防止相机移动后继续使用旧坐标矩阵。
-3. **提高启动安全性**：启动时要求当前帧直接识别到鱼尾，不允许仅依靠短时预测位置启动。
-4. **重新测量系统延迟**：记录相机、推理、HTTP 和执行时间，替换目前固定的 `0.30 s` 补偿值。
-5. **降低鱼尾摆动误差**：评估鱼身刚体参考点、鱼头识别或其他更稳定的跟踪位置。
-6. **完善集成测试**：增加假相机和假通信测试，覆盖主循环、相机失帧、目标丢失和关闭流程。
-7. **继续整理代码**：统一运行状态，删除或接入未使用的 Windows 鼠标轮询和刚体跟踪代码。
-8. **标定控制参数**：实测左右转圈半径、终点制动距离和相机索引，并保存对应配置。
+当前策略：
+
+1. Python 生成处理后视频。
+2. Go 负责反向代理。
+3. 浏览器优先使用 WebRTC。
+4. WebRTC 不可用时使用 MJPEG 回退。
+
+当前常用采集参数：
+
+```text
+640 × 480
+目标 30 FPS
+MJPEG 质量 50
+```
+
+公网通过 FRP 时，视频带宽和延迟可能比局域网更高。遇到卡顿，先在本机直接访问 GUI，关闭录像和画面增强，再比较处理 FPS、YOLO FPS 和浏览器显示效果。
+
+## 6. 视觉控制安全边界
+
+以下情况必须停止视觉运动：
+
+- 目标没有出现。
+- 目标编号已经失效。
+- 物理设备没有绑定。
+- 控制权不属于当前视觉会话。
+- 视觉会话超时。
+- 摄像头失帧。
+- Python 服务退出。
+- 用户停止视觉。
+
+停止视觉时，Go 先发送安全停止，再关闭 Python 会话和视频连接。
+
+## 7. 常用接口
+
+浏览器通过 Go 代理使用以下能力：
+
+```text
+/api/vision/cameras
+/api/vision/sessions
+/api/vision/sessions/current
+/api/vision/sessions/{id}/processing
+/api/vision/sessions/{id}/camera
+/api/vision/sessions/{id}/target
+/api/vision/sessions/{id}/actions
+/api/vision/sessions/{id}/stream.mjpg
+```
+
+停止会话使用 `DELETE /api/vision/sessions/{id}`；停止处理使用
+`DELETE /api/vision/sessions/{id}/processing`。Python 本机服务使用同类内部接口，
+外部用户不应直接依赖 Python 端口。
+
+## 8. 数据和模型
+
+- YOLO 模型放在 `vision/assets/`。
+- 运行输出放在 `output/vision/`。
+- 录像、截图和 CSV 不应提交到仓库。
+- 模型文件可由 GUI 选择，但模型加载和推理仍在 Python 执行。
+
+## 9. 测试
+
+在项目根目录运行 Python 测试：
+
+```bash
+cd vision
+python -m unittest discover -s tests
+```
+
+测试重点包括：
+
+- 摄像头和视觉会话启停。
+- 目标识别和跟踪。
+- 坐标转换。
+- 视觉动作接口。
+- 视频和 WebRTC。
+- 目标丢失后的安全停止。

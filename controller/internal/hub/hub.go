@@ -47,14 +47,26 @@ type Device struct {
 }
 
 type entry struct {
-	device         Device
-	conn           Conn
-	latestMu       sync.Mutex
-	latest         any
-	latestSequence uint64
-	latestWake     chan struct{}
-	stop           chan struct{}
-	stopOnce       sync.Once
+	device Device
+	conn   Conn
+
+	outboundMu      sync.Mutex
+	outbound        []*outboundMessage
+	latestPending   *outboundMessage
+	latestSequence  uint64
+	nextOrder       uint64
+	outboundWake    chan struct{}
+	outboundStopped bool
+
+	stop     chan struct{}
+	stopOnce sync.Once
+}
+
+type outboundMessage struct {
+	value  any
+	order  uint64
+	done   chan error
+	latest bool
 }
 type Hub struct {
 	mu          sync.RWMutex
@@ -85,12 +97,13 @@ func (h *Hub) Register(d Device, c Conn) {
 	d.Online = true
 	d.LastSeen = time.Now()
 	current := &entry{
-		device: d, conn: c,
-		latestWake: make(chan struct{}, 1),
-		stop:       make(chan struct{}),
+		device:       d,
+		conn:         c,
+		outboundWake: make(chan struct{}, 1),
+		stop:         make(chan struct{}),
 	}
 	h.entries[d.ID] = current
-	go current.writeLatestLoop()
+	go current.writeOutboundLoop()
 	h.notifyLocked()
 }
 
@@ -238,13 +251,15 @@ func (h *Hub) notifyLocked() {
 }
 
 func (h *Hub) Send(id string, v any) bool {
-	h.mu.RLock()
-	e := h.entries[id]
-	h.mu.RUnlock()
-	if e == nil || e.conn == nil {
+	e := h.entry(id)
+	if e == nil {
 		return false
 	}
-	return e.conn.WriteJSON(v) == nil
+	done := make(chan error, 1)
+	if !e.enqueue(v, done) {
+		return false
+	}
+	return <-done == nil
 }
 
 // SendLatest queues a low-latency state update. If the device writer is busy,
@@ -256,46 +271,48 @@ func (h *Hub) SendLatest(id string, v any) bool {
 // SendLatestOrdered queues a low-latency state update and drops an older
 // sequence that arrived late. Sequence zero keeps the legacy unordered mode.
 func (h *Hub) SendLatestOrdered(id string, sequence uint64, v any) bool {
-	h.mu.RLock()
-	e := h.entries[id]
-	h.mu.RUnlock()
-	if e == nil || e.conn == nil {
+	e := h.entry(id)
+	if e == nil {
 		return false
 	}
-	e.latestMu.Lock()
-	if sequence > 0 && sequence <= e.latestSequence {
-		e.latestMu.Unlock()
+	if !e.enqueueLatest(sequence, v) {
 		return false
 	}
-	e.latest = v
-	if sequence > 0 {
-		e.latestSequence = sequence
-	}
-	e.latestMu.Unlock()
 	select {
-	case e.latestWake <- struct{}{}:
+	case e.outboundWake <- struct{}{}:
 	default:
 	}
 	return true
 }
 
 func (e *entry) stopWriter() {
-	e.stopOnce.Do(func() { close(e.stop) })
+	e.stopOnce.Do(func() {
+		e.outboundMu.Lock()
+		e.outboundStopped = true
+		pending := append([]*outboundMessage(nil), e.outbound...)
+		e.outbound = nil
+		e.latestPending = nil
+		e.outboundMu.Unlock()
+		for _, message := range pending {
+			completeOutbound(message, ErrConnectionClosed)
+		}
+		close(e.stop)
+	})
 }
 
-func (e *entry) writeLatestLoop() {
+func (e *entry) writeOutboundLoop() {
 	for {
 		select {
-		case <-e.latestWake:
+		case <-e.outboundWake:
 			for {
-				e.latestMu.Lock()
-				message := e.latest
-				e.latest = nil
-				e.latestMu.Unlock()
+				message := e.popNext()
 				if message == nil {
 					break
 				}
-				if e.conn.WriteJSON(message) != nil {
+				err := e.conn.WriteJSON(message.value)
+				completeOutbound(message, err)
+				if err != nil {
+					e.stopWriter()
 					return
 				}
 			}
@@ -303,6 +320,92 @@ func (e *entry) writeLatestLoop() {
 			return
 		}
 	}
+}
+
+var ErrConnectionClosed = &connectionClosedError{}
+
+type connectionClosedError struct{}
+
+func (*connectionClosedError) Error() string { return "device connection closed" }
+
+func completeOutbound(message *outboundMessage, err error) {
+	if message == nil || message.done == nil {
+		return
+	}
+	message.done <- err
+}
+
+func (e *entry) enqueue(value any, done chan error) bool {
+	e.outboundMu.Lock()
+	defer e.outboundMu.Unlock()
+	if e.outboundStopped {
+		return false
+	}
+	e.nextOrder++
+	e.outbound = append(e.outbound, &outboundMessage{
+		value: value,
+		order: e.nextOrder,
+		done:  done,
+	})
+	select {
+	case e.outboundWake <- struct{}{}:
+	default:
+	}
+	return true
+}
+
+func (e *entry) enqueueLatest(sequence uint64, value any) bool {
+	e.outboundMu.Lock()
+	defer e.outboundMu.Unlock()
+	if e.outboundStopped {
+		return false
+	}
+	if sequence > 0 && sequence <= e.latestSequence {
+		return false
+	}
+	if sequence > 0 {
+		e.latestSequence = sequence
+	}
+	e.nextOrder++
+	if e.latestPending != nil {
+		e.latestPending.value = value
+		e.latestPending.order = e.nextOrder
+		e.latestPending.latest = true
+	} else {
+		e.latestPending = &outboundMessage{
+			value:  value,
+			order:  e.nextOrder,
+			latest: true,
+		}
+		e.outbound = append(e.outbound, e.latestPending)
+	}
+	return true
+}
+
+func (e *entry) popNext() *outboundMessage {
+	e.outboundMu.Lock()
+	defer e.outboundMu.Unlock()
+	if len(e.outbound) == 0 {
+		return nil
+	}
+	index := 0
+	for i := 1; i < len(e.outbound); i++ {
+		if e.outbound[i].order < e.outbound[index].order {
+			index = i
+		}
+	}
+	message := e.outbound[index]
+	e.outbound = append(e.outbound[:index], e.outbound[index+1:]...)
+	if message == e.latestPending {
+		e.latestPending = nil
+	}
+	return message
+}
+
+func (h *Hub) entry(id string) *entry {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.entries[id]
 }
 
 // SendAndWait routes a command and waits for the matching device result.
@@ -353,12 +456,12 @@ func (h *Hub) SendOnly(v any) bool {
 		h.mu.RUnlock()
 		return false
 	}
-	var connection Conn
+	var id string
 	for _, entry := range h.entries {
-		connection = entry.conn
+		id = entry.device.ID
 	}
 	h.mu.RUnlock()
-	return connection != nil && connection.WriteJSON(v) == nil
+	return id != "" && h.Send(id, v)
 }
 
 // OnlyDeviceID returns the device ID only when exactly one device is connected.
@@ -375,6 +478,41 @@ func (h *Hub) OnlyDeviceID() (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// RemoveInactive removes devices that have not sent a message within maxAge.
+// Device connections are closed outside the Hub lock so a slow WebSocket
+// implementation cannot block dashboard reads or other device registrations.
+func (h *Hub) RemoveInactive(maxAge time.Duration) []string {
+	cutoff := time.Now().Add(-maxAge)
+	type staleEntry struct {
+		id string
+		e  *entry
+	}
+	var stale []staleEntry
+
+	h.mu.Lock()
+	for id, e := range h.entries {
+		if e == nil || e.device.LastSeen.After(cutoff) {
+			continue
+		}
+		delete(h.entries, id)
+		e.stopWriter()
+		stale = append(stale, staleEntry{id: id, e: e})
+	}
+	if len(stale) > 0 {
+		h.notifyLocked()
+	}
+	h.mu.Unlock()
+
+	ids := make([]string, 0, len(stale))
+	for _, item := range stale {
+		ids = append(ids, item.id)
+		if item.e != nil && item.e.conn != nil {
+			_ = item.e.conn.Close()
+		}
+	}
+	return ids
 }
 
 func (h *Hub) List() []Device {
