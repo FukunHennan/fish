@@ -29,7 +29,9 @@ import (
 var frontendFiles embed.FS
 
 const maxFirmwareSize int64 = 8 << 20
-const deviceHeartbeatTimeout = 3 * time.Second
+// Wi-Fi and ESP32 scheduling can briefly delay a heartbeat. A longer socket
+// deadline avoids turning short LAN jitter into a full reconnect.
+const deviceHeartbeatTimeout = 10 * time.Second
 const visionMotionTimeout = 3 * time.Second
 
 type server struct {
@@ -143,6 +145,11 @@ func newHandler(h *hub.Hub, key []byte, apiAddress, streamAddress, firmwarePath 
 		hub: h, key: append([]byte(nil), key...), firmwarePath: firmwarePath,
 		calibrationPath: motionCalibrationPath(), auth: newAuthStore(authStorePath()),
 		leases: newLeaseStore(60 * time.Second),
+	}
+	if s.authActive() {
+		if err := s.leases.loadReservations(authStorePath() + ".reservations.json"); err != nil {
+			panic(fmt.Errorf("load fish reservations: %w", err))
+		}
 	}
 	s.leases.onRelease = func(id string) { s.hub.StopAndReset(id) }
 	if firmwarePath != "" {
@@ -322,9 +329,9 @@ func (s *server) firmware(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "仅支持 GET", http.StatusMethodNotAllowed)
 		return
 	}
-	if _, ok := s.requireAdmin(w, r); !ok {
-		return
-	}
+	// Device firmware downloads happen from the ESP32 and cannot carry the
+	// browser's admin session cookie. The OTA command is still admin-only and
+	// the image is integrity-checked by the device against the command hash.
 	path, _ := s.firmwareSnapshot()
 	if _, err := readFirmware(path); err != nil {
 		http.Error(w, "固件尚未上传或构建", http.StatusNotFound)
@@ -415,6 +422,8 @@ func (s *server) visionDeviceCommand(w http.ResponseWriter, r *http.Request) {
 		Amplitude  float64 `json:"amplitude"`
 		Bias       float64 `json:"bias"`
 		DurationMs int     `json:"durationMs"`
+		OwnerID    string  `json:"ownerId"`
+		ClientID   string  `json:"clientId"`
 	}
 	if json.NewDecoder(r.Body).Decode(&command) != nil {
 		http.Error(w, "请求格式错误", http.StatusBadRequest)
@@ -492,14 +501,23 @@ func (s *server) visionDeviceCommand(w http.ResponseWriter, r *http.Request) {
 		command.Bias = limitMotionValue(command.Bias, -90, 90)
 		// Vision may request a direction, but the controller owns the final
 		// center and amplitude geometry for every control path.
+		// Forward PID uses explicit bias for fine steering. Left/right requests
+		// mean a real tail-direction mode change, so let calibrated motion
+		// geometry choose that side's center instead of neutralizing it with
+		// a JSON default bias of 0.
+		usesExplicitBias := command.Mode == "forward"
 		command.Frequency, command.Amplitude, command.Bias, _ =
-			s.applyMotionGeometry(deviceID, command.Mode, command.Frequency, command.Amplitude, command.Bias, true, nil)
+			s.applyMotionGeometry(deviceID, command.Mode, command.Frequency, command.Amplitude, command.Bias, usesExplicitBias, nil)
 		payload["mode"] = command.Mode
 		payload["frequency"] = command.Frequency
 		payload["amplitude"] = command.Amplitude
 		payload["bias"] = command.Bias
 	} else if command.Operation == "calibrate-forward" {
-		frequency, amplitude, bias, _ := s.applyMotionGeometry(deviceID, "forward", 2.0, 22.0, 0, true, nil)
+		profile := s.motionProfileForDevice(deviceID)
+		percent := profile.ForwardAmplitudePercent * 100.0
+		frequency, calibratedAmplitude, bias, _ := s.applyMotionGeometry(deviceID, "forward", profile.ForwardFrequency, 0, 0, false, &percent)
+		_, minimumVisibleAmplitude, _, _ := s.applyMotionGeometry(deviceID, "forward", profile.ForwardFrequency, 22.0, 0, true, nil)
+		amplitude := math.Max(calibratedAmplitude, minimumVisibleAmplitude)
 		payload["frequency"] = frequency
 		payload["amplitude"] = amplitude
 		payload["bias"] = bias
@@ -515,10 +533,16 @@ func (s *server) visionDeviceCommand(w http.ResponseWriter, r *http.Request) {
 		wait = 250 * time.Millisecond
 	}
 	var receipt *hub.Receipt
-	admitted := s.leases.admitVision(deviceID, command.Operation, func() bool {
+	queue := func() bool {
 		receipt = s.hub.QueueVisionCommand(deviceID, requestID, message, lifetime, command.SessionID, command.Operation)
 		return receipt.Queued()
-	})
+	}
+	admitted := false
+	if s.authActive() && s.isVisionInternalRequest(r) && command.OwnerID != "" && command.ClientID != "" {
+		admitted = s.leases.admit(deviceID, authUser{ID: command.OwnerID}, command.ClientID, true, queue)
+	} else {
+		admitted = s.leases.admitVision(deviceID, command.Operation, queue)
+	}
 	if !admitted {
 		if receipt != nil {
 			receipt.Wait(0)
@@ -653,7 +677,10 @@ func (s *server) leasesAPI(w http.ResponseWriter, r *http.Request) {
 		Force    bool   `json:"force"`
 	}
 	if r.Body != nil {
-		_ = json.NewDecoder(r.Body).Decode(&input)
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			writeAuthError(w, http.StatusBadRequest, "控制权请求格式错误")
+			return
+		}
 	}
 	input.DeviceID = strings.TrimSpace(input.DeviceID)
 	if input.DeviceID == "" {
@@ -715,7 +742,6 @@ func (s *server) emergencyStop(w http.ResponseWriter, r *http.Request) {
 		message := map[string]any{"type": "command", "requestId": requestID, "command": "emergency.stop", "payload": map[string]any{"operator": user.Email}}
 		s.leases.mu.Lock()
 		s.hub.StopAndReset(device.ID)
-		delete(s.leases.leases, device.ID)
 		receipts = append(receipts, s.hub.QueueCommand(device.ID, requestID, message, 0))
 		s.leases.mu.Unlock()
 	}
@@ -1176,8 +1202,30 @@ func (s *server) realtimeCommand(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) authenticatedVisionProxy(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.authActive() {
-			if _, ok := s.requireUser(w, r); !ok {
+		user, ok := s.requireUser(w, r)
+		if !ok { return }
+		r.Header.Del("X-Fish-Workspace-User")
+		r.Header.Del("X-Fish-Workspace-Client")
+		prefix := "/api/vision/workspaces/"
+		if strings.HasPrefix(r.URL.Path, prefix) {
+			rest := strings.TrimPrefix(r.URL.Path, prefix)
+			parts := strings.SplitN(rest, "/", 2)
+			clientID := strings.TrimSpace(r.Header.Get("X-Fish-Client"))
+			if clientID == "" { clientID = strings.TrimSpace(r.URL.Query().Get("clientId")) }
+			if len(parts) != 2 || parts[0] == "" || clientID == "" || !canControl(user) {
+				writeAuthError(w, http.StatusForbidden, "视觉工作区身份无效")
+				return
+			}
+			lease, exists := s.leases.snapshot()[parts[0]]
+			if !exists || lease.OwnerID != user.ID || lease.ClientID != clientID {
+				writeAuthError(w, http.StatusConflict, "请先在当前浏览器取得该机器鱼的控制权")
+				return
+			}
+			r.Header.Set("X-Fish-Workspace-User", user.ID)
+			r.Header.Set("X-Fish-Workspace-Client", clientID)
+		} else if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			if !canAdmin(user) {
+				writeAuthError(w, http.StatusForbidden, "共享视觉设置需要管理员权限")
 				return
 			}
 		}

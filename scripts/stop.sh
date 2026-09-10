@@ -10,8 +10,16 @@ stop_pidfile() {
   if [[ -f "$pidfile" ]]; then
     local pid
     pid="$(cat "$pidfile" 2>/dev/null || true)"
-    if [[ -n "$pid" ]] && kill "$pid" >/dev/null 2>&1; then
-      echo "Stopped $label."
+    if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" >/dev/null 2>&1; then
+      kill "$pid" >/dev/null 2>&1 || true
+      for _ in {1..20}; do
+        kill -0 "$pid" >/dev/null 2>&1 || break
+        sleep 0.1
+      done
+      if kill -0 "$pid" >/dev/null 2>&1; then
+        kill -KILL "$pid" >/dev/null 2>&1 || true
+      fi
+      echo "Stopped $label (pid=$pid)."
     fi
     rm -f "$pidfile"
   fi
@@ -20,6 +28,4 @@ stop_pidfile() {
 stop_pidfile "$RUNTIME/fish-controller.pid" "Fish Controller"
 stop_pidfile "$RUNTIME/frpc.pid" "frpc"
 
-if ! pgrep -f "fish-controller$" >/dev/null 2>&1 && ! pgrep -f "frpc( |$)" >/dev/null 2>&1; then
-  echo "Stopped."
-fi
+echo "Stopped."

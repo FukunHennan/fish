@@ -38,9 +38,11 @@ private:
     bool started_=false,registered_=false;
     bool endpointReady_=false;
     IPAddress controllerIP_;
+    uint32_t endpointAttemptAt_=0;
     uint32_t lastHeartbeat_=0,lastReport_=0;
     uint32_t lastControlMs_=0;
     String stopReason_="BOOT";
     String otaState_="IDLE";
+    uint8_t otaProgress_=0;
     String controlSource_="";
 };

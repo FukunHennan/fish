@@ -40,6 +40,32 @@ class WebRTCFrameTests(unittest.TestCase):
 
 @unittest.skipIf(_LatestVideoTrack is None, "aiortc is not installed")
 class WebRTCTrackTests(unittest.IsolatedAsyncioTestCase):
+    async def test_viewers_have_independent_resolution_and_source_is_unchanged(self):
+        source = _LatestFrameBuffer()
+        source.update(np.zeros((1944, 2592, 3), dtype=np.uint8))
+        low = _LatestVideoTrack(source, "smooth")
+        high = _LatestVideoTrack(source, "full")
+        first = await low.recv()
+        second = await high.recv()
+        self.assertEqual((first.width, first.height), (640, 480))
+        self.assertEqual((second.width, second.height), (1920, 1440))
+        self.assertEqual(source.wait_for_frame(-1, 0.1)[1].shape, (1944, 2592, 3))
+        low.stop()
+        high.stop()
+
+    async def test_short_frame_gap_does_not_end_track(self):
+        import asyncio
+        source = _LatestFrameBuffer()
+        track = _LatestVideoTrack(source)
+        pending = asyncio.create_task(track.recv())
+        await asyncio.sleep(1.15)
+        self.assertFalse(pending.done())
+        source.update(np.zeros((48, 64, 3), dtype=np.uint8))
+        frame = await asyncio.wait_for(pending, 1)
+        self.assertEqual(frame.width, 64)
+        track.stop()
+        source.close()
+
     async def test_track_uses_aiortc_realtime_timestamps(self):
         source = _LatestFrameBuffer()
         source.update(np.zeros((2, 3, 3), dtype=np.uint8))

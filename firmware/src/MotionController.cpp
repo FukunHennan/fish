@@ -30,11 +30,9 @@ void MotionController::update(uint32_t nowMs) {
     if (s.mode != MotionMode::Stopped) {
         phase_ = fmodf(phase_ + s.frequency * 2.0f * PI * dt, 2.0f * PI);
     }
-    float target = state_.angleAt(phase_);
-    float delta = target - outputAngle_;
-    const float maxStep = 8.0f;
-    if (delta > maxStep) delta = maxStep;
-    if (delta < -maxStep) delta = -maxStep;
-    outputAngle_ += delta;
+    // Follow the sampled sine-wave target directly. The previous 8-degree
+    // per-update clamp distorted the waveform and limited the requested
+    // speed. The servo's own control loop now handles the physical response.
+    outputAngle_ = state_.angleAt(phase_);
     servo_.write((int)outputAngle_);
 }

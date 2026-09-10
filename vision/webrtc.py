@@ -11,7 +11,7 @@ import cv2
 from config import (
     VIDEO_HEIGHT,
     VIDEO_WIDTH,
-    CAMERA_STALE_TIMEOUT_S,
+
     WEBRTC_MAX_FPS,
     WEBRTC_OFFER_TIMEOUT_S,
     WEBRTC_STUN_URL,
@@ -84,6 +84,11 @@ class _LatestFrameBuffer:
                 return None
             return self._sequence, self._frame.copy(), self._timestamp
 
+    @property
+    def closed(self):
+        with self._condition:
+            return self._closed
+
     def clear(self):
         with self._condition:
             self._frame = None
@@ -97,11 +102,14 @@ class _LatestFrameBuffer:
             self._condition.notify_all()
 
 
-def _resize_for_video(frame):
+VIDEO_PROFILES = {"smooth": (640, 480), "hd": (1280, 960), "full": (1920, 1440)}
+
+def _resize_for_video(frame, quality="smooth"):
     height, width = frame.shape[:2]
     if width <= 0 or height <= 0:
         return frame
-    scale = min(VIDEO_WIDTH / width, VIDEO_HEIGHT / height)
+    max_width, max_height = VIDEO_PROFILES[quality]
+    scale = min(1.0, max_width / width, max_height / height)
     target = (
         max(1, int(round(width * scale))),
         max(1, int(round(height * scale))),
@@ -140,9 +148,10 @@ def browser_ice_servers():
 
 if _IMPORT_ERROR is None:
     class _LatestVideoTrack(VideoStreamTrack):
-        def __init__(self, source):
+        def __init__(self, source, quality="smooth"):
             super().__init__()
             self._source = source
+            self._quality = quality
             self._sequence = -1
 
         async def recv(self):
@@ -153,20 +162,23 @@ if _IMPORT_ERROR is None:
                     1.0,
                 )
                 if item is None:
-                    raise MediaStreamError
+                    if self._source.closed or self.readyState != "live":
+                        raise MediaStreamError
+                    continue
                 sequence, frame, frame_timestamp = item
                 self._sequence = sequence
                 if (
                     frame_timestamp > 0
-                    and time.time() - frame_timestamp > CAMERA_STALE_TIMEOUT_S
+                    and time.time() - frame_timestamp > 2.0
                 ):
-                    # Never push an old frame into the browser after a
+                    # Viewing tolerates processing jitter independently of motion safety.
+                    # Never push an excessively old frame into the browser after a
                     # processing/network stall. Wait for a newer capture.
                     continue
                 # Let aiortc own the 90 kHz real-time clock. Using the camera
                 # sequence as PTS makes dropped frames change playback speed.
                 pts, time_base = await self.next_timestamp()
-                video_frame = VideoFrame.from_ndarray(frame, format="bgr24")
+                video_frame = VideoFrame.from_ndarray(_resize_for_video(frame, self._quality), format="bgr24")
                 video_frame.pts = pts
                 video_frame.time_base = time_base
                 return video_frame
@@ -218,9 +230,11 @@ class WebRTCServer:
         if now - self._last_update_t < 1.0 / max(1, WEBRTC_MAX_FPS):
             return
         self._last_update_t = now
-        self._source.update(_resize_for_video(frame), timestamp)
+        self._source.update(frame, timestamp)
 
-    def offer(self, sdp, offer_type):
+    def offer(self, sdp, offer_type, quality="smooth"):
+        if quality not in VIDEO_PROFILES:
+            raise ValueError("无效的观看清晰度")
         if not self.available:
             raise WebRTCUnavailable(
                 "WebRTC 依赖未安装，请安装 aiortc 和 av"
@@ -229,7 +243,7 @@ class WebRTCServer:
             raise WebRTCUnavailable("WebRTC 服务已关闭")
         self.start()
         future = asyncio.run_coroutine_threadsafe(
-            self._handle_offer(sdp, offer_type),
+            self._handle_offer(sdp, offer_type, quality),
             self._loop,
         )
         try:
@@ -238,7 +252,7 @@ class WebRTCServer:
             future.cancel()
             raise
 
-    async def _handle_offer(self, sdp, offer_type):
+    async def _handle_offer(self, sdp, offer_type, quality="smooth"):
         pc = RTCPeerConnection(
             configuration=RTCConfiguration(iceServers=_ice_servers())
         )
@@ -254,7 +268,7 @@ class WebRTCServer:
             await pc.setRemoteDescription(
                 RTCSessionDescription(sdp=sdp, type=offer_type)
             )
-            pc.addTrack(_LatestVideoTrack(self._source))
+            pc.addTrack(_LatestVideoTrack(self._source, quality))
             answer = await pc.createAnswer()
             await pc.setLocalDescription(answer)
             return {

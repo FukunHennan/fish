@@ -10,11 +10,8 @@ export function deviceLabel(device) {
 
 export function leaseIsMine(lease, user) {
   if (!lease || !user) return false;
-  if (lease.clientId && lease.clientId !== CONTROL_CLIENT_ID) return false;
-  return Boolean(
-    (user.id && lease.ownerId === user.id)
-    || (user.email && lease.ownerEmail === user.email),
-  );
+  if (!lease.clientId || lease.clientId !== CONTROL_CLIENT_ID) return false;
+  return Boolean(user.id && lease.ownerId === user.id);
 }
 
 export function leaseSummary(device, user) {
@@ -31,9 +28,10 @@ export function leaseSummary(device, user) {
       mine: true,
     };
   }
+  const reservedByMe = Boolean(user?.id && lease.ownerId === user.id);
   return {
     className: "other",
-    label: "他人控制",
+    label: reservedByMe ? "我的归属 · 待恢复" : "他人控制",
     owner: lease.ownerName || "其他用户",
     account: lease.ownerEmail || "账户信息不可用",
     mine: false,

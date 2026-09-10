@@ -31,3 +31,13 @@ test("running vision state selects the camera used by the backend", () => {
   assert.equal(chooseCameraIndex("0", cameras, { state: "running", cameraIndex: 1 }), "1");
   assert.equal(chooseCameraIndex("", cameras, { state: "stopped", cameraIndex: null }), "0");
 });
+
+test("prefers global shutter by name even when its index changes", () => {
+  const cameras = [{ index: 0, name: "USB Webcam" }, { index: 5, name: "Global Shutter Camera" }];
+  assert.equal(chooseCameraIndex("", cameras, {state:"stopped"}), "5");
+  assert.equal(chooseCameraIndex("3", cameras, {state:"stopped"}), "5");
+  assert.equal(chooseCameraIndex("0", cameras, {state:"stopped"}), "0");
+  for (const state of ["previewing", "processing", "tracking"]) {
+    assert.equal(chooseCameraIndex("5", cameras, {state,cameraIndex:0}), "0");
+  }
+});

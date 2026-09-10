@@ -409,7 +409,9 @@ class PathGuidance:
             if abs(raw_heading_error_rad) >= math.radians(2.0):
                 self._turn_sign = 1.0 if raw_heading_error_rad > 0.0 else -1.0
 
-        heading_feedback = float(np.clip(
+        # Before a motion-derived course is available, the initial direction
+        # is only a path fallback and must not create a large steering command.
+        heading_feedback = 0.0 if heading_source == "INITIAL" else float(np.clip(
             heading_error_rad / (math.pi / 2.0),
             -1.0,
             1.0,
@@ -899,4 +901,3 @@ def save_turn_calibration(path: str, result: TurnCircleFit) -> None:
         json.dump(payload, file, ensure_ascii=False, indent=2)
         file.write("\n")
     os.replace(temporary_path, path)
-

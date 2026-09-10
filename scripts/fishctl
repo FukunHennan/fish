@@ -1,0 +1,370 @@
+#!/usr/bin/env python3
+"""fishctl — 机器鱼项目的一键启动/停止/状态/日志/桌面入口。
+
+不依赖第三方库或 GUI 工具包，可在无桌面环境运行；桌面图标经
+`fishctl install-desktop` 生成的 .desktop 文件调用。
+
+用法：
+  fishctl status             查看服务状态（controller/vision/systemd）
+  fishctl start              构建并启动（systemd 服务存在则改用 systemctl）
+  fishctl stop               停止服务
+  fishctl restart            重启服务
+  fishctl open               用默认浏览器打开正式控制台 http://127.0.0.1:8081
+  fishctl logs [--follow]    显示运行日志（含 controller 与 launcher 输出）
+  fishctl doctor             检查依赖、端口、PID 与 systemd 归属
+  fishctl install-desktop    在桌面菜单安装 Fish Controller 条目
+  fishctl uninstall-desktop  移除桌面条目
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import shutil
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS = ROOT / "scripts"
+CONTROLLER = ROOT / "controller"
+RUNTIME = CONTROLLER / ".runtime"
+START_SH = SCRIPTS / "start.sh"
+STOP_SH = SCRIPTS / "stop.sh"
+START_BAT = SCRIPTS / "start.bat"
+STOP_BAT = SCRIPTS / "stop.bat"
+
+CONTROLLER_URL = "http://127.0.0.1:8081"
+VISION_URL = "http://127.0.0.1:8091"
+HEALTHZ = f"{CONTROLLER_URL}/healthz"
+VISION_HEALTH = f"{VISION_URL}/health"
+
+SYSTEMD_UNIT = "fish-controller.service"
+FRONTEND_PORTS = (8098,)
+
+
+def log(message: str) -> None:
+    print(message, flush=True)
+
+
+def health(url: str, timeout: float = 0.8) -> bool:
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            return response.status == 200
+    except (OSError, urllib.error.URLError):
+        return False
+
+
+def is_windows() -> bool:
+    return os.name == "nt"
+
+
+def start_script() -> Path:
+    return START_BAT if is_windows() else START_SH
+
+
+def stop_script() -> Path:
+    return STOP_BAT if is_windows() else STOP_SH
+
+
+def run(cmd: list[str], cwd: Path | None = None, timeout: float | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, cwd=cwd or ROOT, timeout=timeout)
+
+
+# ---------------------------------------------------------------- systemd
+def systemctl(args: list[str]) -> subprocess.CompletedProcess:
+    return subprocess.run(["systemctl", "--user", *args], capture_output=True, text=True)
+
+
+def systemd_available() -> bool:
+    return not is_windows() and shutil.which("systemctl") is not None
+
+
+def systemd_unit_exists() -> bool:
+    if not systemd_available():
+        return False
+    result = systemctl(["cat", SYSTEMD_UNIT])
+    return result.returncode == 0
+
+
+def systemd_active() -> bool:
+    if not systemd_available():
+        return False
+    result = systemctl(["is-active", SYSTEMD_UNIT])
+    return result.stdout.strip() == "active"
+
+
+# ---------------------------------------------------------------- status
+def describe_service() -> dict:
+    info = {
+        "systemd": systemd_unit_exists(),
+        "systemd_active": systemd_active(),
+        "controller_health": health(HEALTHZ),
+        "vision_health": health(VISION_HEALTH),
+        "controller_pid": read_pid("fish-controller.pid"),
+        "controller_log": RUNTIME / "fish-controller.log",
+    }
+    return info
+
+
+def read_pid(name: str) -> int | None:
+    path = RUNTIME / name
+    try:
+        value = int(path.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+    return value
+
+
+def pid_alive(pid: int) -> bool:
+    if pid is None or pid <= 0:
+        return False
+    if is_windows():
+        return True  # Windows 下通过脚本检查，避免复杂进程 API
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def cmd_status(_args) -> int:
+    info = describe_service()
+    log("Fish Controller 状态")
+    log("=" * 40)
+    if info["systemd"]:
+        mode = "systemd" if info["systemd_active"] else "systemd (inactive)"
+        log(f"进程管理模式 : {mode}")
+    else:
+        log("进程管理模式 : 脚本 (controller/.runtime PID 文件)")
+        pid = info["controller_pid"]
+        if pid:
+            log(f"控制器 PID   : {pid} {'(存活)' if pid_alive(pid) else '(未存活)'}")
+    log(f"Go Controller : {'运行中' if info['controller_health'] else '未运行'}  {CONTROLLER_URL}")
+    log(f"Python Vision : {'运行中' if info['vision_health'] else '未运行'}  {VISION_URL}")
+    log(f"运行日志     : {info['controller_log']}")
+    log(f"诊断目录     : {CONTROLLER / 'diagnostics' / 'runs'}")
+    if info["systemd_active"]:
+        log("提示：当前由 systemd 管理，请使用 fishctl stop/restart，不要运行 start.sh。")
+    return 0 if (info["controller_health"] or info["systemd_active"]) else 1
+
+
+# ---------------------------------------------------------------- lifecycle
+def cmd_start(_args) -> int:
+    if systemd_unit_exists():
+        log(f"[systemd] 检测到 {SYSTEMD_UNIT}，使用 systemctl 启动。")
+        result = systemctl(["start", SYSTEMD_UNIT])
+        if result.returncode != 0:
+            log(f"[systemd] 启动失败：{result.stderr.strip()}")
+            return result.returncode
+        log("[systemd] 已请求启动，等待健康检查…")
+        return wait_health(60, expected=True)
+    script = start_script()
+    if not script.exists():
+        log(f"[ERROR] 找不到脚本 {script}")
+        return 1
+    log(f">> {script.relative_to(ROOT)}")
+    result = run([str(script)])
+    if result.returncode != 0:
+        log("[ERROR] start 脚本执行失败，请查看日志。")
+        return result.returncode
+    return wait_health(90, expected=True)
+
+
+def cmd_stop(_args) -> int:
+    if systemd_unit_exists():
+        log(f"[systemd] 检测到 {SYSTEMD_UNIT}，使用 systemctl 停止。")
+        result = systemctl(["stop", SYSTEMD_UNIT])
+        if result.returncode != 0:
+            log(f"[systemd] 停止失败：{result.stderr.strip()}")
+            return result.returncode
+        return wait_health(20, expected=False)
+    script = stop_script()
+    if not script.exists():
+        log(f"[ERROR] 找不到脚本 {script}")
+        return 1
+    log(f">> {script.relative_to(ROOT)}")
+    result = run([str(script)])
+    if result.returncode != 0:
+        log("[ERROR] stop 脚本执行失败。")
+        return result.returncode
+    return wait_health(20, expected=False)
+
+
+def cmd_restart(_args) -> int:
+    if systemd_unit_exists():
+        log(f"[systemd] 重启 {SYSTEMD_UNIT}…")
+        result = systemctl(["restart", SYSTEMD_UNIT])
+        return wait_health(60, expected=True) if result.returncode == 0 else result.returncode
+    cmd_stop(argparse.Namespace())
+    return cmd_start(argparse.Namespace())
+
+
+def wait_health(seconds: float, expected: bool) -> int:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if health(HEALTHZ) == expected:
+            if expected:
+                log("[OK] Go Controller 已就绪，正式控制台：http://127.0.0.1:8081")
+            else:
+                log("[OK] Go Controller 已停止。")
+            return 0
+        time.sleep(1)
+    log(f"[WARN] 等待 {seconds:.0f} 秒后，Go Controller 状态仍不符合预期（期望 running={expected}）。")
+    return 1
+
+
+def cmd_open(_args) -> int:
+    if not health(HEALTHZ):
+        log("[WARN] Go Controller 未运行。请先执行 fishctl start，或运行 fishctl status 检查。")
+        return 1
+    url = "http://127.0.0.1:8081/"
+    log(f"打开控制台：{url}")
+    if is_windows():
+        os.startfile(url)  # type: ignore[attr-defined]
+        return 0
+    opener = shutil.which("xdg-open")
+    if opener is None:
+        log("[ERROR] 未找到 xdg-open，无法打开浏览器。")
+        return 1
+    return subprocess.Popen([opener, url]).wait()
+
+
+# ---------------------------------------------------------------- logs
+def cmd_logs(args) -> int:
+    paths = [RUNTIME / "fish-controller.log"]
+    existing = [path for path in paths if path.exists()]
+    if not existing:
+        log("[INFO] 暂无运行日志。请先执行 fishctl start。")
+        return 0
+    if args.follow:
+        run(["tail", "-F", *(str(path) for path in existing)])
+        return 0
+    for path in existing:
+        log(f"===== {path} =====")
+        try:
+            log(path.read_text(encoding="utf-8", errors="replace")[-8000:])
+        except OSError as error:
+            log(f"(读取失败：{error})")
+    return 0
+
+
+# ---------------------------------------------------------------- doctor
+def cmd_doctor(_args) -> int:
+    info = describe_service()
+    log("Fish Controller 体检")
+    log("=" * 40)
+
+    checks = []
+    if is_windows():
+        checks.append(("start.bat/stop.bat", START_BAT.exists() and STOP_BAT.exists()))
+    else:
+        checks.append(("start.sh/stop.sh", START_SH.exists() and STOP_SH.exists()))
+    checks += [
+        ("config/deployment.json", (ROOT / "config" / "deployment.json").exists()),
+        ("前端构建产物 dist", (CONTROLLER / "internal" / "web" / "dist" / "index.html").exists()),
+        ("Python 环境 vision/.venv", (ROOT / "vision" / ".venv").exists()),
+        ("Go 源码 controller/go.mod", (CONTROLLER / "go.mod").exists()),
+    ]
+    for label, ok in checks:
+        log(f"{'[OK]' if ok else '[WARN]'} {label}")
+    log("")
+    log(f"systemd 单元 : {'存在' if info['systemd'] else '不存在'} / {'运行中' if info['systemd_active'] else '未运行'}")
+    log(f"Controller   : {'OK' if info['controller_health'] else 'DOWN'}")
+    log(f"Vision       : {'OK' if info['vision_health'] else 'DOWN'}")
+    return 0
+
+
+# ---------------------------------------------------------------- desktop
+def desktop_target() -> Path:
+    base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    return Path(base) / "applications" / "fish-controller.desktop"
+
+
+def cmd_install_desktop(_args) -> int:
+    if is_windows():
+        log("[INFO] Windows 请直接为 scripts/fishctl（或 python fishctl）创建快捷方式，工作目录设为项目根目录。")
+        return 0
+    target = desktop_target()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    content = f"""[Desktop Entry]
+Type=Application
+Name=Fish Controller
+Comment=机器鱼控制中心（启动服务并打开控制台）
+Exec={sys.executable} {SCRIPTS / 'fishctl'} start-and-open
+Path={ROOT}
+Terminal=false
+Categories=Development;Science;
+StartupNotify=true
+"""
+    target.write_text(content, encoding="utf-8")
+    os.chmod(target, 0o644)
+    if shutil.which("update-desktop-database"):
+        subprocess.run(["update-desktop-database", str(target.parent)], capture_output=True)
+    log(f"已安装桌面条目：{target}")
+    log("在应用菜单中搜索“Fish Controller”即可启动。")
+    return 0
+
+
+def cmd_uninstall_desktop(_args) -> int:
+    target = desktop_target()
+    if target.exists():
+        target.unlink()
+        log(f"已移除桌面条目：{target}")
+    else:
+        log("[INFO] 桌面条目不存在。")
+    return 0
+
+
+def cmd_start_and_open(_args) -> int:
+    """桌面双击入口：需要时启动，然后轮询健康并打开浏览器。"""
+    if not health(HEALTHZ) and not systemd_active():
+        code = cmd_start(argparse.Namespace())
+        if code != 0:
+            log("[ERROR] 服务未能启动。")
+            return code
+    elif not health(HEALTHZ):
+        log("[INFO] 已由 systemd 管理，等待就绪…")
+        wait_health(60, expected=True)
+    return cmd_open(argparse.Namespace())
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="fishctl", description="机器鱼控制中心管理入口")
+    sub = parser.add_subparsers(dest="command")
+    sub.add_parser("status", help="查看服务状态")
+    sub.add_parser("start", help="构建并启动服务")
+    sub.add_parser("stop", help="停止服务")
+    sub.add_parser("restart", help="重启服务")
+    sub.add_parser("open", help="打开正式控制台")
+    sub.add_parser("start-and-open", help="桌面双击入口")
+    logs_parser = sub.add_parser("logs", help="查看运行日志")
+    logs_parser.add_argument("--follow", action="store_true", help="持续跟踪日志")
+    sub.add_parser("doctor", help="检查依赖与运行环境")
+    sub.add_parser("install-desktop", help="安装桌面条目")
+    sub.add_parser("uninstall-desktop", help="移除桌面条目")
+
+    args = parser.parse_args()
+    handlers = {
+        "status": cmd_status,
+        "start": cmd_start,
+        "stop": cmd_stop,
+        "restart": cmd_restart,
+        "open": cmd_open,
+        "start-and-open": cmd_start_and_open,
+        "logs": cmd_logs,
+        "doctor": cmd_doctor,
+        "install-desktop": cmd_install_desktop,
+        "uninstall-desktop": cmd_uninstall_desktop,
+    }
+    handler = handlers.get(args.command)
+    if handler is None:
+        parser.print_help()
+        return 1
+    return handler(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

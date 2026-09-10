@@ -57,6 +57,7 @@ from perception import (
     VisionPipeline,
     build_calibration_homography,
 )
+from session import TrackingMode
 from ui import (
     VisionHud,
     VisionMouseController,
@@ -99,9 +100,16 @@ class VisionApplication:
         action_result_sink=None,
         frame_sink=None,
         yolo_model_path=None,
+        tracking_mode=TrackingMode.YOLO.value,
+        camera_factory=None, detector_factory=None, comm_factory=None, tablet_factory=None,
     ):
+        self.camera_factory = camera_factory or CameraStream
+        self.detector_factory = detector_factory or FishDetector
+        self.comm_factory = comm_factory or RoboFishComm
+        self.tablet_factory = tablet_factory or TabletTCPServer
         self.camera_index = camera_index
         self.yolo_model_path = yolo_model_path or YOLO_MODEL_PATH
+        self.tracking_mode = TrackingMode(tracking_mode or TrackingMode.YOLO.value)
         self.headless = headless
         self.action_source = action_source
         self.action_result_sink = action_result_sink
@@ -132,6 +140,7 @@ class VisionApplication:
         self._stop_latched_reason = None
         self._last_web_metrics_t = 0.0
         self._forward_calibration = None
+        self._turn_calibration_direction = None
         self.processing_enabled = False
         self._heading_calibration_result = {
             "status": "idle", "progress": 0.0, "sampleCount": 0,
@@ -183,19 +192,19 @@ class VisionApplication:
         print("=" * 60 + "\n")
 
     def _start(self):
-        self.cam = CameraStream(src=self.camera_index).start()
+        self.cam = self.camera_factory(src=self.camera_index).start()
         if not self.cam.ret:
             print("Unable to open camera; check USB connection and camera index.")
             return False
 
-        self.tablet = TabletTCPServer(
+        self.tablet = self.tablet_factory(
             host=TABLET_TCP_HOST, port=TABLET_TCP_PORT
         )
         # WebRTC is the only browser transport. MJPEG is kept as a testable
         # compatibility class, but is not started in the production service.
         self.mjpeg = None
-        self.fish_comm = RoboFishComm()
-        self.detector = FishDetector(
+        self.fish_comm = self.comm_factory()
+        self.detector = self.detector_factory(
             model_path=self.yolo_model_path,
             conf=YOLO_CONF_THRESHOLD,
             imgsz=YOLO_IMG_SIZE,
@@ -407,6 +416,12 @@ class VisionApplication:
             self.turn_session.add(
                 result.direct_marker_world_position, result.frame_time
             )
+        if self.turn_session.active and self._turn_calibration_direction:
+            maintain_turn = getattr(
+                self.fish_comm, "maintain_continuous_turn", None
+            )
+            if callable(maintain_turn):
+                maintain_turn(self._turn_calibration_direction)
 
     def _handle_tablet_commands(self):
         command = self.tablet.get_next_command()
@@ -605,6 +620,19 @@ class VisionApplication:
                 self.runtime.drawn_path["drawing"] = False
                 self.runtime.drawn_path["active"] = False
                 self.runtime.drawn_path["segment"] = 0
+            elif action == "TRACKING_MODE":
+                self.tracking_mode = TrackingMode(payload)
+                self._safe_stop("TRACKING MODE CHANGED", force=True)
+                self.pipeline.reset_motion()
+                if self.tracking_mode == TrackingMode.SINGLE_FISH:
+                    self.pipeline.set_target_track(None)
+                self._heading_calibration_result = {
+                    "status": "idle",
+                    "progress": 0.0,
+                    "sampleCount": 0,
+                    "message": "模式已切换，请重新确认方向",
+                }
+                print(f"Tracking mode changed to {self.tracking_mode.value}.")
             elif action == "START":
                 self._start_tracking(result)
             elif action == "TURN_CALIB":
@@ -700,11 +728,12 @@ class VisionApplication:
         calibration_ready = self.runtime.calibration["H"] is not None
         path_ready = len(self.runtime.drawn_path["pixels"]) >= 2
         selected_track_id = yolo.get("targetTrackId")
-        target_detected = (
-            bool(yolo.get("targetFound"))
-            if selected_track_id is not None
-            else yolo["detectionCount"] == 1
-        )
+        single_fish_mode = self.tracking_mode == TrackingMode.SINGLE_FISH
+        target_detected = bool(result.control_position is not None)
+        if selected_track_id is not None and not single_fish_mode:
+            target_detected = bool(yolo.get("targetFound"))
+        elif selected_track_id is None and not single_fish_mode:
+            target_detected = yolo["detectionCount"] == 1
         position_ready = result.control_position is not None
         heading_ready = (
             self.runtime.heading["world_unit_vector"] is not None
@@ -712,11 +741,11 @@ class VisionApplication:
         )
         calibrating_heading = self._forward_calibration is not None
         if calibrating_heading:
-            elapsed = time.monotonic() - self._forward_calibration["started"]
+            sample_count = len(self._forward_calibration["samples"])
             heading_calibration = {
                 "status": "running",
-                "progress": min(1.0, elapsed / 3.4),
-                "sampleCount": len(self._forward_calibration["samples"]),
+                "progress": min(0.95, sample_count / 60.0),
+                "sampleCount": sample_count,
                 "message": "持续采集运动轨迹，正在评估方向稳定性",
             }
         else:
@@ -729,14 +758,12 @@ class VisionApplication:
             blockers.append("未检测到机器鱼")
         elif selected_track_id is not None and not target_detected:
             blockers.append(f"目标 #{selected_track_id} 暂未识别")
-        elif selected_track_id is None and yolo["detectionCount"] > 1:
+        elif not single_fish_mode and selected_track_id is None and yolo["detectionCount"] > 1:
             blockers.append("检测到多条鱼，请锁定单一目标")
         if not calibration_ready:
             blockers.append("场地尚未标定")
         if not path_ready:
             blockers.append("尚未绘制有效轨迹")
-        if not heading_ready:
-            blockers.append("方向尚未自标定")
         if not position_ready:
             blockers.append("缺少可用于控制的鱼位置")
         if self.turn_session.active:
@@ -755,6 +782,7 @@ class VisionApplication:
             "type": "system.metrics",
             "metrics": {
                 "frame": {"width": int(width), "height": int(height)},
+                "crop": getattr(self.cam, "crop_region", {"x":0,"y":0,"width":1,"height":1}),
                 "frameLatencyMs": max(0.0, (time.time() - result.frame_time) * 1000.0),
                 "yolo": yolo,
                 "overlays": dict(self.presentation.overlay_options),
@@ -773,6 +801,7 @@ class VisionApplication:
                     "headingCalibrated": heading_ready,
                     "headingCalibrating": calibrating_heading,
                     "headingCalibration": heading_calibration,
+                    "trackingMode": self.tracking_mode.value,
                     "canCalibrateHeading": target_detected and not calibrating_heading and not tracking_active,
                     "trackingActive": tracking_active,
                     "canStart": not blockers and not calibrating_heading,
@@ -793,6 +822,7 @@ class VisionApplication:
             "type": "system.metrics",
             "metrics": {
                 "frame": {"width": int(width), "height": int(height)},
+                "crop": getattr(self.cam, "crop_region", {"x":0,"y":0,"width":1,"height":1}),
                 "frameLatencyMs": max(0.0, (time.time() - frame_time) * 1000.0),
                 "yolo": {
                     "enabled": False,
@@ -815,6 +845,7 @@ class VisionApplication:
                     "targetDetected": False,
                     "targetCount": 0,
                     "trackingActive": False,
+                    "trackingMode": self.tracking_mode.value,
                     "canStart": False,
                     "blockers": ["视觉识别未启动"],
                 },
@@ -839,7 +870,14 @@ class VisionApplication:
         state["pixels"].clear()
         state["drawing"] = False
         state["segment"] = 0
+        self._clear_motion_trajectory()
+        if self.presentation is not None and hasattr(self.presentation, "clear_trajectory"):
+            self.presentation.clear_trajectory()
         self.control.stop("PATH CLEARED", clear_path=True)
+
+    def _clear_motion_trajectory(self):
+        if self.runtime is not None and hasattr(self.runtime, "trajectory"):
+            self.runtime.trajectory.clear()
 
     def _start_tracking(self, result):
         calibration = self.runtime.calibration
@@ -900,16 +938,30 @@ class VisionApplication:
             print("Cannot calibrate heading: no single fish is locked.")
             return
         selected_track_id = result.yolo_result.get("targetTrackId")
+        single_fish_mode = self.tracking_mode == TrackingMode.SINGLE_FISH
         if selected_track_id is None and len(result.yolo_result.get("detections", [])) != 1:
-            print("Cannot calibrate heading: exactly one fish must be detected.")
-            return
-        if selected_track_id is not None and not result.yolo_result.get("targetFound"):
+            if not single_fish_mode:
+                print("Cannot calibrate heading: exactly one fish must be detected.")
+                return
+        if selected_track_id is not None and not single_fish_mode and not result.yolo_result.get("targetFound"):
             print(f"Cannot calibrate heading: target #{selected_track_id} is not visible.")
             return
         if not self.fish_comm.ensure_hybrid_mode():
-            print("Cannot calibrate heading: device did not acknowledge vision session.")
+            message = "设备未确认视觉控制会话，请检查机器鱼在线状态"
+            self._heading_calibration_result = {
+                "status": "failed",
+                "progress": 0.0,
+                "sampleCount": 0,
+                "message": message,
+            }
+            print(f"Cannot calibrate heading: {message}")
             return
-        if not self.fish_comm.start_forward_calibration(3200):
+        start_forward = getattr(self.fish_comm, "start_continuous_forward", None)
+        if callable(start_forward):
+            started = start_forward()
+        else:
+            started = self.fish_comm.start_forward_calibration(3200)
+        if not started:
             self._safe_stop("CAL_FORWARD_FAILED", force=True)
             self._heading_calibration_result = {"status": "failed", "progress": 0.0, "sampleCount": 0, "message": "设备未确认前进标定指令"}
             return
@@ -929,28 +981,47 @@ class VisionApplication:
         now = time.monotonic()
         detections = result.yolo_result.get("detections", [])
         selected_track_id = result.yolo_result.get("targetTrackId")
+        single_fish_mode = self.tracking_mode == TrackingMode.SINGLE_FISH
         target_valid = (
             bool(result.yolo_result.get("targetFound"))
             if selected_track_id is not None
             else len(detections) == 1
         )
+        if single_fish_mode:
+            target_valid = result.pixel is not None
         if result.pixel is not None and target_valid:
             state["samples"].append((now, np.asarray(result.pixel, dtype=np.float64), np.asarray(result.control_position, dtype=np.float64) if result.control_position is not None else None))
+            state["lost_frames"] = 0
         else:
             state["lost_frames"] += 1
+        maintain_forward = getattr(self.fish_comm, "maintain_continuous_forward", None)
+        if callable(maintain_forward):
+            maintain_forward()
+        if state["lost_frames"] > 60:
+            self._forward_calibration = None
+            self._fail_heading_calibration("目标连续丢失，已停止方向标定", len(state["samples"]))
+            return
         if now - state["started"] < 3.4:
             return
-        self.fish_comm.stop_now()
-        self._forward_calibration = None
         samples = state["samples"]
         if len(samples) < 20:
-            self._fail_heading_calibration(f"有效轨迹帧不足：{len(samples)} / 20", len(samples))
+            self._heading_calibration_result = {
+                "status": "running",
+                "progress": min(0.95, len(samples) / 20.0),
+                "sampleCount": len(samples),
+                "message": "数据不足，鱼正在连续运动采样",
+            }
             return
         points = np.asarray([sample[1] for sample in samples], dtype=np.float64)
         try:
             estimate = estimate_motion_heading(points)
-        except ValueError as error:
-            self._fail_heading_calibration(str(error), len(samples))
+        except ValueError:
+            self._heading_calibration_result = {
+                "status": "running",
+                "progress": min(0.95, len(samples) / 60.0),
+                "sampleCount": len(samples),
+                "message": "方向数据暂不稳定，鱼正在连续运动采样",
+            }
             return
         pixel_unit = estimate["unit"]
         pixel_distance = estimate["distance"]
@@ -973,7 +1044,9 @@ class VisionApplication:
                     "world_unit_vector": tuple(float(v) for v in world_unit),
                     "control_heading": tuple(float(v) for v in world_unit),
                     "control_heading_source": "MOTION",
-                })
+        })
+        self.fish_comm.stop_now()
+        self._forward_calibration = None
         self.status = "HEADING_READY"
         self._heading_calibration_result = {"status": "completed", "progress": 1.0, "sampleCount": len(samples), "message": f"方向确认完成：{heading['angle_deg']:.1f}°，位移 {pixel_distance:.1f}px，一致性 {consistency:.2f}", "angleDeg": heading["angle_deg"], "distancePx": pixel_distance, "consistency": consistency, "linearity": linearity}
         print(f"Automatic forward heading ready: {heading['angle_deg']:.1f} deg, samples={len(samples)}, travel={pixel_distance:.1f} px, consistency={consistency:.2f}, linearity={linearity:.2f}")
@@ -1005,6 +1078,7 @@ class VisionApplication:
 
     def _toggle_turn_calibration(self, result):
         if self.turn_session.active:
+            self.fish_comm.stop_now()
             try:
                 fit = self.turn_session.finish()
                 save_turn_calibration(TURN_CALIBRATION_PATH, fit)
@@ -1016,6 +1090,7 @@ class VisionApplication:
             self.control.path_guidance.set_turn_radius(
                 fit.direction, fit.radius_m
             )
+            self._turn_calibration_direction = None
             self.status = "TURN CALIBRATED"
             print(f"{fit.direction} turn radius saved: {fit.radius_m:.3f} m")
             return
@@ -1025,13 +1100,32 @@ class VisionApplication:
         if result.direct_marker_world_position is None:
             print("Cannot measure: tail marker must be locked directly.")
             return
+        direction = (
+            "right"
+            if "LEFT" in self.turn_results and "RIGHT" not in self.turn_results
+            else "left"
+        )
+        if not self.fish_comm.ensure_hybrid_mode():
+            self.status = "READY"
+            print("Cannot measure: fish did not acknowledge calibration control.")
+            return
+        start_turn = getattr(self.fish_comm, "start_continuous_turn", None)
+        if not callable(start_turn) or not start_turn(direction):
+            self.fish_comm.stop_now()
+            self.status = "READY"
+            print(f"Cannot measure: failed to start {direction} turn.")
+            return
         self._safe_stop("TURN CALIBRATING", force=self.control.active)
         self._cancel_selection_modes()
         self.turn_session.start(
             result.direct_marker_world_position, result.frame_time
         )
+        self._turn_calibration_direction = direction
         self.status = "TURN CALIBRATING"
-        print("Turn calibration started; click again to fit the circle.")
+        print(
+            f"Turn calibration started with {direction} turn; "
+            "click again to stop and fit the circle."
+        )
 
     def _toggle_marker_roi(self):
         self._safe_stop("SELECT MARKER ROI", force=self.control.active)

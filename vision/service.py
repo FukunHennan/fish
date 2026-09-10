@@ -11,9 +11,11 @@ import math
 import time
 from typing import Callable, Optional
 
+from camera_policy import camera_blocked
+
 import cv2
 from camera_stream import _open_working_capture, _safe_get, _safe_release
-from session import SessionMismatch, VisionSession, VisionState
+from session import SessionMismatch, TrackingMode, VisionSession, VisionState
 
 UNSET = object()
 
@@ -135,6 +137,8 @@ def enumerate_cameras(
 
     for index in probe_indexes:
         name = names[index] if index < len(names) else f"摄像头 {index}"
+        if camera_blocked(index, name):
+            continue
 
         if open_capture is None:
             # Use the exact same DSHOW -> MSMF -> ANY fallback policy as the
@@ -217,6 +221,7 @@ class VisionService:
         "camera.clahe",
         "overlay.set",
         "system.stop",
+        "tracking.mode",
     })
 
     def __init__(self, runner_factory: Callable):
@@ -237,6 +242,7 @@ class VisionService:
         target_device_id=None,
         yolo_model=None,
         target_track_id=None,
+        tracking_mode=TrackingMode.YOLO.value,
     ):
         with self._lock:
             if self._stop_runner is not None:
@@ -247,22 +253,44 @@ class VisionService:
                 target_device_id,
                 target_track_id,
                 yolo_model,
+                tracking_mode,
             )
             self._error = ""
             try:
                 parameters = list(inspect.signature(self._runner_factory).parameters.values())
-                accepts_model = any(
+                has_varargs = any(
                     parameter.kind == inspect.Parameter.VAR_POSITIONAL
-                    or parameter.kind == inspect.Parameter.VAR_KEYWORD
-                    or parameter.name == "yolo_model_path"
                     for parameter in parameters
-                ) or len(parameters) >= 3
-                if accepts_model:
-                    stop_runner = self._runner_factory(
-                        camera_index, self.publish, yolo_model
+                )
+                has_varkw = any(
+                    parameter.kind == inspect.Parameter.VAR_KEYWORD
+                    for parameter in parameters
+                )
+                positional_count = sum(
+                    1 for parameter in parameters
+                    if parameter.kind in (
+                        inspect.Parameter.POSITIONAL_ONLY,
+                        inspect.Parameter.POSITIONAL_OR_KEYWORD,
                     )
-                else:
-                    stop_runner = self._runner_factory(camera_index, self.publish)
+                )
+                accepts_tracking_mode = any(
+                    parameter.name == "tracking_mode"
+                    for parameter in parameters
+                ) or has_varkw or has_varargs or positional_count >= 4
+                accepts_model = any(
+                    parameter.name == "yolo_model_path"
+                    for parameter in parameters
+                ) or has_varkw or has_varargs or positional_count >= 3
+                args = [camera_index, self.publish]
+                kwargs = {}
+                if accepts_model:
+                    args.append(yolo_model)
+                if accepts_tracking_mode:
+                    if has_varkw or any(parameter.name == "tracking_mode" for parameter in parameters):
+                        kwargs["tracking_mode"] = tracking_mode
+                    else:
+                        args.append(tracking_mode)
+                stop_runner = self._runner_factory(*args, **kwargs)
             except Exception as error:
                 session.fail("camera_open_failed", str(error))
                 self._session = session
@@ -287,6 +315,7 @@ class VisionService:
                     "cameraId": None, "cameraIndex": None, "targetDeviceId": None,
                     "targetTrackId": None,
                     "yoloModel": None,
+                    "trackingMode": TrackingMode.YOLO.value,
                     "error": None, "metrics": {}, "lastAction": None,
                 }
             return self._session.snapshot()
@@ -321,6 +350,21 @@ class VisionService:
                 return False
             if action.get("type") in ("overlay.set", "camera.exposure"):
                 allowed_states = (VisionState.PREVIEWING, VisionState.PROCESSING, VisionState.TRACKING)
+            elif action.get("type") == "tracking.mode":
+                allowed_states = (
+                    VisionState.PREVIEWING,
+                    VisionState.PROCESSING,
+                    VisionState.TRACKING,
+                )
+            elif action.get("type") == "path.clear":
+                # Clearing the fish motion trace is also valid in preview:
+                # processing may have just been stopped while the old yellow
+                # trace is still visible in the shared runtime.
+                allowed_states = (
+                    VisionState.PREVIEWING,
+                    VisionState.PROCESSING,
+                    VisionState.TRACKING,
+                )
             else:
                 allowed_states = (VisionState.PROCESSING, VisionState.TRACKING)
             if session.state not in allowed_states:
@@ -328,6 +372,13 @@ class VisionService:
             action = dict(action)
             if session.target_device_id:
                 action["deviceId"] = session.target_device_id
+            if action.get("type") == "tracking.mode":
+                mode = TrackingMode(action.get("mode") or TrackingMode.YOLO.value)
+                session.tracking_mode = mode
+                action["mode"] = mode.value
+                if session.state == VisionState.TRACKING:
+                    session.transition(VisionState.PROCESSING)
+                    self._actions.put("STOP")
             self._actions.put(action)
             session.last_action = {"type": action["type"], "accepted": True}
             self._notify()
@@ -395,6 +446,7 @@ class VisionService:
             session = self._require_session(session_id)
             target_device_id = session.target_device_id
             target_track_id = session.target_track_id
+            tracking_mode = session.tracking_mode.value
             if session.camera_index == camera_index:
                 return session.snapshot()
 
@@ -412,6 +464,7 @@ class VisionService:
             target_device_id,
             session.yolo_model,
             target_track_id,
+            tracking_mode,
         )
         if snapshot is None:
             return self.current_session()
@@ -519,4 +572,5 @@ class VisionService:
                 "state": "running" if self._stop_runner is not None else "stopped",
                 "cameraIndex": self._camera_index,
                 "error": self._error,
+                "trackingMode": self._session.tracking_mode.value if self._session is not None else TrackingMode.YOLO.value,
             }

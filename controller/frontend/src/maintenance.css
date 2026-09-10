@@ -24,6 +24,9 @@
 .ota-device-card small { margin-top:3px; color:var(--muted); font-size:7.5px; }
 .ota-device-card em { color:var(--muted); font-size:7.5px; font-style:normal; }
 .ota-device-card.selected .device-check { border-color:var(--accent); background:var(--accent); }
+.ota-device-progress { grid-column:2 / -1; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:7px; align-items:center; width:100%; }
+.ota-device-progress .ota-progress-track { height:4px; }
+.ota-device-progress b { color:var(--accent); font-size:8px; }
 .device-info-list { display:flex; flex-direction:column; gap:7px; max-height:650px; overflow:auto; padding:10px; }
 .device-info-card { overflow:hidden; border:1px solid var(--line); border-radius:10px; background:#101820; }
 .rgb-controls { display:grid; gap:8px; padding:10px; border-top:1px solid var(--line); }

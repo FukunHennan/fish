@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <WiFiUdp.h>
 #include "DeviceConfig.h"
+#include "DiscoveryNonceWindow.h"
 #include "MotionController.h"
 #include "ControllerClient.h"
 
@@ -12,6 +13,7 @@ public:
     void update();
 private:
     void sendAnnouncement(uint32_t nowMs);
+    void receivePacket();
     void writePacket(const IPAddress& target, const String& payload);
     void probeController(uint32_t nowMs);
     bool probeControllerAt(const IPAddress& target);
@@ -25,4 +27,5 @@ private:
     uint32_t probeOffset_ = 1;
     uint16_t nearProbeStep_ = 0;
     String nonce_;
+    DiscoveryNonceWindow<String> nonces_;
 };

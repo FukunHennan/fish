@@ -41,6 +41,7 @@ void DiscoveryResponder::writePacket(const IPAddress& target, const String& payl
 void DiscoveryResponder::sendAnnouncement(uint32_t nowMs) {
     nonce_=makeNonce();
     lastAnnouncement_=nowMs;
+    nonces_.remember(nonce_,nowMs);
     char proof[65],mac[18];
     formatDeviceMac(mac);
     if(!computeIdentityProof("fish-device-announce-v2",nonce_.c_str(),proof))return;
@@ -64,71 +65,71 @@ void DiscoveryResponder::sendAnnouncement(uint32_t nowMs) {
 bool DiscoveryResponder::probeControllerAt(const IPAddress& target) {
     WiFiClient client;
     client.setTimeout(CONTROLLER_DISCOVERY_SCAN_TIMEOUT_MS);
-    if(!client.connect(target, config_.controllerPort, CONTROLLER_DISCOVERY_SCAN_TIMEOUT_MS))return false;
+    if (!client.connect(target, config_.controllerPort, CONTROLLER_DISCOVERY_SCAN_TIMEOUT_MS)) return false;
     client.print(String("GET /healthz HTTP/1.1\r\nHost: ") + target.toString() + "\r\nConnection: close\r\n\r\n");
     String response;
-    uint32_t started=millis();
-    while(millis()-started<CONTROLLER_DISCOVERY_SCAN_TIMEOUT_MS){
-        while(client.available()){
-            char c=(char)client.read();
-            if(response.length()<180)response+=c;
-            if(response.indexOf("200 OK")>=0&&response.indexOf("\"status\":\"ok\"")>=0){
+    uint32_t started = millis();
+    while (millis() - started < CONTROLLER_DISCOVERY_SCAN_TIMEOUT_MS) {
+        while (client.available()) {
+            char c = (char)client.read();
+            if (response.length() < 180) response += c;
+            if (response.indexOf("200 OK") >= 0 && response.indexOf("\"status\":\"ok\"") >= 0) {
                 client.stop();
                 return true;
             }
         }
-        if(!client.connected())break;
+        if (!client.connected()) break;
         delay(1);
     }
     client.stop();
-    return response.indexOf("200 OK")>=0&&response.indexOf("\"status\":\"ok\"")>=0;
+    return response.indexOf("200 OK") >= 0 && response.indexOf("\"status\":\"ok\"") >= 0;
 }
 
 void DiscoveryResponder::probeController(uint32_t nowMs) {
-    if(nowMs-lastProbe_<CONTROLLER_DISCOVERY_SCAN_INTERVAL_MS)return;
-    lastProbe_=nowMs;
+    if (nowMs - lastProbe_ < CONTROLLER_DISCOVERY_SCAN_INTERVAL_MS) return;
+    lastProbe_ = nowMs;
 
-    uint32_t ip=ipToInteger(WiFi.localIP());
-    uint32_t mask=ipToInteger(WiFi.subnetMask());
-    uint32_t base=ip&mask;
-    uint32_t broadcast=base|(~mask);
-    if(broadcast<=base+1)return;
-    uint32_t hosts=broadcast-base-1;
-    if(hosts>2048)hosts=2048;
+    uint32_t ip = ipToInteger(WiFi.localIP());
+    uint32_t mask = ipToInteger(WiFi.subnetMask());
+    uint32_t base = ip & mask;
+    uint32_t broadcast = base | (~mask);
+    if (broadcast <= base + 1) return;
+    uint32_t hosts = broadcast - base - 1;
+    if (hosts > 2048) hosts = 2048;
 
-    const uint32_t ownIp=ip;
-    const uint32_t gatewayIp=ipToInteger(WiFi.gatewayIP());
-    for(uint8_t attempt=0;attempt<2;attempt++){
-        uint32_t candidateValue=0;
-        while(candidateValue==0){
-            if(nearProbeStep_<CONTROLLER_DISCOVERY_NEAR_SCAN_RADIUS*2){
-                uint32_t distance=(nearProbeStep_/2)+1;
-                bool negative=(nearProbeStep_%2)==1;
+    const uint32_t ownIp = ip;
+    const uint32_t gatewayIp = ipToInteger(WiFi.gatewayIP());
+    for (uint8_t attempt = 0; attempt < 2; attempt++) {
+        uint32_t candidateValue = 0;
+        while (candidateValue == 0) {
+            if (nearProbeStep_ < CONTROLLER_DISCOVERY_NEAR_SCAN_RADIUS * 2) {
+                uint32_t distance = (nearProbeStep_ / 2) + 1;
+                bool negative = (nearProbeStep_ % 2) == 1;
                 nearProbeStep_++;
-                if(negative){
-                    if(ownIp<=base+distance)continue;
-                    candidateValue=ownIp-distance;
-                }else{
-                    if(ownIp+distance>=broadcast)continue;
-                    candidateValue=ownIp+distance;
+                if (negative) {
+                    if (ownIp <= base + distance) continue;
+                    candidateValue = ownIp - distance;
+                } else {
+                    if (ownIp + distance >= broadcast) continue;
+                    candidateValue = ownIp + distance;
                 }
-            }else{
-                uint32_t offset=(probeOffset_%hosts)+1;
+            } else {
+                uint32_t offset = (probeOffset_ % hosts) + 1;
                 probeOffset_++;
-                candidateValue=base+offset;
+                candidateValue = base + offset;
             }
-            if(candidateValue==ownIp||candidateValue==gatewayIp)candidateValue=0;
+            if (candidateValue == ownIp || candidateValue == gatewayIp) candidateValue = 0;
         }
-        IPAddress candidate=integerToIp(candidateValue);
-        if(probeControllerAt(candidate)){
-            controller_.setEndpoint(candidate,config_.controllerPort);
+        IPAddress candidate = integerToIp(candidateValue);
+        if (probeControllerAt(candidate)) {
+            controller_.setEndpoint(candidate, config_.controllerPort);
             return;
         }
     }
 }
 
 void DiscoveryResponder::update() {
-    if (WiFi.status() != WL_CONNECTED) return;
+    if (WiFi.status() != WL_CONNECTED) {if(started_)udp_.stop();started_=false;return;}
     if (!started_) {
         started_ = udp_.begin(DISCOVERY_PORT);
         if (!started_) return;
@@ -137,9 +138,12 @@ void DiscoveryResponder::update() {
     if (!controller_.registered() && (nonce_.length()==0 || now-lastAnnouncement_>=CONTROLLER_DISCOVERY_ANNOUNCE_INTERVAL_MS)) {
         sendAnnouncement(now);
     }
-    if (!controller_.registered() && !controller_.endpointReady()) {
-        probeController(now);
-    }
+    // Drain replies before any blocking fallback probe.
+    for(uint8_t i=0;i<16;i++)receivePacket();
+    if (!controller_.registered() && !controller_.endpointReady()) probeController(millis());
+}
+
+void DiscoveryResponder::receivePacket() {
     int packetSize = udp_.parsePacket();
     if (packetSize <= 0) return;
     if (packetSize > 1400) { while (udp_.available()) udp_.read(); return; }
@@ -150,14 +154,26 @@ void DiscoveryResponder::update() {
     JsonDocument request;
     if (deserializeJson(request, buffer, length)) return;
     char ownMac[18];formatDeviceMac(ownMac);uint16_t offeredPort=0;String offeredProof;
-    if(readControllerOffer(request,String(ownMac),nonce_,offeredPort,offeredProof)){
-        char expected[65];if(computeIdentityProof("fish-controller-offer-v2",nonce_.c_str(),expected)&&offeredProof.equalsIgnoreCase(expected)){
-            controller_.setEndpoint(udp_.remoteIP(),offeredPort);
+    if(String(request["type"]|"")=="controller.offer"){
+        String offeredNonce=request["nonce"]|"";
+        if(nonces_.contains(offeredNonce,millis()) && readControllerOffer(request,String(ownMac),offeredNonce,offeredPort,offeredProof)){
+            char expected[65];
+            if(computeIdentityProof("fish-controller-offer-v2",offeredNonce.c_str(),expected)&&offeredProof.equalsIgnoreCase(expected)){
+                if(!controller_.registered())controller_.setEndpoint(udp_.remoteIP(),offeredPort);
+            }
         }
         return;
     }
     String requestId, nonce;
     if (!readDiscoveryRequest(request, requestId, nonce)) return;
+    if(!controller_.registered() && nonce_.length()>0){
+        char announceProof[65];
+        if(computeIdentityProof("fish-device-announce-v2",nonce_.c_str(),announceProof)){
+            JsonDocument announce;announce["type"]="device.announce";announce["protocolVersion"]=2;
+            announce["nonce"]=nonce_;announce["deviceId"]=ownMac;announce["proof"]=announceProof;
+            String payload;serializeJson(announce,payload);writePacket(udp_.remoteIP(),payload);
+        }
+    }
     char proof[65], mac[18];
     if (!computeIdentityProof("fish-discovery-v1", nonce.c_str(), proof)) return;
     formatDeviceMac(mac);

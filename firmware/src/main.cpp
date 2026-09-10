@@ -50,7 +50,10 @@ void setup(){
 void loop(){
     uint32_t now=millis();
     if(provisioningResetPending){serviceProvisioningReset(now);return;}
-    battery.update(now);ambientLight.update(now);network.update(now);discovery.update();controller.update(now,network.connected());motion.update(now);
+    battery.update(now);ambientLight.update(now);network.update(now,controller.registered());
+    if(network.provisioning()){motion.safeStop();controller.update(now,false);}
+    else {discovery.update();controller.update(now,network.connected());}
+    motion.update(now);
     StatusLightMode lightMode;
     if(network.provisioning()) lightMode=StatusLightMode::Provisioning;
     else if(!network.connected()) lightMode=StatusLightMode::WifiConnecting;

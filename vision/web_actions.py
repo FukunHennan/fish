@@ -37,6 +37,11 @@ def translate_web_action(action, frame_size=None):
     action_type = action.get("type") if isinstance(action, dict) else None
     if action_type in SIMPLE_ACTIONS:
         return SIMPLE_ACTIONS[action_type]
+    if action_type == "tracking.mode":
+        mode = action.get("mode")
+        if mode not in ("yolo", "single_fish"):
+            return None
+        return "TRACKING_MODE", mode
     if action_type in ("calibration.point", "heading.point"):
         point = _point(action, frame_size=frame_size)
         if point is None:

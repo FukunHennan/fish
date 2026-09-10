@@ -13,7 +13,7 @@ Go 中央控制器（8081）
    └── Python 视觉服务（127.0.0.1:8091）
 ```
 
-浏览器不直接连接 ESP32，也不直接连接 Python。Go 是设备、视觉、权限和公网访问的统一入口。
+浏览器不直接连接 ESP32，也不直接连接 Python。Go 是设备、视觉、权限和网络访问的统一入口。
 
 ## 快速开始
 
@@ -32,8 +32,8 @@ scripts\start.bat
 启动脚本负责构建并启动 Go 控制器。要使用当前指定的 `8098` GUI，再单独运行：
 
 ```bash
-cd controller/frontend/gui-redesign-demo
-npx --yes vite --host 127.0.0.1 --port 8098
+cd controller/frontend
+npm run dev -- --host 127.0.0.1
 ```
 
 打开电脑端 GUI：
@@ -86,7 +86,8 @@ USB 烧录需要连接设备后执行 PlatformIO Upload。仅修改电脑端 GUI
 
 ## 配置提醒
 
-- `config/deployment.json` 和 `config/frpc.toml` 只放本机，不要提交真实密钥。
-- 公网访问需要先完成 FRP 配置、域名解析、HTTPS 和登录权限。
+- `config/deployment.json` 和 `config/frpc.toml` 是本机运行配置。
+- 当前平台面向内部研发和受控环境，暂不以公网或商用部署为目标，也不把相关安全性作为当前开发重点。
+- 如需临时使用 FRP，主要用于网络连通性和视频链路调试，不作为当前重点。
 - OTA 只能由管理员发起。
 - 设备断线、控制器心跳超时、视觉异常和 OTA 开始时都应停止运动。

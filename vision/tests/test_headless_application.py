@@ -62,6 +62,23 @@ class HeadlessVisionApplicationTests(unittest.TestCase):
         app.request_exit()
         self.assertTrue(app._exit_requested)
 
+    def test_clear_path_also_clears_motion_trajectory(self):
+        app = VisionApplication.__new__(VisionApplication)
+        cleared = []
+        app.runtime = SimpleNamespace(
+            drawn_path={"pixels": [(1, 2)], "drawing": False, "active": False, "segment": 2},
+            trajectory=deque([(3, 4), (5, 6)]),
+        )
+        app.presentation = SimpleNamespace(clear_trajectory=lambda: cleared.append(True) or app.runtime.trajectory.clear())
+        app.control = SimpleNamespace(stop=lambda *args, **kwargs: None)
+        app._safe_stop = lambda *args, **kwargs: None
+
+        app._clear_path()
+
+        self.assertEqual(list(app.runtime.trajectory), [])
+        self.assertEqual(app.runtime.drawn_path["pixels"], [])
+        self.assertEqual(cleared, [True])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -14,9 +14,13 @@ def _default_model_factory(model_path: str):
     return YOLO(model_path)
 
 
-def resolve_inference_device(requested, model_device):
-    if isinstance(requested, int) and str(model_device).lower().startswith("cpu"):
-        return "cpu"
+def resolve_inference_device(requested, model_device, cuda_available=None):
+    # Model weights normally load on CPU before predict selects the device.
+    if isinstance(requested, int):
+        if cuda_available is None:
+            import torch
+            cuda_available = torch.cuda.is_available() and requested < torch.cuda.device_count()
+        return requested if cuda_available else "cpu"
     return requested
 
 
@@ -1544,6 +1548,8 @@ class VisionPipeline:
         self.velocity_estimator = velocity_estimator
         self._latency_compensator = latency_compensator
         self.target_track_id = None
+        self._target_hold_center = None
+        self._target_hold_max_distance_px = 90.0
 
     def toggle_clahe(self) -> bool:
         self.use_clahe = not self.use_clahe
@@ -1559,6 +1565,7 @@ class VisionPipeline:
         self.target_track_id = (
             int(track_id) if track_id is not None else None
         )
+        self._target_hold_center = None
         self.reset_motion()
 
     def _select_target(self, yolo_result):
@@ -1576,6 +1583,16 @@ class VisionPipeline:
             ),
             None,
         )
+        if target is None and len(detections) == 1 and self._target_hold_center is not None:
+            candidate = detections[0]
+            center = candidate.get("center")
+            if center is not None:
+                distance = float(
+                    ((float(center[0]) - self._target_hold_center[0]) ** 2
+                     + (float(center[1]) - self._target_hold_center[1]) ** 2) ** 0.5
+                )
+                if distance <= self._target_hold_max_distance_px:
+                    target = candidate
         selected["targetFound"] = target is not None
         if target is None:
             selected.update({
@@ -1591,6 +1608,10 @@ class VisionPipeline:
             "confidence": float(target.get("confidence", 0.0)),
             "track_id": target.get("trackId"),
         })
+        self._target_hold_center = (
+            float(target["center"][0]),
+            float(target["center"][1]),
+        )
         return selected
 
     def process(self, frame, frame_time: float, homography=None) -> VisionFrameResult:

@@ -8,6 +8,7 @@ RUNTIME="$CONTROLLER/.runtime"
 EXE="$RUNTIME/fish-controller"
 FRPC_CONFIG="$ROOT/config/frpc.toml"
 FRPC_LOG="$RUNTIME/frpc.log"
+CONTROLLER_LOG="$RUNTIME/fish-controller.log"
 CONTROLLER_PID="$RUNTIME/fish-controller.pid"
 FRPC_PID="$RUNTIME/frpc.pid"
 
@@ -40,15 +41,20 @@ mkdir -p "$RUNTIME"
 echo "[3/4] Building Go controller..."
 (cd "$CONTROLLER" && go build -o "$EXE" ./cmd/fish-controller)
 
-if pgrep -f "fish-controller$" >/dev/null 2>&1; then
-  echo "[INFO] An existing Fish Controller is running. Stopping it first..."
-  pkill -f "fish-controller$" || true
-  sleep 1
+if [[ -f "$CONTROLLER_PID" ]]; then
+  OLD_PID="$(cat "$CONTROLLER_PID" 2>/dev/null || true)"
+  if [[ "$OLD_PID" =~ ^[0-9]+$ ]] && kill -0 "$OLD_PID" >/dev/null 2>&1; then
+    echo "[INFO] Fish Controller already running (pid=$OLD_PID)."
+  else
+    rm -f "$CONTROLLER_PID"
+  fi
 fi
 
-echo "[4/4] Starting Fish Controller..."
-"$EXE" >/dev/null 2>&1 &
-echo $! > "$CONTROLLER_PID"
+if [[ ! -f "$CONTROLLER_PID" ]]; then
+  echo "[4/4] Starting Fish Controller..."
+  "$EXE" >>"$CONTROLLER_LOG" 2>&1 &
+  echo $! > "$CONTROLLER_PID"
+fi
 
 if [[ -f "$FRPC_CONFIG" ]]; then
   FRPC_BIN="${FISH_FRPC:-}"

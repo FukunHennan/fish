@@ -328,7 +328,6 @@ func TestUserCannotAccessAdminOnlyEndpoints(t *testing.T) {
 	}{
 		{http.MethodGet, "/api/auth/users", ""},
 		{http.MethodGet, "/api/firmware", ""},
-		{http.MethodGet, "/api/firmware/current.bin", ""},
 		{http.MethodPost, "/api/ota", `{}`},
 		{http.MethodPost, "/api/emergency-stop", `{}`},
 	}
@@ -452,7 +451,7 @@ func TestVisionDeviceCommandNormalizesOutOfRangeMotion(t *testing.T) {
 	}
 	message := connection.sent[0].(map[string]any)
 	payload := message["payload"].(map[string]any)
-	if payload["frequency"] != 5.0 || payload["amplitude"] != 0.0 || payload["bias"] != 90.0 {
+	if payload["frequency"] != 5.0 || payload["amplitude"] != 45.0 || payload["bias"] != -45.0 {
 		t.Fatalf("视觉参数没有被控制器归一化: %#v", payload)
 	}
 }
@@ -497,7 +496,7 @@ func TestVisionDeviceCommandRoutesToExplicitTargetAmongMultipleFish(t *testing.T
 		t.Fatalf("command=%v", message["command"])
 	}
 	payload := message["payload"].(map[string]any)
-	if payload["mode"] != "forward" || payload["frequency"] != 2.0 || payload["amplitude"] != 22.0 {
+	if payload["mode"] != "forward" || payload["frequency"] != 2.5 || payload["amplitude"] != 22.0 {
 		t.Fatalf("payload=%+v", payload)
 	}
 }

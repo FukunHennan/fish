@@ -1162,6 +1162,9 @@ class VisionPresentation:
             if (cx - last[0]) ** 2 + (cy - last[1]) ** 2 >= 9.0:
                 self.trajectory.append((cx, cy))
 
+    def clear_trajectory(self):
+        self.trajectory.clear()
+
     def _draw_guidance(self, image, result, homography, decision):
         guidance = None if decision is None else decision.guidance
         if guidance is None or homography is None or result.pixel is None:

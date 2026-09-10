@@ -505,6 +505,21 @@ h1 { margin-top: 2px; font-size: 15px; line-height: 1.2; }
 .setting input[type="range"] { padding:0; accent-color:var(--accent); }
 .firmware-status { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; padding:10px; border:1px solid var(--line); border-radius:12px; background:var(--panel-2); }
 .firmware-status small { min-width:0; color:var(--muted); font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ota-summary { display:flex; align-items:center; justify-content:space-between; gap:14px; margin-bottom:10px; padding-bottom:12px; border-bottom:1px solid var(--line); }
+.ota-summary > div { min-width:0; }
+.ota-summary .section-kicker { display:block; margin-bottom:4px; font-size:8px; }
+.ota-summary strong, .ota-summary small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ota-summary strong { color:var(--text); font-size:13px; }
+.ota-summary small { margin-top:4px; color:var(--muted); font-size:9px; }
+.ota-progress-block { display:grid; gap:6px; margin-top:10px; }
+.ota-progress-block.overall { margin-top:14px; padding-top:12px; border-top:1px solid var(--line); }
+.ota-progress-heading { display:flex; justify-content:space-between; gap:8px; color:var(--muted); font-size:9px; }
+.ota-progress-heading b, .ota-device-progress b { color:var(--accent); font-weight:900; }
+.ota-progress-track { display:block; height:6px; overflow:hidden; border-radius:99px; background:#1c2a31; }
+.ota-progress-track i { display:block; height:100%; border-radius:inherit; background:var(--accent); transition:width .45s ease-out; }
+.ota-progress-track.indeterminate i { width:42% !important; background:linear-gradient(90deg,transparent,var(--accent),transparent); animation:ota-progress-signal 1.15s ease-in-out infinite; }
+@keyframes ota-progress-signal { from { transform:translateX(-120%); } to { transform:translateX(250%); } }
+.ota-complete { margin-top:10px !important; color:var(--green) !important; }
 .settings-card .clean-device-list { display:grid; gap:10px; max-height:520px; overflow:auto; padding:0; }
 .settings-card .clean-device-card { display:grid; gap:10px; padding:10px; border-radius:14px; background:var(--panel-2); }
 .settings-card .clean-device-card header { padding:0 0 8px; background:transparent; }

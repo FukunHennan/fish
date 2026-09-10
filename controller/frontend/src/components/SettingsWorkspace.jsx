@@ -166,27 +166,28 @@ function RgbSettings({
               <strong>{deviceLabel(device)}</strong>
               <small>{device.deviceId} · {device.online ? "可以下发" : "设备离线"}</small>
             </div>
-            <label className="settings-color">
-              <span>颜色</span>
-              <input type="color" value={rgbColor} onChange={(event) => setRgbColor(event.target.value)} />
-            </label>
-            <label className="settings-select">
-              <span>色序</span>
-              <select value={rgbOrder} onChange={(event) => setRgbOrder(event.target.value)}>
-                {["RGB", "GRB", "RBG", "GBR", "BRG", "BGR"].map((order) => <option key={order}>{order}</option>)}
-              </select>
-            </label>
-            <label className="settings-range compact">
-              <span>亮度 <b>{rgbBrightness}</b></span>
-              <input
-                type="range"
-                min="1"
-                max="255"
-                value={rgbBrightness}
-                onChange={(event) => setRgbBrightness(event.target.value)}
-                onPointerUp={() => setRgb(device, device.rgbMode === "SOLID" ? "SOLID" : "AUTO")}
-                onKeyUp={() => setRgb(device, device.rgbMode === "SOLID" ? "SOLID" : "AUTO")}
-              />
+              <label className="settings-color">
+                <span>颜色</span>
+                <input type="color" value={rgbColor} disabled={!device.online} onChange={(event) => setRgbColor(event.target.value)} />
+              </label>
+              <label className="settings-select">
+                <span>色序</span>
+                <select value={rgbOrder} disabled={!device.online} onChange={(event) => setRgbOrder(event.target.value)}>
+                  {["RGB", "GRB", "RBG", "GBR", "BRG", "BGR"].map((order) => <option key={order}>{order}</option>)}
+                </select>
+              </label>
+              <label className="settings-range compact">
+                <span>亮度 <b>{rgbBrightness}</b></span>
+                <input
+                  type="range"
+                  min="1"
+                  max="255"
+                  value={rgbBrightness}
+                  disabled={!device.online}
+                  onChange={(event) => setRgbBrightness(event.target.value)}
+                  onPointerUp={() => setRgb(device, device.rgbMode === "SOLID" ? "SOLID" : "AUTO")}
+                  onKeyUp={() => setRgb(device, device.rgbMode === "SOLID" ? "SOLID" : "AUTO")}
+                />
             </label>
             <div className="settings-inline-actions">
               <button type="button" disabled={!device.online} onClick={() => setRgb(device, "SOLID")}>应用颜色</button>
@@ -206,7 +207,7 @@ function OtaSettings({
   firmwareFile,
   setFirmwareFile,
   uploading,
-  uploadFirmware,
+  uploadProgress,
   startOta,
   otaFeedback,
   otaSelectedDevices,
@@ -214,14 +215,35 @@ function OtaSettings({
   selectOtaOnline,
   toggleOtaDevice,
 }) {
+  const activeDevices = devices.filter((device) => device.otaState && device.otaState !== "IDLE");
+  const otaRunning = activeDevices.some((device) => ["DOWNLOADING", "REBOOTING"].includes(device.otaState));
+  const otaComplete = activeDevices.length > 0 && activeDevices.every((device) => device.otaState === "REBOOTING");
+  const otaStateLabel = {
+    DOWNLOADING: "下载中",
+    REBOOTING: "即将重启",
+    FAILED: "失败",
+  };
+  const progressTrack = (device, overall = false) => {
+    const active = overall || device?.otaState === "DOWNLOADING";
+    const progress = Number(device?.otaProgress) || 0;
+    return (
+      <span className={`ota-progress-track ${active ? "indeterminate" : ""}`}>
+        <i style={active ? undefined : { width: `${progress}%` }} />
+      </span>
+    );
+  };
+
   return (
     <SettingsBlock title="固件与 OTA" full>
-      <p className="settings-note">OTA 只能由管理员发起，升级前设备会停止并在完成后重启。</p>
-      <div className="firmware-status">
+      <div className="ota-summary">
+        <div>
+          <span className="section-kicker">FIRMWARE</span>
+          <strong>{firmwareInfo.available ? firmwareInfo.name : "尚未准备固件"}</strong>
+          <small>{firmwareInfo.available ? `${formatBytes(firmwareInfo.size)} · SHA-256 已校验` : "上传一个 ESP32 .bin 文件开始"}</small>
+        </div>
         <span className={`firmware-ready ${firmwareInfo.available ? "ready" : ""}`}>
-          {firmwareInfo.available ? "READY" : "NO FIRMWARE"}
+          {firmwareInfo.available ? "已就绪" : "待上传"}
         </span>
-        <small>{firmwareInfo.available ? `${firmwareInfo.name} · ${formatBytes(firmwareInfo.size)}` : "请选择电脑上的 firmware.bin"}</small>
       </div>
       <label className="local-bin-picker">
         <input
@@ -229,33 +251,25 @@ function OtaSettings({
           accept=".bin,application/octet-stream"
           onChange={(event) => setFirmwareFile(event.target.files?.[0] || null)}
         />
-        <strong>{firmwareFile ? firmwareFile.name : "选择固件 BIN"}</strong>
-        <small>用于 ESP32 OTA 升级</small>
+        <strong>{firmwareFile ? firmwareFile.name : "选择 firmware.bin"}</strong>
+        <small>{firmwareFile ? formatBytes(firmwareFile.size) : "点击选择本地固件"}</small>
       </label>
-      {firmwareFile && (
-        <div className="local-file-meta">
-          <span>本地文件</span><b>{firmwareFile.name}</b>
-          <span>大小</span><b>{formatBytes(firmwareFile.size)}</b>
-        </div>
-      )}
-      {firmwareInfo.available && (
-        <div className="firmware-meta compact">
-          <div><span>SHA-256</span><code>{firmwareInfo.sha256}</code></div>
-        </div>
-      )}
       <div className="settings-actions">
-        <button className="action" type="button" disabled={!firmwareFile || uploading} onClick={uploadFirmware}>
-          {uploading ? "上传校验中…" : "上传固件"}
-        </button>
-        <button className="ghost-action" type="button" disabled={!firmwareInfo.available || !otaSelectedDevices.length || uploading} onClick={startOta}>
-          OTA 下发 {otaSelectedDevices.length ? `(${otaSelectedDevices.length})` : ""}
+        <button className="action" type="button" disabled={(!firmwareInfo.available && !firmwareFile) || !otaSelectedDevices.length || uploading || otaRunning} onClick={startOta}>
+          {uploading ? `准备中 ${uploadProgress}%` : "开始升级"} {otaSelectedDevices.length ? `· ${otaSelectedDevices.length} 台` : ""}
         </button>
       </div>
+      {uploading && (
+        <div className="ota-progress-block">
+          <div className="ota-progress-heading"><span>正在上传固件</span><b>{uploadProgress}%</b></div>
+          <div className="ota-progress-track"><i style={{ width: `${uploadProgress}%` }} /></div>
+        </div>
+      )}
       <div className="ota-target-header">
-        <div><span className="sidebar-label no-pad">升级目标</span><small>已选择 {otaSelectedDevices.length} 台</small></div>
+        <div><span className="sidebar-label no-pad">升级目标</span><small>{otaSelectedDevices.length} 台在线设备已选择</small></div>
         <div>
-          <button type="button" onClick={selectOtaOnline}>全选在线</button>
-          <button type="button" onClick={() => toggleOtaDevice("clear")}>取消选择</button>
+          <button type="button" onClick={selectOtaOnline}>全选</button>
+          <button type="button" onClick={() => toggleOtaDevice("clear")}>清空</button>
         </div>
       </div>
       <div className="ota-device-grid">
@@ -271,11 +285,24 @@ function OtaSettings({
             >
               <span className="device-check">{selected ? "✓" : ""}</span>
               <span><strong>{deviceLabel(device)}</strong><small>{device.deviceId}</small></span>
-              <em>{device.online ? "在线" : "离线"}</em>
+              <em>{device.online ? (otaStateLabel[device.otaState] || "在线") : "离线"}</em>
+              {device.otaState && device.otaState !== "IDLE" && (
+                <span className="ota-device-progress">
+                  {progressTrack(device)}
+                  <b>{device.otaState === "DOWNLOADING" ? "进行中" : `${Number(device.otaProgress) || 0}%`}</b>
+                </span>
+              )}
             </button>
           );
         })}
       </div>
+      {otaRunning && (
+        <div className="ota-progress-block overall">
+          <div className="ota-progress-heading"><span>正在升级 · {activeDevices.length} 台设备</span><b>进行中</b></div>
+          {progressTrack(null, true)}
+        </div>
+      )}
+      {otaComplete && <p className="ota-complete">设备已完成写入，正在重启并重新上线。</p>}
       <p className="feedback" aria-live="polite">{otaFeedback}</p>
     </SettingsBlock>
   );
@@ -294,7 +321,7 @@ export default function SettingsWorkspace({
   firmwareFile = null,
   setFirmwareFile = () => {},
   uploading = false,
-  uploadFirmware = () => {},
+  uploadProgress = 0,
   startOta = () => {},
   otaFeedback = "",
   otaSelectedDevices = [],
@@ -373,7 +400,7 @@ export default function SettingsWorkspace({
         firmwareFile={firmwareFile}
         setFirmwareFile={setFirmwareFile}
         uploading={uploading}
-        uploadFirmware={uploadFirmware}
+        uploadProgress={uploadProgress}
         startOta={startOta}
         otaFeedback={otaFeedback}
         otaSelectedDevices={otaSelectedDevices}

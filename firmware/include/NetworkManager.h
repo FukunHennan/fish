@@ -9,20 +9,24 @@ class NetworkManager {
 public:
     explicit NetworkManager(ConfigStore& store);
     void begin(DeviceConfig& config);
-    void update(uint32_t nowMs);
+    void update(uint32_t nowMs, bool registered);
     bool connected() const;
     bool provisioning() const;
 private:
     void connect();
     void startProvisioning();
     void registerRoutes();
+    String scanNetworksJson();
     void printConnectionInfo();
     ConfigStore& store_;
     DeviceConfig* config_ = nullptr;
     NetworkPolicy policy_;
     WebServer server_{80};
     DNSServer dnsServer_;
+    bool uploadOk_ = false;
+    bool uploadFailed_ = false;
     bool portalStarted_ = false;
     bool lastConnected_ = false;
     uint32_t lastReconnect_ = 0;
+    String scannedNetworksJson_ = "{\"networks\":[]}";
 };

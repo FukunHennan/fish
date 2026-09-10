@@ -15,11 +15,20 @@ import numpy as np
 from control_coordinates import ControlCoordinateMapper
 from main import VisionApplication
 from navigation import VelocityEstimator
-from perception import ReferenceSource
 
 
 class TrackingVisionApplication(VisionApplication):
     """Run path tracking in image-derived coordinates when no field map exists."""
+
+    @staticmethod
+    def _path_start_heading(path_points):
+        points = np.asarray(path_points, dtype=np.float64)
+        for start, end in zip(points[:-1], points[1:]):
+            delta = end - start
+            distance = float(np.linalg.norm(delta))
+            if distance > 1e-6:
+                return delta / distance
+        return None
 
     def _start(self):
         if not super()._start():
@@ -86,7 +95,9 @@ class TrackingVisionApplication(VisionApplication):
             position=position,
             frame_time=result.frame_time,
             now=time.monotonic(),
-            allow_course_update=result.reference.source == ReferenceSource.MARKER,
+            # The fish's own visual displacement is the only reliable heading
+            # feedback when field markers are unavailable.
+            allow_course_update=True,
             speed_mps=speed,
         )
         self.status = decision.status
@@ -109,6 +120,10 @@ class TrackingVisionApplication(VisionApplication):
     def _start_tracking(self, result):
         drawn = self.runtime.drawn_path
         heading = self.runtime.heading
+        # A second run must start from a fresh navigation state even when the
+        # previous run ended because it reached the path endpoint.
+        self.control.stop("RESTARTING")
+        self._stop_latched_reason = None
         if self.turn_session.active:
             print("Complete turn calibration first.")
             return
@@ -120,15 +135,18 @@ class TrackingVisionApplication(VisionApplication):
             print("Cannot start: no reliable fish position.")
             return
 
-        self._promote_pixel_heading(self._field_homography(), result.pixel)
-        startup_heading = heading.get("control_heading") or heading.get("world_unit_vector")
-        if startup_heading is None:
-            print("Cannot start: run direction calibration first.")
-            return
-
         path_control = self.control_mapper.map_points(
             drawn["pixels"], self._field_homography()
         )
+        self._promote_pixel_heading(self._field_homography(), result.pixel)
+        startup_heading = (
+            heading.get("control_heading")
+            or heading.get("world_unit_vector")
+            or self._path_start_heading(path_control)
+        )
+        if startup_heading is None:
+            print("Cannot start: path has no usable direction.")
+            return
         try:
             initial = self.control.prepare(
                 path_control, position, result.frame_time, startup_heading
@@ -139,7 +157,7 @@ class TrackingVisionApplication(VisionApplication):
             return
 
         start_distance = float(np.linalg.norm(
-            np.asarray(position) - self.control.path_guidance.path[0]
+            np.asarray(position) - np.asarray(path_control[0])
         ))
         if start_distance > 0.40:
             self.control.stop("PATH INVALID", clear_path=True)
@@ -158,7 +176,7 @@ class TrackingVisionApplication(VisionApplication):
         self.status = self.control.status
         print(
             f"Tracking started in {self._control_mapping().mode} coordinates "
-            f"with {len(self.control.path_guidance.path)} path points."
+            f"with {len(path_control)} path points."
         )
 
     def _publish_web_metrics(self, result):
@@ -178,15 +196,28 @@ class TrackingVisionApplication(VisionApplication):
         workflow = payload.get("metrics", {}).get("workflow", {})
         blockers = [
             value for value in workflow.get("blockers", [])
-            if value not in ("场地尚未标定", "缺少可用于控制的鱼位置")
+            if value not in (
+                "场地尚未标定",
+                "缺少可用于控制的鱼位置",
+            )
         ]
         position_ready = result.pixel is not None
         if not position_ready:
             blockers.append("缺少可用于控制的鱼位置")
+        heading_ready = (
+            self.runtime.heading.get("control_heading") is not None
+            or self.runtime.heading.get("world_unit_vector") is not None
+        )
         workflow.update({
             "positionReady": position_ready,
+            "targetDetected": position_ready if self.tracking_mode.value == "single_fish" else workflow.get("targetDetected", position_ready),
             "fieldCalibrated": self._field_homography() is not None,
             "controlCoordinateMode": self._control_mapping().mode,
+            "headingCalibrated": heading_ready,
+            "headingSource": (
+                self.runtime.heading.get("control_heading_source")
+                or ("PATH" if not heading_ready else "CALIBRATED")
+            ),
             "canStart": not blockers and not workflow.get("headingCalibrating", False),
             "blockers": blockers,
         })
@@ -194,6 +225,6 @@ class TrackingVisionApplication(VisionApplication):
             workflow["stage"] = "TRACKING"
         elif workflow.get("headingCalibrating"):
             workflow["stage"] = "HEADING_CALIBRATING"
-        elif workflow.get("headingCalibrated") and not blockers:
+        elif not blockers:
             workflow["stage"] = "READY"
         sink(payload)

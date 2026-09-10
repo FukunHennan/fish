@@ -1,12 +1,16 @@
 package web
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 )
 
 type controlLease struct {
+	MotionExpired bool      `json:"motionExpired"`
 	DeviceID      string    `json:"deviceId"`
 	ClientID      string    `json:"clientId,omitempty"`
 	OwnerID       string    `json:"ownerId"`
@@ -20,6 +24,7 @@ type controlLease struct {
 
 type leaseStore struct {
 	mu        sync.Mutex
+	path      string
 	ttl       time.Duration
 	leases    map[string]controlLease
 	onRelease func(string)
@@ -32,9 +37,14 @@ func newLeaseStore(ttl time.Duration) *leaseStore {
 func (l *leaseStore) cleanupLocked(now time.Time) []string {
 	var expired []string
 	for id, lease := range l.leases {
-		if now.After(lease.ExpiresAt) {
+		if now.After(lease.ExpiresAt) && !lease.MotionExpired {
 			l.stopLocked(id)
-			delete(l.leases, id)
+			if lease.OwnerID == "vision-bot" {
+				delete(l.leases, id)
+			} else {
+				lease.MotionExpired = true
+				l.leases[id] = lease
+			}
 			expired = append(expired, id)
 		}
 	}
@@ -55,6 +65,10 @@ func (l *leaseStore) admit(deviceID string, user authUser, clientID string, requ
 	now := time.Now()
 	l.cleanupLocked(now)
 	lease, exists := l.leases[deviceID]
+	// Even STOP must not interfere with another browser's active lease.
+	if exists && (lease.OwnerID != user.ID || lease.ClientID != clientID) {
+		return false
+	}
 	if required && (!exists || lease.OwnerID != user.ID || lease.ClientID != clientID) {
 		return false
 	}
@@ -62,6 +76,7 @@ func (l *leaseStore) admit(deviceID string, user authUser, clientID string, requ
 		return false
 	}
 	if exists && lease.OwnerID == user.ID && lease.ClientID == clientID {
+		lease.MotionExpired = false
 		lease.ExpiresAt, lease.LastCommandAt = now.Add(l.ttl), now
 		l.leases[deviceID] = lease
 	}
@@ -104,12 +119,8 @@ func (l *leaseStore) releaseIdleVision(active func(string) bool) bool {
 func (l *leaseStore) snapshot() map[string]controlLease {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	now := time.Now()
 	out := make(map[string]controlLease, len(l.leases))
 	for id, lease := range l.leases {
-		if now.After(lease.ExpiresAt) {
-			continue
-		}
 		out[id] = lease
 	}
 	return out
@@ -154,22 +165,23 @@ func (l *leaseStore) acquireExclusive(deviceID string, user authUser, mode strin
 	if current, ok := l.leases[deviceID]; !ok || current.OwnerID != user.ID || current.ClientID != clientID {
 		l.stopLocked(deviceID)
 	}
-	released := make([]string, 0, 1)
-	for id, lease := range l.leases {
-		if id == deviceID || lease.OwnerID != user.ID {
-			continue
-		}
-		delete(l.leases, id)
-		l.stopLocked(id)
-		released = append(released, id)
-	}
+	// Exclusivity is per device; a user may hold several devices.
 	lease := controlLease{
 		ClientID: clientID,
 		DeviceID: deviceID, OwnerID: user.ID, OwnerName: user.Name, OwnerEmail: user.Email,
 		Mode: mode, AcquiredAt: now, ExpiresAt: now.Add(l.ttl), LastCommandAt: now,
 	}
+	previous, existed := l.leases[deviceID]
 	l.leases[deviceID] = lease
-	return lease, released, true
+	if err := l.saveLocked(); err != nil {
+		if existed {
+			l.leases[deviceID] = previous
+		} else {
+			delete(l.leases, deviceID)
+		}
+		return previous, nil, false
+	}
+	return lease, nil, true
 }
 
 func (l *leaseStore) acquireBot(deviceID, botName, mode string) (controlLease, bool) {
@@ -192,6 +204,10 @@ func (l *leaseStore) release(deviceID string, user authUser, force bool, clients
 	}
 	l.stopLocked(deviceID)
 	delete(l.leases, deviceID)
+	if err := l.saveLocked(); err != nil {
+		l.leases[deviceID] = current
+		return false
+	}
 	return true
 }
 
@@ -212,6 +228,7 @@ func (l *leaseStore) touch(deviceID string, user authUser) bool {
 	if !ok || current.OwnerID != user.ID {
 		return false
 	}
+	current.MotionExpired = false
 	current.LastCommandAt = now
 	current.ExpiresAt = now.Add(l.ttl)
 	l.leases[deviceID] = current
@@ -234,4 +251,50 @@ func canControl(user authUser) bool {
 
 func canAdmin(user authUser) bool {
 	return user.Status == "active" && user.Role == "Admin"
+}
+
+// Reservations survive service restarts; transport sessions never resume motion.
+func (l *leaseStore) loadReservations(path string) error {
+	l.path = path
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err = json.Unmarshal(data, &l.leases); err != nil {
+		return err
+	}
+	if l.leases == nil {
+		l.leases = map[string]controlLease{}
+	}
+	for id, lease := range l.leases {
+		lease.MotionExpired = true
+		lease.ClientID = ""
+		l.leases[id] = lease
+	}
+	return nil
+}
+func (l *leaseStore) saveLocked() error {
+	if l.path == "" {
+		return nil
+	}
+	reservations := map[string]controlLease{}
+	for id, lease := range l.leases {
+		if lease.OwnerID != "vision-bot" {
+			reservations[id] = lease
+		}
+	}
+	data, err := json.Marshal(reservations)
+	if err != nil {
+		return err
+	}
+	if err = os.MkdirAll(filepath.Dir(l.path), 0700); err != nil {
+		return err
+	}
+	if err = os.WriteFile(l.path+".tmp", data, 0600); err != nil {
+		return err
+	}
+	return os.Rename(l.path+".tmp", l.path)
 }

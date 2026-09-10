@@ -15,6 +15,8 @@ const MODE_LABELS = {
 };
 
 export default function ManualInspector({
+  keyProfile = { keys: {}, enabled: false },
+  onKeysChange = () => {},
   device = null,
   user = null,
   devices = [],
@@ -77,14 +79,31 @@ export default function ManualInspector({
 
           <section className={`inspector-section manual-lease-panel ${lease.className}`}>
             <div className="manual-lease-head"><strong>控制权</strong><b>{lease.label}</b></div>
-            {lease.mine && <button className="lease-button release" type="button" disabled={leaseBusy} onClick={onRelease}>停止并释放控制权</button>}
+            {lease.mine && <button className="lease-button release" type="button" disabled={leaseBusy} onClick={() => onRelease(false)}>停止并释放控制权</button>}
             {!device.lease && <button className="lease-button claim" type="button" disabled={leaseBusy} onClick={onClaim}>接管当前设备</button>}
+            {device.lease && !lease.mine && device.lease.ownerId === user?.id && <button type="button" onClick={onClaim}>在本窗口恢复控制</button>}
+            {device.lease && !lease.mine && user?.role === "Admin" && <button type="button" onClick={() => onRelease(true)}>强制释放</button>}
             {device.lease && !lease.mine && <p className="lease-note">{lease.owner} 正在控制</p>}
+          </section>
+
+          <section className="inspector-section">
+            <details><summary>自定义按键</summary>
+              <label><input type="checkbox" checked={keyProfile.enabled} onChange={e => onKeysChange({ ...keyProfile, enabled: e.target.checked })} /> 多鱼键盘控制</label>
+              <small>启用后，切换所选鱼仍可用此组按键控制。空格停止本窗口键盘控制的鱼。</small>
+              {[["forward", "前进"], ["left", "左转"], ["right", "右转"], ["stop", "停止"]].map(([mode, label]) => (
+                <label className="range-row" key={mode}><span>{label}</span><input aria-label={`${label}按键`} readOnly value={(keyProfile.keys[mode] || "").replace("Key", "")} onKeyDown={e => {
+                  e.preventDefault(); e.stopPropagation();
+                  if (!/^(Key[A-Z]|Digit[0-9]|Arrow(Up|Down|Left|Right))$/.test(e.code)) return;
+                  if (Object.entries(keyProfile.keys).some(([m, code]) => m !== mode && code === e.code)) return;
+                  onKeysChange({ ...keyProfile, keys: { ...keyProfile.keys, [mode]: e.code } });
+                }} /></label>
+              ))}
+            </details>
           </section>
 
           <section className="inspector-section inspector-detail-section">
             <details className="device-details"><summary>设备详情</summary>
-              <dl><dt>设备 ID</dt><dd>{device.deviceId}</dd><dt>IP</dt><dd>{device.ip || "—"}</dd><dt>控制来源</dt><dd>{device.controlSource || "—"}</dd><dt>控制者</dt><dd>{lease.owner}</dd><dt>账户</dt><dd>{lease.account}</dd><dt>有效至</dt><dd>{device.lease ? formatTime(device.lease.expiresAt) : "—"}</dd></dl>
+              <dl><dt>设备 ID</dt><dd>{device.deviceId}</dd><dt>IP</dt><dd>{device.ip || "—"}</dd><dt>控制来源</dt><dd>{device.controlSource || "—"}</dd><dt>控制者</dt><dd>{lease.owner}</dd><dt>账户</dt><dd>{lease.account}</dd><dt>归属</dt><dd>{device.lease ? "保留至主动释放" : "空闲"}</dd></dl>
             </details>
             {keyboardStatus.phase !== "idle" &&
             <div className={`keyboard-status ${keyboardStatus.phase}`}>

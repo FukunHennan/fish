@@ -6,6 +6,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -70,5 +71,20 @@ func TestFirmwareUploadRejectsInvalidImage(t *testing.T) {
 	handler.ServeHTTP(w, r)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("无效镜像应被拒绝: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestFirmwareDownloadDoesNotRequireBrowserSession(t *testing.T) {
+	t.Setenv("FISH_AUTH_DISABLED", "false")
+	firmware := []byte{0xE9, 0x10, 0x20, 0x30}
+	path := t.TempDir() + "/firmware.bin"
+	if err := os.WriteFile(path, firmware, 0600); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandlerWithFirmware(hub.New(), testKey(), path)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/firmware/current.bin", nil))
+	if w.Code != http.StatusOK || !bytes.Equal(w.Body.Bytes(), firmware) {
+		t.Fatalf("设备固件下载不应要求浏览器会话: %d %s", w.Code, w.Body.String())
 	}
 }

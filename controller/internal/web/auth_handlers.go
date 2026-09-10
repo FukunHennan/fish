@@ -171,7 +171,10 @@ func (s *server) authLogout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if cookie, err := r.Cookie(sessionCookieName); err == nil {
-		s.auth.clearSession(cookie.Value)
+		if err := s.auth.clearSession(cookie.Value); err != nil {
+			writeAuthError(w, http.StatusInternalServerError, "退出保存失败，请重试")
+			return
+		}
 	}
 	clearSessionCookie(w)
 	w.Header().Set("Content-Type", "application/json")

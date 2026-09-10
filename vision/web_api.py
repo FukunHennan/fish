@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from datetime import datetime
+from threading import Lock
 import json
 import os
 
-from flask import Flask, Response, jsonify, request, stream_with_context
+from flask import Flask, Response, jsonify, request, stream_with_context, g
 
+import crop_region
+from camera_policy import camera_blocked
 from service import CameraCatalog, UNSET, enumerate_cameras
 from config import YOLO_MODEL_PATH, list_yolo_models, resolve_yolo_model
 from session import InvalidTransition, SessionMismatch
@@ -16,6 +19,19 @@ from webrtc import WebRTCServer, WebRTCUnavailable
 
 def create_app(service, camera_provider=None, camera_catalog=None, webrtc_server=None):
     app = Flask(__name__)
+    lifecycle_lock = Lock()
+
+    @app.before_request
+    def serialize_camera_mutations():
+        if request.method in ("POST", "PUT", "PATCH", "DELETE") and (request.path.startswith("/sessions") or request.path in ("/crop", "/start", "/stop", "/action")):
+            lifecycle_lock.acquire()
+            g.camera_mutation_locked = True
+
+    @app.teardown_request
+    def release_camera_mutation(_error):
+        if g.pop("camera_mutation_locked", False):
+            lifecycle_lock.release()
+
     camera_catalog = camera_catalog or CameraCatalog(
         camera_provider or enumerate_cameras
     )
@@ -68,12 +84,37 @@ def create_app(service, camera_provider=None, camera_catalog=None, webrtc_server
             "default": default if default in models else (models[0] if models else None),
         })
 
+    @app.before_request
+    def reject_blocked_camera():
+        if request.method in ("POST", "PUT", "PATCH"):
+            body = request.get_json(silent=True)
+            if isinstance(body, dict) and "cameraIndex" in body and camera_blocked(body["cameraIndex"]):
+                return jsonify({"message": "该摄像头已被项目禁用，请使用 Global Shutter Camera"}), 403
+
+    @app.route("/crop", methods=["GET", "PUT"])
+    def crop_settings():
+        if request.method == "GET":
+            return jsonify(crop_region.load())
+        current = service.current_session()
+        if current and current.get("state") in ("processing", "tracking"):
+            return jsonify({"message": "请先关闭识别和循迹，再调整裁剪"}), 409
+        try:
+            region = crop_region.validate(request.get_json(silent=True))
+            crop_region.save(region)
+        except (ValueError, OSError) as error:
+            return jsonify({"message": str(error)}), 400
+        if current and current.get("state") == "previewing":
+            service.stop_session(current["sessionId"])
+            service.create_session(current["cameraId"], current["cameraIndex"])
+        return jsonify(region)
+
     @app.get("/cameras")
     def cameras():
         running = service.status()["state"] == "running"
         return jsonify([
             camera.to_dict()
             for camera in camera_catalog.list(allow_refresh=not running)
+            if not camera_blocked(camera.index, camera.name)
         ])
 
     @app.post("/start")
@@ -131,7 +172,10 @@ def create_app(service, camera_provider=None, camera_catalog=None, webrtc_server
                 "error": {"code": "webrtc_unavailable", "message": "WebRTC 服务未配置"},
             }), 503
         try:
-            answer = webrtc_server.offer(sdp, offer_type)
+            quality = body.get("quality", "smooth")
+            if quality not in ("smooth", "hd", "full"):
+                return jsonify({"error": {"message": "无效的观看清晰度"}}), 400
+            answer = webrtc_server.offer(sdp, offer_type, quality=quality)
         except WebRTCUnavailable as error:
             return jsonify({
                 "ok": False,
@@ -159,6 +203,7 @@ def create_app(service, camera_provider=None, camera_catalog=None, webrtc_server
         target_device_id = body.get("targetDeviceId")
         target_track_id = body.get("targetTrackId")
         yolo_model = body.get("yoloModel")
+        tracking_mode = body.get("trackingMode", "yolo")
         if not isinstance(camera_index, int) or camera_index < 0 or not camera_id:
             snapshot = service.current_session()
             return envelope(
@@ -179,6 +224,13 @@ def create_app(service, camera_provider=None, camera_catalog=None, webrtc_server
         if yolo_model is not None and not isinstance(yolo_model, str):
             snapshot = service.current_session()
             return envelope(snapshot, ok=False, error={"code": "invalid_yolo_model", "message": "YOLO 模型参数无效"}, status=400)
+        if not isinstance(tracking_mode, str):
+            snapshot = service.current_session()
+            return envelope(snapshot, ok=False, error={"code": "invalid_tracking_mode", "message": "循迹模式参数无效"}, status=400)
+        tracking_mode = tracking_mode.strip()
+        if tracking_mode not in ("yolo", "single_fish"):
+            snapshot = service.current_session()
+            return envelope(snapshot, ok=False, error={"code": "invalid_tracking_mode", "message": "循迹模式参数无效"}, status=400)
         yolo_model_name = yolo_model.strip() if yolo_model else None
         yolo_model_path = resolve_yolo_model(yolo_model_name)
         if yolo_model_name and yolo_model_path is None:
@@ -190,12 +242,14 @@ def create_app(service, camera_provider=None, camera_catalog=None, webrtc_server
             target_device_id.strip() if target_device_id else None,
             yolo_model_path or YOLO_MODEL_PATH,
             target_track_id,
+            tracking_mode or "yolo",
         )
         if snapshot is not None:
             snapshot["yoloModel"] = (
                 yolo_model_name
                 or os.path.basename(YOLO_MODEL_PATH)
             )
+            snapshot["trackingMode"] = tracking_mode or "yolo"
         if snapshot is None:
             return envelope(
                 service.current_session(), ok=False,

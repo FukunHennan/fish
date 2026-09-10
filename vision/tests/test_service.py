@@ -9,6 +9,7 @@ from service import (
     _linux_v4l2_camera_names,
     enumerate_cameras,
 )
+from session import TrackingMode
 
 
 class FakeCapture:
@@ -43,7 +44,7 @@ class CameraEnumerationTests(unittest.TestCase):
             root = Path(temporary_directory)
             (root / "video0").mkdir()
             (root / "video0" / "name").write_text(
-                "USB2.0 FHD UVC WebCam: USB2.0 F\n",
+                "Generic Test Camera: USB2.0 F\n",
                 encoding="utf-8",
             )
             (root / "video1").mkdir()
@@ -52,7 +53,7 @@ class CameraEnumerationTests(unittest.TestCase):
             self.assertEqual(
                 _linux_v4l2_camera_names(max_index=3, root=root),
                 [
-                    "USB2.0 FHD UVC WebCam: USB2.0 F",
+                    "Generic Test Camera: USB2.0 F",
                     "RERVISION",
                     "摄像头 2",
                 ],
@@ -127,12 +128,12 @@ class CameraEnumerationTests(unittest.TestCase):
         cameras = enumerate_cameras(
             max_index=2,
             open_capture=lambda index: captures[index],
-            name_provider=lambda: ["USB2.0 FHD UVC WebCam", "USB2.0 FHD UVC WebCam"],
+            name_provider=lambda: ["Generic Test Camera", "Generic Test Camera"],
         )
 
         self.assertEqual(
             cameras,
-            [CameraInfo(index=0, name="USB2.0 FHD UVC WebCam", width=640, height=480, fps=30)],
+            [CameraInfo(index=0, name="Generic Test Camera", width=640, height=480, fps=30)],
         )
         self.assertTrue(all(capture.released for capture in captures.values()))
 
@@ -171,7 +172,7 @@ class VisionServiceLifecycleTests(unittest.TestCase):
         stopped = []
 
         service = VisionService(
-            runner_factory=lambda camera_index, publish: (
+            runner_factory=lambda camera_index, publish, yolo_model_path=None, tracking_mode="yolo": (
                 started.append(camera_index),
                 lambda: stopped.append(camera_index),
             )[1]
@@ -181,6 +182,7 @@ class VisionServiceLifecycleTests(unittest.TestCase):
         self.assertFalse(service.start(1))
         self.assertEqual(service.status()["state"], "running")
         self.assertEqual(service.status()["cameraIndex"], 1)
+        self.assertEqual(service.status()["trackingMode"], "yolo")
 
         self.assertTrue(service.stop())
         self.assertFalse(service.stop())
@@ -242,6 +244,18 @@ class VisionServiceLifecycleTests(unittest.TestCase):
             {"type": "overlay.set", "overlays": {"detections": False}},
         )
 
+    def test_path_clear_is_accepted_during_preview(self):
+        service = VisionService(runner_factory=lambda _index, _publish: lambda: None)
+        snapshot = service.create_session("camera-1", 1)
+
+        accepted = service.handle_session_action(
+            snapshot["sessionId"],
+            {"type": "path.clear"},
+        )
+
+        self.assertTrue(accepted)
+        self.assertEqual(service.next_action(), {"type": "path.clear"})
+
     def test_processing_lifecycle_enqueues_runtime_switches(self):
         service = VisionService(runner_factory=lambda _index, _publish: lambda: None)
         snapshot = service.create_session("camera-1", 1)
@@ -297,6 +311,15 @@ class VisionServiceLifecycleTests(unittest.TestCase):
             service.next_action(),
             {"type": "target.select", "trackId": 7},
         )
+
+    def test_single_fish_mode_is_preserved_in_session_and_status(self):
+        service = VisionService(
+            runner_factory=lambda _index, _publish, yolo_model_path=None, tracking_mode="yolo": lambda: None
+        )
+        snapshot = service.create_session("camera-1", 1, tracking_mode=TrackingMode.SINGLE_FISH.value)
+
+        self.assertEqual(snapshot["trackingMode"], "single_fish")
+        self.assertEqual(service.current_session()["trackingMode"], "single_fish")
 
     def test_exposure_is_accepted_during_preview(self):
         service = VisionService(runner_factory=lambda _index, _publish: lambda: None)

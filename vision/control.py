@@ -19,10 +19,12 @@ class MotionPidController:
     cross_kd: float = 1.2
     heading_kp: float = 0.12
     curve_feed_forward: float = 5.0
-    cruise_frequency: float = 2.5
-    cruise_amplitude: float = 28.0
+    base_frequency: float = 2.8
+    base_amplitude: float = 36.0
+    target_speed_mps: float = 0.18
     slow_distance: float = 0.50
     stop_distance: float = 0.10
+    turn_mode_threshold: float = 0.18
 
     def __post_init__(self):
         self.reset()
@@ -33,7 +35,7 @@ class MotionPidController:
         self.last_update = None
 
     def update(self, *, cross_track_error, heading_error_deg, distance_to_target,
-               curvature, brake, now):
+               curvature, brake, now, speed_mps=0.0, steering_demand=0.0):
         if self.last_update is None:
             dt = 0.1
         else:
@@ -51,13 +53,54 @@ class MotionPidController:
             + self.heading_kp * heading_error_deg
             + self.curve_feed_forward * curvature
         )
-        scale = distance_to_target / self.slow_distance
         stopped = brake and distance_to_target <= self.stop_distance
+        if stopped:
+            return {
+                "mode": "stop",
+                "frequency": 0.0,
+                "amplitude": 0.0,
+                "bias": 0.0,
+            }
+
+        distance_scale = float(
+            max(0.35, min(1.0, distance_to_target / self.slow_distance))
+        )
+        speed = max(0.0, float(speed_mps))
+        speed_error = (
+            self.target_speed_mps - speed
+        ) / max(self.target_speed_mps, 1e-6)
+        speed_demand = float(max(-0.5, min(1.0, speed_error)))
+        turn_demand = float(
+            max(
+                0.0,
+                min(
+                    1.0,
+                    abs(steering) / 45.0
+                    + abs(float(curvature)) * 0.20,
+                ),
+            )
+        )
+        # Adapt propulsion to observed motion: push harder when the fish is
+        # slow, add body swing for a turn, and taper near the endpoint.
+        frequency = (
+            self.base_frequency
+            + 0.9 * speed_demand
+            + 0.35 * turn_demand
+        ) * (0.70 + 0.30 * distance_scale)
+        amplitude = (
+            self.base_amplitude
+            + 12.0 * speed_demand
+            + 18.0 * turn_demand
+        ) * distance_scale
+        mode = "forward"
+        if abs(float(steering_demand)) >= self.turn_mode_threshold:
+            mode = "left" if steering_demand > 0.0 else "right"
+            steering = 0.0
         return {
-            "mode": "stop" if stopped else "forward",
-            "frequency": 0.0 if stopped else self.cruise_frequency * scale,
-            "amplitude": 0.0 if stopped else self.cruise_amplitude * scale,
-            "bias": 0.0 if stopped else -steering,
+            "mode": mode,
+            "frequency": max(0.6, frequency),
+            "amplitude": max(4.0, amplitude),
+            "bias": -steering,
         }
 
 class RoboFishComm:
@@ -83,6 +126,7 @@ class RoboFishComm:
 
     def _post(self, payload, timeout=0.5):
         payload = dict(payload)
+        payload.update(getattr(self, "workspace_identity", {}))
         if self._device_id:
             payload["deviceId"] = self._device_id
         request = urllib.request.Request(
@@ -102,12 +146,15 @@ class RoboFishComm:
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 result = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as error:
+            body = error.read().decode("utf-8", errors="replace")
             if error.code == 409 and payload.get("operation") in ("motion", "calibrate-forward"):
                 with self._state_lock:
                     if payload.get("sessionId") == self._session_id:
                         self._motion_enabled = False
                         self._control_session += 1
                         self._clear_queue()
+            if body:
+                print(f"[HTTP Forwarding] {error.code} {body}")
             error.close()
             raise
         if not result.get("sent"):
@@ -270,6 +317,45 @@ class RoboFishComm:
             print(f"[Vision Calibration] Forward preset failed: {error}")
             return False
 
+    def start_continuous_forward(self):
+        """Begin a forward command that is renewed by the vision loop."""
+        if not self._session_id:
+            return False
+        self.vision_seq = (self.vision_seq + 1) & 0x7FFFFFFF
+        return self._send_async({
+            "kind": "motion",
+            "seq": self.vision_seq,
+            "mode": "forward",
+            "frequency": 3.0,
+            "amplitude": 45.0,
+            "bias": 0.0,
+        })
+
+    def maintain_continuous_forward(self):
+        """Refresh forward motion before the controller vision watchdog expires."""
+        return self.start_continuous_forward()
+
+    def start_continuous_turn(self, direction):
+        """Begin a low-drift in-place turn for calibration."""
+        if not self._session_id:
+            return False
+        mode = str(direction).lower()
+        if mode not in ("left", "right"):
+            return False
+        self.vision_seq = (self.vision_seq + 1) & 0x7FFFFFFF
+        return self._send_async({
+            "kind": "motion",
+            "seq": self.vision_seq,
+            "mode": mode,
+            "frequency": 3.0,
+            "amplitude": 45.0,
+            "bias": 0.0,
+        })
+
+    def maintain_continuous_turn(self, direction):
+        """Refresh the calibration turn before the vision watchdog expires."""
+        return self.start_continuous_turn(direction)
+
     def send_command(self, cmd_str):
         if cmd_str in ["stop", "emergency_stop"]:
             print("[HTTP Command] Emergency stop / propulsion stop")
@@ -314,6 +400,8 @@ class RoboFishComm:
             curvature=float(path_curvature_per_m),
             brake=bool(brake_request),
             now=time.monotonic(),
+            speed_mps=float(speed_mps),
+            steering_demand=float(steering_demand),
         )
         queued = self._send_async({
             "kind": "motion",

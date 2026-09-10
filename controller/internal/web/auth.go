@@ -30,7 +30,7 @@ type authUser struct {
 }
 
 type authSession struct {
-	Token     string
+	Token     string `json:"-"`
 	UserID    string
 	ExpiresAt time.Time
 }
@@ -55,6 +55,7 @@ func authStorePath() string {
 
 func newAuthStore(path string) *authStore {
 	store := &authStore{path: path, users: map[string]authUser{}, sessions: map[string]authSession{}}
+	_ = store.loadSessions()
 	_ = store.load()
 	return store
 }
@@ -88,6 +89,9 @@ func (a *authStore) load() error {
 }
 
 func (a *authStore) saveLocked() error {
+	if err := a.saveSessionsLocked(); err != nil {
+		return err
+	}
 	data, err := json.MarshalIndent(a.users, "", "  ")
 	if err != nil {
 		return err
@@ -357,15 +361,29 @@ func (a *authStore) createSession(user authUser) (authSession, error) {
 	}
 	session := authSession{Token: token, UserID: user.ID, ExpiresAt: time.Now().Add(14 * 24 * time.Hour)}
 	a.mu.Lock()
-	a.sessions[token] = session
+	a.sessions[sessionKey(token)] = session
+	if err := a.saveSessionsLocked(); err != nil {
+		delete(a.sessions, sessionKey(token))
+		a.mu.Unlock()
+		return authSession{}, err
+	}
 	a.mu.Unlock()
 	return session, nil
 }
 
-func (a *authStore) clearSession(token string) {
+func (a *authStore) clearSession(token string) error {
 	a.mu.Lock()
-	delete(a.sessions, token)
-	a.mu.Unlock()
+	defer a.mu.Unlock()
+	key := sessionKey(token)
+	previous, exists := a.sessions[key]
+	delete(a.sessions, key)
+	if err := a.saveSessionsLocked(); err != nil {
+		if exists {
+			a.sessions[key] = previous
+		}
+		return err
+	}
+	return nil
 }
 
 func (a *authStore) clearSessionsLocked(userID string) {
@@ -379,9 +397,9 @@ func (a *authStore) clearSessionsLocked(userID string) {
 func (a *authStore) userBySession(token string) (authUser, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	session, ok := a.sessions[token]
+	session, ok := a.sessions[sessionKey(token)]
 	if !ok || time.Now().After(session.ExpiresAt) {
-		delete(a.sessions, token)
+		delete(a.sessions, sessionKey(token))
 		return authUser{}, false
 	}
 	for _, user := range a.users {
@@ -424,4 +442,39 @@ func clearSessionCookie(w http.ResponseWriter) {
 		Name: sessionCookieName, Value: "", Path: "/",
 		HttpOnly: true, SameSite: http.SameSiteLaxMode, Expires: time.Unix(0, 0), MaxAge: -1,
 	})
+}
+
+func sessionKey(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+func (a *authStore) saveSessionsLocked() error {
+	data, err := json.Marshal(a.sessions)
+	if err != nil {
+		return err
+	}
+	if err = os.MkdirAll(filepath.Dir(a.path), 0700); err != nil {
+		return err
+	}
+	path := a.path + ".sessions.json"
+	if err = os.WriteFile(path+".tmp", data, 0600); err != nil {
+		return err
+	}
+	return os.Rename(path+".tmp", path)
+}
+func (a *authStore) loadSessions() error {
+	data, err := os.ReadFile(a.path + ".sessions.json")
+	if err != nil {
+		return err
+	}
+	sessions := map[string]authSession{}
+	if err = json.Unmarshal(data, &sessions); err != nil {
+		return err
+	}
+	for key, session := range sessions {
+		if time.Now().Before(session.ExpiresAt) {
+			a.sessions[key] = session
+		}
+	}
+	return nil
 }

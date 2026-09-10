@@ -3,6 +3,7 @@ import unittest
 from session import (
     InvalidTransition,
     SessionMismatch,
+    TrackingMode,
     VisionSession,
     VisionState,
 )
@@ -27,6 +28,7 @@ class VisionSessionTests(unittest.TestCase):
             camera_index=2,
             target_device_id="fish-2",
             target_track_id=7,
+            tracking_mode=TrackingMode.SINGLE_FISH.value,
         )
         snapshot = session.snapshot()
 
@@ -35,6 +37,7 @@ class VisionSessionTests(unittest.TestCase):
         self.assertEqual(snapshot["cameraIndex"], 2)
         self.assertEqual(snapshot["targetDeviceId"], "fish-2")
         self.assertEqual(snapshot["targetTrackId"], 7)
+        self.assertEqual(snapshot["trackingMode"], "single_fish")
         self.assertGreaterEqual(len(snapshot["sessionId"]), 24)
         self.assertIsNone(snapshot["error"])
 

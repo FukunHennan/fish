@@ -22,9 +22,11 @@ export function toVideoPoint(pointer, bounds, videoWidth, videoHeight, mediaWidt
 }
 
 export function chooseCameraIndex(current, cameras, status) {
-  if (status?.state === "running" && Number.isInteger(status.cameraIndex)) {
+  if (["running", "previewing", "processing", "tracking"].includes(status?.state) && Number.isInteger(status.cameraIndex)) {
     return String(status.cameraIndex);
   }
-  if (current !== "" || !cameras.length) return current;
-  return String(cameras[0].index);
+  if (!cameras.length) return "";
+  if (current !== "" && cameras.some((camera) => String(camera.index) === String(current))) return current;
+  const preferred = cameras.find((camera) => /global[ _-]*shutter/i.test(camera.name || camera.label || ""));
+  return String((preferred || cameras[0]).index);
 }

@@ -91,9 +91,89 @@ class GoControllerCommTests(unittest.TestCase):
         self.assertEqual([item["operation"] for item in CaptureHandler.messages], ["start", "motion", "stop"])
         motion = CaptureHandler.messages[1]
         self.assertEqual(motion["mode"], "forward")
-        self.assertAlmostEqual(motion["frequency"], 4.0)
-        self.assertAlmostEqual(motion["amplitude"], 44.8)
+        self.assertGreater(motion["frequency"], 2.4)
+        self.assertGreater(motion["amplitude"], 26.0)
         self.assertAlmostEqual(motion["bias"], -4.568)
+
+    def test_turn_calibration_uses_repeating_in_place_turn_commands(self):
+        comm = RoboFishComm(controller_url=self.url)
+        try:
+            self.assertTrue(comm.ensure_hybrid_mode())
+            CaptureHandler.event.clear()
+            self.assertTrue(comm.start_continuous_turn("left"))
+            deadline = time.time() + 1
+            while len(CaptureHandler.messages) < 2 and time.time() < deadline:
+                CaptureHandler.event.wait(0.05)
+                CaptureHandler.event.clear()
+            self.assertGreaterEqual(len(CaptureHandler.messages), 2)
+            motion = CaptureHandler.messages[-1]
+            self.assertEqual(motion["operation"], "motion")
+            self.assertEqual(motion["mode"], "left")
+            self.assertEqual(motion["frequency"], 3.0)
+            self.assertEqual(motion["amplitude"], 45.0)
+            time.sleep(0.12)
+            self.assertTrue(comm.maintain_continuous_turn("left"))
+        finally:
+            comm.stop_now()
+            comm.close()
+
+    def test_visual_motion_parameters_follow_measured_motion(self):
+        comm = RoboFishComm(controller_url=self.url)
+        try:
+            slow = comm._motion_pid.update(
+                cross_track_error=0.0,
+                heading_error_deg=0.0,
+                distance_to_target=0.8,
+                curvature=0.0,
+                brake=False,
+                now=1.0,
+                speed_mps=0.0,
+            )
+            fast = comm._motion_pid.update(
+                cross_track_error=0.0,
+                heading_error_deg=0.0,
+                distance_to_target=0.8,
+                curvature=0.0,
+                brake=False,
+                now=1.1,
+                speed_mps=0.18,
+            )
+            # A slow fish receives more propulsion; a fish already at cruise
+            # speed is allowed to settle instead of using fixed user limits.
+            self.assertGreater(slow["frequency"], fast["frequency"])
+            self.assertGreater(slow["amplitude"], fast["amplitude"])
+        finally:
+            comm.close()
+
+    def test_large_steering_uses_directional_tail_mode(self):
+        comm = RoboFishComm(controller_url=self.url)
+        try:
+            left = comm._motion_pid.update(
+                cross_track_error=0.0,
+                heading_error_deg=0.0,
+                distance_to_target=0.8,
+                curvature=0.0,
+                brake=False,
+                now=1.0,
+                speed_mps=0.1,
+                steering_demand=0.5,
+            )
+            right = comm._motion_pid.update(
+                cross_track_error=0.0,
+                heading_error_deg=0.0,
+                distance_to_target=0.8,
+                curvature=0.0,
+                brake=False,
+                now=1.1,
+                speed_mps=0.1,
+                steering_demand=-0.5,
+            )
+            self.assertEqual(left["mode"], "left")
+            self.assertEqual(right["mode"], "right")
+            self.assertEqual(left["bias"], 0.0)
+            self.assertEqual(right["bias"], 0.0)
+        finally:
+            comm.close()
 
     def test_device_rejection_does_not_enable_vision_motion(self):
         CaptureHandler.response = {

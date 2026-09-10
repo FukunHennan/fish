@@ -13,15 +13,15 @@
 
 
 /* Wi-Fi 和控制器配置通过 Fish-Setup-XXXXXX 热点写入 NVS。 */
-#define FIRMWARE_VERSION "1.3.1"
+#define FIRMWARE_VERSION "1.3.2"
 
 /* Allow short Wi-Fi stalls without falsely declaring the controller lost. */
-#define CONTROLLER_HEARTBEAT_TIMEOUT_MS 3000
+#define CONTROLLER_HEARTBEAT_TIMEOUT_MS 10000
 
 /* If Wi-Fi is connected but the controller is not registered, keep announcing
  * the fish on the LAN. The controller replies with its current WebSocket port,
  * so users do not have to type a controller IP during normal setup. */
-#define CONTROLLER_DISCOVERY_ANNOUNCE_INTERVAL_MS 2500
+#define CONTROLLER_DISCOVERY_ANNOUNCE_INTERVAL_MS 1000
 #define CONTROLLER_DISCOVERY_SCAN_INTERVAL_MS 220
 #define CONTROLLER_DISCOVERY_SCAN_TIMEOUT_MS 260
 #define CONTROLLER_DISCOVERY_NEAR_SCAN_RADIUS 96

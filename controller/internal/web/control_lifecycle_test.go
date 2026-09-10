@@ -54,7 +54,7 @@ func TestLeaseReplacementQueuesStopBeforeNewMotion(t *testing.T) {
 	l.leases["fish"] = controlLease{OwnerID: "old", ExpiresAt: time.Now().Add(-time.Second)}
 	var events []string
 	l.onRelease = func(string) { events = append(events, "stop") }
-	l.acquireExclusive("fish", user, "manual", false, "browser")
+	l.acquireExclusive("fish", user, "manual", true, "browser")
 	if !l.admit("fish", user, "browser", true, func() bool { events = append(events, "motion"); return true }) {
 		t.Fatal("new owner denied")
 	}
@@ -110,7 +110,7 @@ func TestBrowserTakeoverResetsSequenceAndRejectsPreviousClient(t *testing.T) {
 	claim("behind")
 	motion("behind", "forward", 1, 200)
 	motion("ahead", "forward", 1000001, 409)
-	motion("ahead", "stop", 1000002, 200)
+	motion("ahead", "stop", 1000002, 409)
 	motion("behind", "forward", 2, 200)
 	motion("behind", "stop", 1, 200)
 	motion("behind", "forward", 1, 409)
@@ -180,8 +180,10 @@ func TestAdminMotionRequiresLeaseAndRenewalCannotTakeOver(t *testing.T) {
 	send("PATCH", "/api/leases", `{"deviceId":"fish","clientId":"b"}`, 409)
 	for _, path := range []string{"/api/command", "/api/command/realtime"} {
 		send("POST", path, `{"deviceId":"fish","mode":"forward","sequence":1,"frequency":2.5,"amplitude":0}`, 409)
-		send("POST", path, `{"deviceId":"fish","mode":"stop","sequence":1,"frequency":2.5,"amplitude":0}`, 200)
+		send("POST", path, `{"deviceId":"fish","mode":"stop","sequence":1,"frequency":2.5,"amplitude":0}`, 409)
 	}
+	send("DELETE", "/api/leases", `{"deviceId":"fish","clientId":"a","force":{}}`, 400)
+	send("PATCH", "/api/leases", `{"deviceId":"fish","clientId":"a"}`, 200)
 	send("DELETE", "/api/leases", `{"deviceId":"fish","clientId":"a"}`, 200)
 	send("PATCH", "/api/leases", `{"deviceId":"fish","clientId":"a"}`, 409)
 }

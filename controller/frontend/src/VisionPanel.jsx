@@ -2,7 +2,8 @@ import { createExposureSync } from "./exposureSync.js";
 import { useEffect, useRef, useState } from "react";
 import { chooseCameraIndex, toVideoPoint } from "./coordinates.js";
 import { transitionVisionTool } from "./visionTools.js";
-import { canEditVision, visionEventUrl, visionRequest } from "./visionSession.js";
+import { canEditVision, visionEventUrl, visionRequest as rootVisionRequest } from "./visionSession.js";
+import { CONTROL_CLIENT_ID, leaseIsMine } from "./ui/devicePresentation.js";
 import { formatFrameLatency, formatServerClock, formatVideoClock } from "./videoTime.js";
 import VideoStream from "./VideoStream.jsx";
 
@@ -13,7 +14,6 @@ const TOOLS = [
 
 const WORKFLOW_STAGES = [
   ["targetDetected", "单鱼目标"],
-  ["headingCalibrated", "方向标定"],
   ["pathReady", "轨迹路径"],
   ["trackingActive", "循迹运行"],
 ];
@@ -26,13 +26,13 @@ const STAGE_LABELS = {
   TRACKING: "循迹运行中",
 };
 
-const CONTROL_MODES = [
-  ["detect", "只识别", "只识别，不自动控制"],
-  ["assist", "辅助驾驶", "视觉辅助，手动仍优先"],
-  ["auto", "自动巡航", "自动巡航，需要管理员确认"],
+const TRACKING_MODES = [
+  ["yolo", "YOLO 模式", "保留多目标约束，适合通用场景"],
+  ["single_fish", "单鱼循迹", "默认池里只有一条鱼，放宽多目标阻塞"],
 ];
 
 const DEFAULT_OVERLAYS = { detections: false, paths: false };
+const EXPOSURE_USER_MAX = 1000;
 
 function sessionErrorMessage(status) {
   const error = status?.error;
@@ -49,16 +49,30 @@ function cameraLabel(camera) {
 }
 
 export default function VisionPanel({
+  isAdmin = false,
+  user = null,
   devices = [],
   targetDeviceId = "",
   targetTrackId = null,
   onTargetDeviceChange = () => {},
   onTargetTrackChange = () => {},
   onVisionStateChange = () => {},
+  onClaimDevice = async () => false,
   mode = "vision",
   showTargetDeviceSelector = true,
   showControls = true,
 }) {
+  const controlledFish = devices.find((fish) => fish.deviceId === targetDeviceId);
+  const workspacePrefix = targetDeviceId && leaseIsMine(controlledFish?.lease, user)
+    ? `/workspaces/${encodeURIComponent(targetDeviceId)}` : "";
+  const workspaceHeaders = workspacePrefix ? { "X-Fish-Client": CONTROL_CLIENT_ID } : {};
+  const workspaceRef = useRef(workspacePrefix);
+  const workspaceChanged = workspaceRef.current !== workspacePrefix;
+  workspaceRef.current = workspacePrefix;
+  const visionRequest = (path, options = {}) => rootVisionRequest(`${workspacePrefix}${path}`, {
+    ...options, headers: { ...workspaceHeaders, ...(options.headers || {}) },
+  });
+  const sharedVisionRequest = (path, options = {}) => rootVisionRequest(path, options);
   const [cameras, setCameras] = useState([]);
   const [cameraIndex, setCameraIndex] = useState("");
   const [status, setStatus] = useState({ state: "stopped", error: "" });
@@ -71,10 +85,7 @@ export default function VisionPanel({
   const [switchingCamera, setSwitchingCamera] = useState(false);
   const [yoloModels, setYoloModels] = useState([]);
   const [selectedYoloModel, setSelectedYoloModel] = useState("");
-  const [controlMode, setControlMode] = useState("detect");
-  const [autoSpeed, setAutoSpeed] = useState(42);
-  const [autoAmplitude, setAutoAmplitude] = useState(35);
-  const [autoConfidence, setAutoConfidence] = useState(80);
+  const [trackingMode, setTrackingMode] = useState("single_fish");
   const [overlayPrefs, setOverlayPrefs] = useState(DEFAULT_OVERLAYS);
   const [clock, setClock] = useState(() => formatVideoClock());
   const [clockTick, setClockTick] = useState(() => Date.now());
@@ -83,7 +94,26 @@ export default function VisionPanel({
   const [serverTimeReceivedAt, setServerTimeReceivedAt] = useState(0);
   const [exposurePercent, setExposurePercent] = useState(50);
   const [videoToggleBusy, setVideoToggleBusy] = useState(false);
-  const [exposureMaxInput, setExposureMaxInput] = useState("");
+  const [cropRegion, setCropRegion] = useState({ x: 0, y: 0, width: 1, height: 1 });
+  const [cropDraft, setCropDraft] = useState(null);
+  const [cropSelecting, setCropSelecting] = useState(false);
+  const cropStart = useRef(null);
+  useEffect(() => { fetch("/api/vision/crop").then(r => r.ok ? r.json() : null).then(value => { if (value) setCropRegion(value); }).catch(() => {}); }, []);
+  async function applyCrop(value) {
+    try {
+      const response = await fetch("/api/vision/crop", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message || "裁剪失败");
+      setCropRegion(result); setCropDraft(null); setCropSelecting(false);
+      const state = await sessionRequest("/sessions/current");
+      setStatus(state.data || state);
+      setFeedback("裁剪已应用，请重新确认目标并进行场地标定");
+    } catch (error) { setFeedback(error.message); }
+  }
+  const [viewQuality, setViewQuality] = useState("smooth");
+  const [previewEnabled, setPreviewEnabled] = useState(true);
+  const [workspaceSessionReady, setWorkspaceSessionReady] = useState(!workspacePrefix);
+  const [exposureMaxInput, setExposureMaxInput] = useState(String(EXPOSURE_USER_MAX));
   const imageRef = useRef(null);
   const retryTimerRef = useRef(null);
   const exposurePendingRef = useRef(createExposureSync());
@@ -95,11 +125,13 @@ export default function VisionPanel({
   const camerasRef = useRef([]);
   const targetDeviceIdRef = useRef(targetDeviceId);
   const targetTrackIdRef = useRef(targetTrackId);
+  const autoClaimedDeviceRef = useRef("");
 
   const manual = mode === "manual";
   const running = ["previewing", "processing", "tracking"].includes(status.state);
   const processing = ["processing", "tracking"].includes(status.state);
   const editable = canEditVision(status);
+  const sessionRequest = workspacePrefix ? visionRequest : sharedVisionRequest;
   const selectedCamera = cameras.find((camera) => camera.index === Number(cameraIndex));
   const videoWidth = status.metrics?.frame?.width || selectedCamera?.width || 640;
   const videoHeight = status.metrics?.frame?.height || selectedCamera?.height || 480;
@@ -110,15 +142,60 @@ export default function VisionPanel({
   const workflowLabel = STAGE_LABELS[workflow.stage] || "等待视觉状态";
   const yoloLabel = yolo?.ready ? "YOLO 就绪" : yolo?.loading ? "YOLO 加载中" : yolo?.error ? "YOLO 异常" : "YOLO 等待启动";
   const coordinateLabel = workflow.controlCoordinateMode === "FIELD" ? "场地坐标" : "画面坐标";
+  const activeTrackingMode = workflow.trackingMode || trackingMode;
+  const singleFishMode = activeTrackingMode === "single_fish";
+  const onlineFish = devices.filter((fish) => fish.online);
+  const autoTargetDeviceId = singleFishMode && !targetDeviceId && onlineFish.length === 1
+    ? onlineFish[0].deviceId
+    : "";
+  const effectiveTargetDeviceId = targetDeviceId || status.targetDeviceId || autoTargetDeviceId;
+  const trackingModeLabel = TRACKING_MODES.find(([name]) => name === activeTrackingMode)?.[1] || "单鱼循迹";
   const selectedTrackId = targetTrackId ?? status.targetTrackId ?? null;
   const selectedDetection = detections.find((target) => target.trackId === selectedTrackId);
+  const singleFishDetected = Boolean(workflow.targetDetected) || Boolean(yolo?.targetFound) || detections.length > 0;
   const targetRequiredForMotion = (
-    !targetDeviceId
-    || (Number(yolo?.detectionCount) > 1 && selectedTrackId === null)
-    || (selectedTrackId !== null && !yolo?.targetFound && processing)
+    !effectiveTargetDeviceId
+    || (!singleFishMode && Number(yolo?.detectionCount) > 1 && selectedTrackId === null)
+    || (!singleFishMode && selectedTrackId !== null && !yolo?.targetFound && processing)
   );
+
+  useEffect(() => {
+    if (
+      mode === "manual"
+      || !running
+      || !singleFishMode
+      || targetDeviceId
+      || !autoTargetDeviceId
+      || autoClaimedDeviceRef.current === autoTargetDeviceId
+    ) return undefined;
+    const device = onlineFish.find((fish) => fish.deviceId === autoTargetDeviceId);
+    if (!device) return undefined;
+    autoClaimedDeviceRef.current = autoTargetDeviceId;
+    let active = true;
+    (async () => {
+      const claimed = await onClaimDevice(device);
+      if (active && claimed) {
+        onTargetDeviceChange(autoTargetDeviceId);
+        setFeedback("单鱼模式已自动恢复当前机器鱼控制权。");
+      } else if (active) {
+        autoClaimedDeviceRef.current = "";
+      }
+    })().catch(() => {
+      if (active) autoClaimedDeviceRef.current = "";
+    });
+    return () => { active = false; };
+  }, [
+    autoTargetDeviceId,
+    mode,
+    onClaimDevice,
+    onTargetDeviceChange,
+    onlineFish,
+    running,
+    singleFishMode,
+    targetDeviceId,
+  ]);
   const exposure = status.metrics?.exposure || {};
-  const controlModeLabel = CONTROL_MODES.find(([name]) => name === controlMode)?.[2] || "只识别，不自动控制";
+  const controlModeLabel = "自动控制";
   const latencyLabel = formatFrameLatency(status.metrics);
   const serverClock = formatServerClock(
     serverTime,
@@ -138,7 +215,11 @@ export default function VisionPanel({
   const requestedExposureMax = Number(exposureMaxInput);
   const snapExposureValue = (value) => {
     if (!exposureRangeReady) return null;
-    const bounded = Math.min(exposureDriverMax, Math.max(exposureMin, Number(value)));
+    const bounded = Math.min(
+      exposureDriverMax,
+      EXPOSURE_USER_MAX,
+      Math.max(exposureMin, Number(value)),
+    );
     if (bounded >= exposureDriverMax) return exposureDriverMax;
     const stepped = exposureMin + Math.round((bounded - exposureMin) / exposureStep) * exposureStep;
     return Math.min(exposureDriverMax, Math.max(exposureMin, stepped));
@@ -174,6 +255,7 @@ export default function VisionPanel({
 
   const sharedExposurePanel = (
     <section className="exposure-control">
+      <div className="exposure-inline">
       <label className="exposure-slider-row">
         <span>曝光</span>
         <input
@@ -197,13 +279,12 @@ export default function VisionPanel({
         />
         <output title={`目标值 ${previewExposureValue ?? "—"} · 实际值 ${exposure.actualValue ?? "—"}`}>{Math.round(exposurePercent)}%</output>
       </label>
-      <details className="exposure-advanced"><summary>高级</summary>
       <label className="exposure-limit-row">
-        <span>曝光上限</span>
-        <input
-          type="number"
-          min={exposureRangeReady ? exposureMin : undefined}
-          max={exposureRangeReady ? exposureDriverMax : undefined}
+        <span>上限</span>
+          <input
+            type="number"
+            min={exposureRangeReady ? exposureMin : undefined}
+            max={exposureRangeReady ? Math.min(exposureDriverMax, EXPOSURE_USER_MAX) : undefined}
           step={exposureRangeReady ? exposureStep : 1}
           value={exposureMaxInput}
           disabled={!exposureRangeReady}
@@ -215,11 +296,12 @@ export default function VisionPanel({
           aria-label="曝光上限"
         />
       </label>
-      <small>目标 {previewExposureValue ?? "—"} · 实际 {exposure.actualValue ?? "—"} · {exposureHelp}</small>
-      </details>
+      </div>
       {exposure.errorCode && <small role="status">{exposureHelp}</small>}
     </section>
   );
+
+  useEffect(() => { if (status.metrics?.crop) setCropRegion(status.metrics.crop); }, [status.metrics?.crop]);
 
   function captureServerTime(payload) {
     const value = Number(payload?.serverTime ?? payload?.data?.serverTime);
@@ -231,13 +313,18 @@ export default function VisionPanel({
   }
 
   useEffect(() => {
+    setWorkspaceSessionReady(!workspacePrefix);
     let active = true;
     async function refresh() {
       try {
         const [cameraResponse, statusResponse] = await Promise.all([
           fetch("/api/vision/cameras", { cache: "no-store" }),
-          fetch("/api/vision/sessions/current", { cache: "no-store" }),
+          fetch(`/api/vision${workspacePrefix}/sessions/current`, { cache: "no-store", headers: workspaceHeaders }),
         ]);
+        if (cameraResponse.status === 401 || statusResponse.status === 401) {
+          if (active) { setStatus({ state: "stopped", metrics: {} }); setStreamFeedback("登录已失效，请重新登录"); }
+          throw new Error("登录已失效，请重新登录");
+        }
         if (!cameraResponse.ok || !statusResponse.ok) throw new Error("视觉后台未就绪");
         const cameraList = await cameraResponse.json();
         const statusEnvelope = await statusResponse.json();
@@ -247,6 +334,8 @@ export default function VisionPanel({
         captureServerTime(statusEnvelope);
         setCameras(cameraList);
         setStatus(nextStatus);
+        setWorkspaceSessionReady(true);
+        setTrackingMode(nextStatus.trackingMode || "single_fish");
         if (nextStatus.yoloModel) setSelectedYoloModel(nextStatus.yoloModel);
         setCameraIndex((current) => chooseCameraIndex(current, cameraList, nextStatus));
       } catch (error) {
@@ -258,7 +347,11 @@ export default function VisionPanel({
       if (active) setFeedback("当前浏览器不支持视觉状态推送");
       return () => { active = false; };
     }
-    const source = new window.EventSource(visionEventUrl());
+    const eventUrl = workspacePrefix
+      ? `${visionEventUrl().replace("/events", `${workspacePrefix}/events`)}?clientId=${encodeURIComponent(CONTROL_CLIENT_ID)}`
+      : visionEventUrl();
+    const source = new window.EventSource(eventUrl);
+    source.onerror = () => { if (active) refresh(); };
     source.addEventListener("session", (event) => {
       if (!active) return;
       try {
@@ -266,6 +359,8 @@ export default function VisionPanel({
         const nextStatus = envelope.data || envelope;
         captureServerTime(envelope);
         setStatus(nextStatus);
+        setWorkspaceSessionReady(true);
+        setTrackingMode(nextStatus.trackingMode || "single_fish");
         if (nextStatus.yoloModel) setSelectedYoloModel(nextStatus.yoloModel);
         setCameraIndex((current) => chooseCameraIndex(current, camerasRef.current, nextStatus));
       } catch {
@@ -276,9 +371,10 @@ export default function VisionPanel({
       active = false;
       source.close();
     };
-  }, []);
+  }, [workspacePrefix]);
 
   useEffect(() => {
+    if (workspaceChanged || (workspacePrefix && !workspaceSessionReady)) return undefined;
     if (
       (
         targetDeviceIdRef.current === targetDeviceId
@@ -321,6 +417,9 @@ export default function VisionPanel({
     selectedTrackId,
     status.sessionId,
     targetDeviceId,
+    workspacePrefix,
+    workspaceSessionReady,
+    workspaceChanged,
   ]);
 
   useEffect(() => {
@@ -396,7 +495,9 @@ export default function VisionPanel({
     if (exposurePendingRef.current.blocked()) return;
     setExposureMaxInput((current) => {
       const currentValue = Number(current);
-      if (!current || !Number.isFinite(currentValue)) return String(exposureDriverMax);
+      if (!current || !Number.isFinite(currentValue)) {
+        return String(Math.min(exposureDriverMax, EXPOSURE_USER_MAX));
+      }
       return String(snapExposureValue(currentValue));
     });
     const actual = Number(exposure.actualValue);
@@ -427,17 +528,21 @@ export default function VisionPanel({
   }
 
   async function start() {
+    setPreviewEnabled(true);
+    if (running) return;
     try {
       if (cameraIndex === "") throw new Error("请选择摄像头");
       const payload = { cameraId: `camera-${cameraIndex}`, cameraIndex: Number(cameraIndex) };
-      if (targetDeviceId) payload.targetDeviceId = targetDeviceId;
+      payload.trackingMode = trackingMode;
+      if (effectiveTargetDeviceId) payload.targetDeviceId = effectiveTargetDeviceId;
       if (selectedTrackId !== null) payload.targetTrackId = selectedTrackId;
       if (selectedYoloModel) payload.yoloModel = selectedYoloModel;
-      const result = await visionRequest("/sessions", { method: "POST", body: JSON.stringify(payload) });
+      const result = await sessionRequest("/sessions", { method: "POST", body: JSON.stringify(payload) });
       setStatus(result.data);
+      setTrackingMode(result.data.trackingMode || trackingMode);
       setSelectedYoloModel(result.data.yoloModel || selectedYoloModel);
       captureServerTime(result);
-      setFeedback(targetDeviceId ? "摄像头预览已启动，已绑定目标鱼" : "摄像头预览已启动；未选择目标鱼，仅预览/识别");
+      setFeedback(effectiveTargetDeviceId ? "摄像头预览已启动，已绑定目标鱼" : "摄像头预览已启动；未选择目标鱼，仅预览/识别");
     } catch (error) { setFeedback(error.message); }
   }
 
@@ -454,7 +559,7 @@ export default function VisionPanel({
     setStreamState("loading");
     setStreamFeedback("正在切换摄像头…");
     try {
-      const result = await visionRequest(
+      const result = await sessionRequest(
         `/sessions/${encodeURIComponent(status.sessionId)}/camera`,
         {
           method: "POST",
@@ -465,6 +570,7 @@ export default function VisionPanel({
         },
       );
       setStatus(result.data);
+      setTrackingMode(result.data.trackingMode || trackingMode);
       setSelectedYoloModel(result.data.yoloModel || selectedYoloModel);
       captureServerTime(result);
       setStreamRetry((current) => current + 1);
@@ -494,14 +600,28 @@ export default function VisionPanel({
     );
   }
 
-  async function stop() {
+  async function changeTrackingMode(nextMode) {
+    if (nextMode === trackingMode || switchingCamera) return;
+    if (nextMode === "single_fish" && selectedTrackId !== null) onTargetTrackChange(null);
+    if (!running || !status.sessionId) {
+      setTrackingMode(nextMode);
+      setFeedback(nextMode === "single_fish" ? "已选择单鱼循迹模式，启动预览时生效" : "已选择 YOLO 模式，启动预览时生效");
+      return;
+    }
     try {
-      if (processing) await sendAction({ type: "system.stop" }, false);
-      const result = await visionRequest(`/sessions/${encodeURIComponent(status.sessionId)}`, { method: "DELETE" });
-      setStatus(result.data);
-      setTool("");
-      setFeedback("视觉服务已停止");
-    } catch (error) { setFeedback(error.message); }
+      await sendAction({ type: "tracking.mode", mode: nextMode });
+      setTrackingMode(nextMode);
+      setFeedback(nextMode === "single_fish" ? "已选择单鱼循迹模式" : "已选择 YOLO 模式");
+    } catch (error) {
+      setFeedback(error.message);
+    }
+  }
+
+  async function stop() {
+    setPreviewEnabled(false);
+    window.clearTimeout(retryTimerRef.current);
+    setStreamFeedback("");
+    setFeedback("已关闭本机预览，其他客户端不受影响");
   }
 
   async function sendAction(action, report = true) {
@@ -523,7 +643,7 @@ export default function VisionPanel({
     exposureTimerRef.current = window.setTimeout(() => {
       if (sync.fail(actionId)) setFeedback("曝光确认超时，请重试");
     }, 5000);
-    sendAction({ type: "camera.exposure", mode: "absolute", value, actionId }, false)
+    sendSharedAction({ type: "camera.exposure", mode: "absolute", value, actionId }, false)
       .then((result) => {
         if (result.data.accepted === false) throw new Error("曝光设置未接受");
       })
@@ -547,11 +667,37 @@ export default function VisionPanel({
 
   async function toggleProcessing() {
     try {
-      const result = await visionRequest(`/sessions/${encodeURIComponent(status.sessionId)}/processing`, { method: processing ? "DELETE" : "POST" });
-      setStatus(result.data);
+      // Camera processing is shared by manual and vision views. Workspace
+      // sessions have a different id, so resolve the shared session first.
+      const sharedCurrent = await sharedVisionRequest("/sessions/current");
+      const sharedSession = sharedCurrent.data || sharedCurrent;
+      if (!sharedSession.sessionId) throw new Error("共享视觉会话尚未建立");
+      const result = await sharedVisionRequest(
+        `/sessions/${encodeURIComponent(sharedSession.sessionId)}/processing`,
+        { method: processing ? "DELETE" : "POST" },
+      );
+      const current = workspacePrefix
+        ? await visionRequest("/sessions/current")
+        : result;
+      const nextStatus = current.data || current;
+      setStatus(nextStatus);
+      setTrackingMode(nextStatus.trackingMode || trackingMode);
       setTool("");
       setFeedback(processing ? "视觉处理已停止，保留预览" : "视觉处理已启动");
     } catch (error) { setFeedback(error.message); }
+  }
+
+  async function sendSharedAction(action, report = true) {
+    const actionId = action.actionId || globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+    const sharedCurrent = await sharedVisionRequest("/sessions/current");
+    const sharedSession = sharedCurrent.data || sharedCurrent;
+    if (!sharedSession.sessionId) throw new Error("共享视觉会话尚未建立");
+    const result = await sharedVisionRequest(`/sessions/${encodeURIComponent(sharedSession.sessionId)}/actions`, {
+      method: "POST",
+      body: JSON.stringify({ ...action, actionId }),
+    });
+    if (report) setFeedback(result.data.accepted ? "操作已确认" : "操作未接受");
+    return result;
   }
 
   async function setOverlay(key, enabled) {
@@ -559,7 +705,7 @@ export default function VisionPanel({
     setOverlayPrefs(next);
     try {
       if (!status.sessionId || !running) return;
-      await sendAction({ type: "overlay.set", overlays: next }, false);
+      await (workspacePrefix ? sendAction : sendSharedAction)({ type: "overlay.set", overlays: next }, false);
       setStatus((current) => ({ ...current, metrics: { ...(current.metrics || {}), overlays: next } }));
       setFeedback(`${key === "detections" ? "YOLO 识别" : "路径"}已${enabled ? "显示" : "屏蔽"}`);
     } catch (error) {
@@ -581,23 +727,35 @@ export default function VisionPanel({
     return toVideoPoint(event, image.getBoundingClientRect(), videoWidth, videoHeight, mediaWidth, mediaHeight);
   }
 
-  function pointerDown(event) {
-    if (!editable || !tool) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
+  function beginCanvasInput(event) {
+    if (cropSelecting && isAdmin && running && !processing) {
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      cropStart.current = pointFrom(event); return;
+    }
+    if (!tool || (tool !== "path" && !editable)) return;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
     const point = pointFrom(event);
     if (tool === "path") setDrag({ start: point, points: [point] });
     else if (tool === "marker") setDrag({ start: point, points: [point] });
   }
 
-  function pointerMove(event) {
+  function moveCanvasInput(event) {
+    if (cropSelecting && cropStart.current) {
+      const p = pointFrom(event), a = cropStart.current;
+      setCropDraft({ x: cropRegion.x + Math.min(a.x,p.x)/videoWidth*cropRegion.width,
+        y: cropRegion.y + Math.min(a.y,p.y)/videoHeight*cropRegion.height,
+        width: Math.abs(a.x-p.x)/videoWidth*cropRegion.width,
+        height: Math.abs(a.y-p.y)/videoHeight*cropRegion.height }); return;
+    }
     if (!drag || tool !== "path") return;
     const point = pointFrom(event);
     const last = drag.points[drag.points.length - 1];
     if ((point.x - last.x) ** 2 + (point.y - last.y) ** 2 >= 16) setDrag({ ...drag, points: [...drag.points, point] });
   }
 
-  async function pointerUp(event) {
-    if (!editable || !tool) return;
+  async function finishCanvasInput(event) {
+    if (cropSelecting) { moveCanvasInput(event); cropStart.current = null; return; }
+    if (!tool || (tool !== "path" && !editable)) return;
     const point = pointFrom(event);
     try {
       if (tool === "calibration") await sendAction({ type: "calibration.point", ...point });
@@ -619,17 +777,25 @@ export default function VisionPanel({
         </div>
       </header>
       <details className="video-common-settings"><summary>视频设置</summary>
+        <label className="range-row"><span>本机清晰度</span><select aria-label="本机观看清晰度" value={viewQuality} onChange={event => setViewQuality(event.target.value)}><option value="smooth">流畅 · 640</option><option value="hd">高清 · 1280</option><option value="full">超清 · 1920</option></select></label>
+      {isAdmin && <details><summary>识别区域裁剪</summary>
+        <small>共享设置。先关闭识别；裁剪后重新标定场地。</small>
+        <button type="button" disabled={!running || processing} onClick={() => { setCropSelecting(!cropSelecting); setCropDraft(null); }}> {cropSelecting ? "取消框选" : "在视频上框选"} </button>
+        <button type="button" disabled={!cropDraft || processing} onClick={() => applyCrop(cropDraft)}>应用裁剪</button>
+        <button type="button" disabled={processing} onClick={() => applyCrop({x:0,y:0,width:1,height:1})}>恢复全画面</button>
+        {cropDraft && <small>已选择宽 {Math.round(cropDraft.width*100)}%、高 {Math.round(cropDraft.height*100)}%</small>}
+      </details>}
       <div className="vision-setup-bar">
 
         <label className="camera-select">摄像头<select value={cameraIndex} disabled={switchingCamera} onChange={changeCamera}><option value="">请选择摄像头</option>{cameras.map((camera) => <option key={camera.index} value={camera.index}>{cameraLabel(camera)}</option>)}</select></label>
         {<label className="camera-select">YOLO 模型<select value={selectedYoloModel} disabled={running || switchingCamera || !yoloModels.length} onChange={(event) => setSelectedYoloModel(event.target.value)}><option value="">{yoloModels.length ? "请选择 .pt 模型" : "未找到 .pt 模型"}</option>{yoloModels.map((model) => <option key={model} value={model}>{model}</option>)}</select><small className="camera-hint">{running ? `当前会话：${status.yoloModel || selectedYoloModel || "默认模型"}` : "选择本地 vision/assets 下的 .pt 模型"}</small></label>}
         <div className="video-switches">
-          <label className="video-switch-row"><span>视频<small>{running ? "已开启" : "已关闭"}</small></span>
-            <input type="checkbox" role="switch" aria-label="视频开关" checked={running}
+          <label className="video-switch-row"><span>本机预览<small>{running && previewEnabled ? "已开启" : "已关闭"}</small></span>
+            <input type="checkbox" role="switch" aria-label="本机预览开关" checked={running && previewEnabled}
               disabled={switchingCamera || videoToggleBusy || (!running && cameraIndex === "")}
-              onChange={async () => { setVideoToggleBusy(true); try { await (running ? stop() : start()); } finally { setVideoToggleBusy(false); } }} />
+              onChange={async () => { setVideoToggleBusy(true); try { await (running && previewEnabled ? stop() : start()); } finally { setVideoToggleBusy(false); } }} />
           </label>
-          <label className="video-switch-row"><span>识别<small>{processing ? "运行中" : "未开启"}</small></span>
+          <label className="video-switch-row"><span>{workspacePrefix ? "识别（服务器统一）" : "识别（共享）"}<small>{processing ? "运行中" : "未开启"}</small></span>
             <input type="checkbox" role="switch" aria-label="识别开关" checked={processing}
               disabled={!running || switchingCamera || videoToggleBusy}
               onChange={async () => { setVideoToggleBusy(true); try { await toggleProcessing(); } finally { setVideoToggleBusy(false); } }} />
@@ -644,28 +810,40 @@ export default function VisionPanel({
           <div className="fish-binding-list">
             {devices.filter((fish) => fish.online).map((fish) => {
               const active = fish.deviceId === targetDeviceId;
+              const ownedHere = leaseIsMine(fish.lease, user);
               const confirmed = active && selectedTrackId !== null
                 && status.targetDeviceId === fish.deviceId && status.targetTrackId === selectedTrackId;
               return <section key={fish.deviceId} className={`fish-binding-card ${active ? "selected" : ""}`}>
                 <button type="button" className="fish-binding-select" aria-pressed={active}
-                  disabled={switchingCamera} onClick={() => changeTargetDevice({ target: { value: fish.deviceId } })}>
+                  disabled={switchingCamera} onClick={async () => {
+                    if (!ownedHere && !(await onClaimDevice(fish))) return;
+                    changeTargetDevice({ target: { value: fish.deviceId } });
+                  }}>
                   <i className="signal online" /><span><strong>{fish.name || fish.deviceId}</strong><small>{fish.ip || fish.deviceId}</small></span>
-                  <b>{active ? "已选" : "在线"}</b>
+                  <b>{active ? "已选" : ownedHere ? "可控制" : "领取"}</b>
                 </button>
                 {active && <div className="fish-binding-target">
-                  <label>识别目标
-                    <select aria-label={`${fish.name || fish.deviceId}的识别目标`} value={selectedTrackId ?? ""} disabled={switchingCamera}
-                      onChange={(event) => onTargetTrackChange(event.target.value === "" ? null : Number(event.target.value))}>
-                      <option value="">不绑定目标</option>
-                      {selectedTrackId !== null && !detections.some((target) => target.trackId === selectedTrackId) && <option value={selectedTrackId}>目标 #{selectedTrackId} · 暂时丢失</option>}
-                      {detections.map((target) => <option key={target.trackId} value={target.trackId}>目标 #{target.trackId} · {target.color} · {Math.round(target.confidence * 100)}%</option>)}
-                    </select>
-                  </label>
-                  <span className="fish-binding-state" role="status">{selectedTrackId !== null
-                    ? !selectedDetection ? "目标暂时丢失" : confirmed ? `已绑定目标 #${selectedTrackId}` : "等待绑定确认"
-                    : status.targetDeviceId === fish.deviceId && status.targetTrackId != null
-                      ? "正在取消绑定…"
-                      : detections.length ? "未绑定 · 可手动控制" : "未绑定 · 暂无识别目标"}</span>
+                  {singleFishMode ? (
+                    <span className="fish-binding-state" role="status">
+                      {singleFishDetected ? "单鱼模式 · 自动跟踪当前鱼" : "单鱼模式 · 等待识别鱼"}
+                    </span>
+                  ) : (
+                    <>
+                      <label>识别目标
+                        <select aria-label={`${fish.name || fish.deviceId}的识别目标`} value={selectedTrackId ?? ""} disabled={switchingCamera}
+                          onChange={(event) => onTargetTrackChange(event.target.value === "" ? null : Number(event.target.value))}>
+                          <option value="">不绑定目标</option>
+                          {selectedTrackId !== null && !detections.some((target) => target.trackId === selectedTrackId) && <option value={selectedTrackId}>目标 #{selectedTrackId} · 暂时丢失</option>}
+                          {detections.map((target) => <option key={target.trackId} value={target.trackId}>目标 #{target.trackId} · {target.color} · {Math.round(target.confidence * 100)}%</option>)}
+                        </select>
+                      </label>
+                      <span className="fish-binding-state" role="status">{selectedTrackId !== null
+                        ? !selectedDetection ? "目标暂时丢失" : confirmed ? `已绑定目标 #${selectedTrackId}` : "等待绑定确认"
+                        : status.targetDeviceId === fish.deviceId && status.targetTrackId != null
+                          ? "正在取消绑定…"
+                          : detections.length ? "未绑定 · 可手动控制" : "未绑定 · 暂无识别目标"}</span>
+                    </>
+                  )}
                 </div>}
               </section>;
             })}
@@ -675,11 +853,17 @@ export default function VisionPanel({
             {devices.filter((fish) => !fish.online).map((fish) => <div key={fish.deviceId}>{fish.name || fish.deviceId}<small>离线</small></div>)}
           </details>}
         </aside>}
-        <div className="shared-video-stage video-stage" style={{ "--video-aspect": `${videoWidth} / ${videoHeight}` }} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp}>
-          {running ? <>
+        <div className="shared-video-stage video-stage" style={{ "--video-aspect": `${videoWidth} / ${videoHeight}` }}
+          onPointerDown={beginCanvasInput} onPointerMove={moveCanvasInput} onPointerUp={finishCanvasInput}
+          onMouseDown={beginCanvasInput} onMouseMove={moveCanvasInput} onMouseUp={finishCanvasInput}>
+          {cropSelecting && cropDraft && <div style={{ position:"absolute", zIndex:5, pointerEvents:"none", border:"2px solid #38bdf8", background:"#38bdf822", left:`${(cropDraft.x-cropRegion.x)/cropRegion.width*100}%`, top:`${(cropDraft.y-cropRegion.y)/cropRegion.height*100}%`, width:`${cropDraft.width/cropRegion.width*100}%`, height:`${cropDraft.height/cropRegion.height*100}%` }} />}
+          {!previewEnabled ? <div className="video-placeholder"><strong>本机预览已关闭</strong><button type="button" disabled={videoToggleBusy} onClick={start}>打开预览</button></div> : running ? <>
             <VideoStream
               ref={imageRef}
               sessionId={status.sessionId}
+              workspacePrefix={workspacePrefix}
+              clientId={CONTROL_CLIENT_ID}
+              quality={viewQuality}
               retry={streamRetry}
               onError={reconnectStream}
               onReady={streamConnected}
@@ -688,10 +872,10 @@ export default function VisionPanel({
             />
             {streamState !== "ready" && <div className={`video-stream-status ${streamState}`}>
               <strong>{streamState === "error" ? "视频流暂时不可用" : "正在连接视频流…"}</strong>
-              <span>{streamState === "error" ? (sessionErrorMessage(status) || "摄像头未返回可显示画面，正在自动重试") : "请稍候，摄像头画面即将出现"}</span>
+              <span>{streamState === "error" ? (sessionErrorMessage(status) || "视频连接暂时中断，正在自动重试") : "请稍候，摄像头画面即将出现"}</span>
             </div>}
           </> : <div className={`video-placeholder ${status.state === "error" ? "has-error" : ""}`}><strong>{status.state === "error" ? "摄像头启动失败" : "视觉画面未启动"}</strong><span>{sessionErrorMessage(status) || "选择摄像头后开始预览"}</span></div>}
-          {running && <div className="video-badge">服务器 {serverClock}<br />本机 {clock}{latencyLabel}<br />{videoWidth} × {videoHeight}</div>}
+          {running && previewEnabled && <div className="video-badge">服务器 {serverClock}<br />本机 {clock}{latencyLabel}<br />{videoWidth} × {videoHeight}</div>}
         </div>
         {!showControls ? null : manual ? <aside className="vision-controls manual-video-controls-panel">
           <div className="vision-control-head"><h2>视频设置</h2></div>
@@ -701,13 +885,14 @@ export default function VisionPanel({
         </aside> : <aside className="vision-controls">
           <div className="vision-control-head"><h2>视觉控制</h2><small>{controlModeLabel}</small></div>
           <section className="vision-mode-panel">
-            <div className="mode-grid">{CONTROL_MODES.map(([name, label, description]) => <button key={name} type="button" className={controlMode === name ? "active" : ""} aria-pressed={controlMode === name} onClick={() => { setControlMode(name); setFeedback(`视觉模式：${description}`); }}>{label}</button>)}</div>
-            <div className="param-panel auto-param-panel" aria-label="自动控制参数">
-              <div className="param-title">自动控制参数 <span>限速 {autoSpeed} · 幅度 {autoAmplitude} · 置信 {autoConfidence}</span></div>
-              <label className="slider-row"><span>限速</span><input type="range" min="0" max="100" value={autoSpeed} onChange={(event) => setAutoSpeed(Number(event.target.value))} /><output>{autoSpeed}%</output></label>
-              <label className="slider-row"><span>最大幅度</span><input type="range" min="0" max="90" value={autoAmplitude} onChange={(event) => setAutoAmplitude(Number(event.target.value))} /><output>{autoAmplitude}°</output></label>
-              <label className="slider-row"><span>置信度</span><input type="range" min="50" max="99" value={autoConfidence} onChange={(event) => setAutoConfidence(Number(event.target.value))} /><output>{autoConfidence}%</output></label>
+            <div className="mode-grid">{TRACKING_MODES.map(([name, label]) => <button key={name} type="button" className={trackingMode === name ? "active" : ""} aria-pressed={trackingMode === name} disabled={switchingCamera || trackingMode === name} onClick={() => changeTrackingMode(name)}>{label}</button>)}</div>
+            <small>当前：{trackingModeLabel}</small>
+          </section>
+          <section className="vision-mode-panel">
+            <div className="mode-grid">
+              <button type="button" className="active" aria-pressed="true" disabled>自动控制</button>
             </div>
+            <small>根据鱼的实时速度、偏航误差、曲率和距离自动调节推进</small>
           </section>
           <section className={`vision-workflow ${workflow.trackingActive ? "active" : ""}`}>
             <header><strong>循迹流程</strong><span>{workflowLabel}</span></header>
@@ -717,16 +902,14 @@ export default function VisionPanel({
               return <p key={key} className={complete ? "complete" : current ? "current" : "pending"}><i>{complete ? "✓" : index + 1}</i><span>{label}</span><b>{complete ? "完成" : current ? "待处理" : "等待"}</b></p>;
             })}</div>
             {workflow.blockers?.length > 0 && <small>{workflow.blockers[0]}</small>}
-            {workflow.headingCalibration && <div className={`heading-calibration-progress ${workflow.headingCalibration.status || "idle"}`}><span><b>方向采样</b><em>{workflow.headingCalibration.sampleCount || 0} 帧 · {Math.round((workflow.headingCalibration.progress || 0) * 100)}%</em></span><progress max="1" value={workflow.headingCalibration.progress || 0} /><small>{workflow.headingCalibration.message || "等待开始"}</small></div>}
           </section>
           <div className="tool-grid">{TOOLS.map(([name, label]) => <button key={name} className={tool === name ? "active" : ""} disabled={!editable} onClick={() => selectTool(name)}>{label}</button>)}</div>
           <div className="tool-grid compact">
-            <button disabled={!running || !workflow.canCalibrateHeading} onClick={() => sendAction({ type: "heading.calibrate" })}>{workflow.headingCalibrating ? "方向标定中" : "方向标定"}</button>
             <button disabled={!running} onClick={() => sendAction({ type: "path.clear" })}>清除轨迹</button>
             <button disabled={!running} onClick={() => sendAction({ type: "recording.toggle" })}>录像</button>
             <button disabled={!running} onClick={() => sendAction({ type: "snapshot.capture" })}>截图</button>
           </div>
-          <div className="tracking-actions"><button disabled={!running || !workflow.canStart || targetRequiredForMotion} onClick={() => sendAction({ type: "tracking.start" })}>{targetRequiredForMotion ? "选择鱼后循迹" : workflow.headingCalibrating ? "方向标定中" : workflow.trackingActive ? "循迹运行中" : "启动循迹"}</button><button className="stop" disabled={!running} onClick={() => sendAction({ type: "tracking.stop" })}>停止循迹</button></div>
+          <div className="tracking-actions"><button disabled={!running || !workflow.canStart || targetRequiredForMotion} onClick={() => sendAction({ type: "tracking.start" })}>{targetRequiredForMotion ? "选择鱼后循迹" : workflow.trackingActive ? "循迹运行中" : "启动循迹"}</button><button className="stop" disabled={!running} onClick={() => sendAction({ type: "tracking.stop" })}>停止循迹</button></div>
           <p className="feedback" aria-live="polite">{streamFeedback || feedback || yolo?.error || yolo?.lastInferenceError || (running ? `摄像头 ${status.cameraIndex} 正在处理 · ${yoloLabel} · ${coordinateLabel}` : "视觉服务未启动")}</p>
         </aside>}
       </div>

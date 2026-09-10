@@ -269,3 +269,14 @@ input[type=range] { accent-color:var(--accent); }
 .video-common-settings .exposure-advanced > summary { font-size:10px; color:var(--muted); cursor:pointer; margin:0; }
 .exposure-advanced .exposure-limit-row { margin-top:10px; }
 .exposure-advanced small { font-size:10px; color:var(--muted); }
+
+/* Exposure and its upper bound share a single compact row. */
+.video-common-settings .exposure-inline { display:flex; align-items:center; gap:12px; }
+.video-common-settings .exposure-inline .exposure-slider-row { flex:1; min-width:0; gap:8px; }
+.video-common-settings .exposure-inline .exposure-limit-row { display:flex; align-items:center; flex:0 0 auto; gap:6px; margin:0; font-size:11px; }
+.video-common-settings .exposure-inline .exposure-limit-row input { width:76px; min-height:28px; padding:3px 6px; font-size:11px; }
+@media(max-width:480px) {
+ .video-common-settings .exposure-inline { gap:6px; }
+ .video-common-settings .exposure-inline .exposure-slider-row { grid-template-columns:26px minmax(0,1fr) 30px; gap:4px; }
+ .video-common-settings .exposure-inline .exposure-limit-row input { width:64px; }
+}

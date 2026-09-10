@@ -48,6 +48,15 @@ class WebActionTranslationTests(unittest.TestCase):
                     runtime_action,
                 )
 
+    def test_tracking_mode_is_translated_for_runtime(self):
+        self.assertEqual(
+            translate_web_action({"type": "tracking.mode", "mode": "single_fish"}),
+            ("TRACKING_MODE", "single_fish"),
+        )
+        self.assertIsNone(
+            translate_web_action({"type": "tracking.mode", "mode": "invalid"}),
+        )
+
     def test_overlay_visibility_action_is_translated(self):
         self.assertEqual(
             translate_web_action({

@@ -13,3 +13,10 @@ test("浏览器接管变化会触发设备快照更新", () => {
   const device = { deviceId: "fish", lease: { ownerId: "user", clientId: "a" } };
   assert.notEqual(deviceStateSignature([device]), deviceStateSignature([{ ...device, lease: { ...device.lease, clientId: "b" } }]));
 });
+
+test("重启保留归属不等于当前浏览器已获控制权", () => {
+  const user = { id: "user", email: "user@example.com" };
+  assert.equal(leaseIsMine({ ownerId: "user", clientId: "" }, user), false);
+  assert.equal(leaseIsMine({ ownerId: "user" }, user), false);
+  assert.equal(leaseIsMine({ ownerId: "user", clientId: CONTROL_CLIENT_ID }, user), true);
+});

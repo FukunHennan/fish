@@ -1,4 +1,4 @@
-import { startLeaseRenewal } from "./leaseRenewal.js";
+import { createMultiKeyboard, DEFAULT_KEYS } from "./multiKeyboard.js";
 import { Component, StrictMode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
@@ -7,10 +7,9 @@ import "./rename.css";
 import "./console-theme.css";
 import VisionPanel from "./VisionPanel.jsx";
 import AuthScreen from "./components/AuthScreen.jsx";
-import DeviceRail from "./components/DeviceRail.jsx";
 import ManualInspector from "./components/ManualInspector.jsx";
 import SettingsWorkspace from "./components/SettingsWorkspace.jsx";
-import { deviceStateSignature, keyboardMode, mergeDevicesInStableOrder } from "./deviceState.js";
+import { deviceStateSignature, mergeDevicesInStableOrder } from "./deviceState.js";
 import {
   batteryLevel,
   deviceLabel,
@@ -30,8 +29,6 @@ const CALIBRATION_STORAGE_KEY = "fish-controller-motion-calibration-v1";
 const MANUAL_MOTION_STORAGE_KEY = "fish-controller-manual-motion-v1";
 const DEFAULT_AMPLITUDE_PERCENT = 40;
 const DEFAULT_FREQUENCY = 2.5;
-const KEYBOARD_CODES = new Set(["KeyW", "KeyA", "KeyS", "KeyD", "Space"]);
-const TURN_CODES = new Set(["KeyA", "KeyD"]);
 
 function clamp(value, min, max, fallback) {
   const number = Number(value);
@@ -78,32 +75,26 @@ function visionStateSignature(state) {
   });
 }
 
-function CommandStrip({ page, device, feedback, keyboardStatus, pressedKeys }) {
-  const modeLabel = keyboardStatus.mode && keyboardStatus.mode !== "stop"
-    ? MODE_LABELS[keyboardStatus.mode] || keyboardStatus.mode
-    : "停止";
-  const primary = keyboardStatus.message || feedback || (device ? `${deviceLabel(device)} 等待控制指令` : "等待控制指令");
-  return (
-    <section className="command-strip" aria-live="polite">
-      <div>
-        <strong>{primary}</strong>
-      </div>
-      <div className="key-hints" aria-label="键盘状态">
-        {["W", "A", "S", "D"].map((key) => (
-          <kbd className={`key ${pressedKeys.has(`Key${key}`) ? "pressed" : ""}`} key={key}>{key}</kbd>
-        ))}
-        <span className="command-mode">{modeLabel}</span>
-      </div>
-    </section>
-  );
-}
-
 function App() {
   const [auth, setAuth] = useState({ loading: true, authenticated: false, bootstrap: false, user: null });
+  const multiKeyboardRef = useRef(null);
+  const [keyProfiles, setKeyProfiles] = useState({});
+  useEffect(() => {
+    try { setKeyProfiles(JSON.parse(localStorage.getItem(`fish-keys:${auth.user?.id || "guest"}`) || "{}")); } catch { setKeyProfiles({}); }
+  }, [auth.user?.id]);
+  function saveKeys(deviceId, profile) {
+    multiKeyboardRef.current?.stop();
+    const next = { ...keyProfiles, [deviceId]: profile };
+    setKeyProfiles(next);
+    localStorage.setItem(`fish-keys:${auth.user?.id || "guest"}`, JSON.stringify(next));
+  }
   const [page, setPage] = useState("manual");
   const [devices, setDevices] = useState([]);
   const [aliases, setAliases] = useState(loadAliases);
-  const [manualMotionByDevice, setManualMotionByDevice] = useState(loadManualMotionProfiles);
+  const [manualMotionByDevice, setManualMotionByDevice] = useState({});
+  useEffect(() => {
+    try { setManualMotionByDevice(JSON.parse(localStorage.getItem(`${MANUAL_MOTION_STORAGE_KEY}:${auth.user?.id || "guest"}`) || "{}")); } catch { setManualMotionByDevice({}); }
+  }, [auth.user?.id]);
   const [selectedDeviceId, setSelectedDeviceId] = useState("");
   const [otaSelectedIds, setOtaSelectedIds] = useState(() => new Set());
   const [feedback, setFeedback] = useState("等待控制指令");
@@ -114,6 +105,7 @@ function App() {
   const [firmwareInfo, setFirmwareInfo] = useState({ available: false });
   const [firmwareFile, setFirmwareFile] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [otaFeedback, setOtaFeedback] = useState("请选择电脑上的 firmware.bin，并选择升级目标");
   const [renameDevice, setRenameDevice] = useState(null);
   const [renameDraft, setRenameDraft] = useState("");
@@ -125,26 +117,13 @@ function App() {
   const [visionTrackId, setVisionTrackId] = useState(null);
   const [visionState, setVisionState] = useState({ state: "idle", targetDeviceId: "", metrics: {} });
   const [keyboardStatus, setKeyboardStatus] = useState({ phase: "idle", mode: "stop", deviceId: "", message: "" });
-  const [pressedKeys, setPressedKeys] = useState(() => new Set());
   const [calibrationProfiles, setCalibrationProfiles] = useState(loadCalibrationProfiles);
-  const keyboardRef = useRef({
-    pressed: new Set(),
-    turnOrder: new Map(),
-    turnSequence: 0,
-    active: false,
-    leasePromise: null,
-    commandPromise: Promise.resolve(),
-    lastMode: "",
-    lastSentMode: "",
-    lastDeviceId: "",
-    intentVersion: 0,
-    lastErrorAt: 0,
-    sequence: 0,
-  });
+  const keyboardRef = useRef({ sequence: 0, lastErrorAt: 0 });
   const manualControlRef = useRef(null);
   const devicesRef = useRef([]);
   const deviceSignatureRef = useRef("");
   const visionStateSignatureRef = useRef("");
+  const visionSessionIdRef = useRef(null);
 
   useEffect(() => {
     let active = true;
@@ -195,6 +174,7 @@ function App() {
     selectedDevice,
     manualMotionByDevice,
     selectedManualMotion,
+    keyProfiles,
   };
 
   function commitDeviceSnapshot(next, force = false) {
@@ -220,11 +200,16 @@ function App() {
       visionStateSignatureRef.current = signature;
       setVisionState(next);
     }
-    if (next?.targetDeviceId !== undefined) {
-      setVisionDeviceId((current) => current === (next.targetDeviceId || "") ? current : (next.targetDeviceId || ""));
-    }
-    if (next?.targetTrackId !== undefined) {
-      setVisionTrackId((current) => current === (next.targetTrackId ?? null) ? current : (next.targetTrackId ?? null));
+    // SSE can arrive between a target change request and its response. Do not
+    // let the old session snapshot overwrite the user's newer selection.
+    if (next?.sessionId !== visionSessionIdRef.current) {
+      visionSessionIdRef.current = next?.sessionId || null;
+      if (next?.targetDeviceId !== undefined) {
+        setVisionDeviceId(next.targetDeviceId || "");
+      }
+      if (next?.targetTrackId !== undefined) {
+        setVisionTrackId(next.targetTrackId ?? null);
+      }
     }
   }, []);
 
@@ -267,13 +252,27 @@ function App() {
         return sameStringSet(current, filtered) ? current : filtered;
       });
       if (lostControl.length) {
-        keyboardRef.current.pressed.clear();
+
         stopKeyboardControl(lostControl);
         setFeedback(`${lostControl.map(deviceLabel).join("、")} 控制权已失效，正在停止设备`);
       }
     });
-    source.onerror = () => {
-      if (active) setError("设备事件通道暂时断开，浏览器正在自动重连");
+    let checkingSession = false;
+    source.onerror = async () => {
+      if (!active) return;
+      setError("设备事件通道暂时断开，浏览器正在自动重连");
+      if (checkingSession) return;
+      checkingSession = true;
+      try {
+        const response = await fetch("/api/auth/me", { cache: "no-store" });
+        const session = await response.json();
+        if (active && (response.status === 401 || (response.ok && session.authenticated === false))) {
+          source.close();
+          setError("");
+          setAuth({ loading: false, authenticated: false, bootstrap: Boolean(session.bootstrap), user: null });
+        }
+      } catch { /* Network failure keeps the automatic reconnect active. */ }
+      finally { checkingSession = false; }
     };
     return () => {
       active = false;
@@ -347,6 +346,7 @@ function App() {
   }
 
   async function logout() {
+    await multiKeyboardRef.current?.stop();
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
     setAuth({ loading: false, authenticated: false, bootstrap: false, user: null });
     setDevices([]);
@@ -375,21 +375,8 @@ function App() {
   function selectDevice(device) {
     if (!device?.deviceId) return;
     const currentDevice = manualControlRef.current?.selectedDevice;
-    const keyboard = keyboardRef.current;
-    if (
-      currentDevice
-      && currentDevice.deviceId !== device.deviceId
-      && (
-        keyboard.pressed.size > 0
-        || keyboard.active
-        || keyboard.lastMode
-        || (keyboard.lastSentMode && keyboard.lastSentMode !== "stop")
-      )
-    ) {
-      keyboard.pressed.clear();
-      keyboard.turnOrder.clear();
-      setPressedKeys(new Set());
-      stopKeyboardControl(currentDevice, true);
+    if (currentDevice && currentDevice.deviceId !== device.deviceId && !manualControlRef.current.keyProfiles[currentDevice.deviceId]?.enabled) {
+      multiKeyboardRef.current?.stop(currentDevice);
     }
     setSelectedDeviceId(device.deviceId);
     const lease = leaseSummary(device, auth.user);
@@ -411,15 +398,17 @@ function App() {
     }
   }, [visionDeviceId]);
 
-  async function claimDevice(device) {
-    if (!device?.deviceId || leaseBusy || !device.online) return;
+  async function claimDevice(device, mode = "manual") {
+    if (!device?.deviceId || leaseBusy || !device.online) return false;
     setLeaseBusy(true);
     setFeedback(`正在接管 ${deviceLabel(device)}…`);
     try {
-      await acquireLease(device, "manual");
-      setFeedback(`已接管 ${deviceLabel(device)}，其他控制已自动释放`);
+      await acquireLease(device, mode);
+      setFeedback(`已接管 ${deviceLabel(device)}，可继续接管其他鱼`);
+      return true;
     } catch (error) {
       setFeedback(error.message);
+      return false;
     } finally {
       setLeaseBusy(false);
     }
@@ -429,7 +418,7 @@ function App() {
     const response = await fetch("/api/leases", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ deviceId: device.deviceId, force, clientId: CONTROL_CLIENT_ID }),
+      body: JSON.stringify({ deviceId: device.deviceId, force: force === true, clientId: CONTROL_CLIENT_ID }),
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok || result.released === false) {
@@ -438,15 +427,15 @@ function App() {
     patchDevice(device.deviceId, { lease: null });
   }
 
-  async function releaseSelectedDevice() {
+  async function releaseSelectedDevice(force = false) {
     const device = manualControlRef.current.selectedDevice;
     if (!device || leaseBusy) return;
     setLeaseBusy(true);
     setFeedback(`正在停止并释放 ${deviceLabel(device)}…`);
-    keyboardRef.current.pressed.clear();
-    await stopKeyboardControl(device, true);
+
     try {
-      await releaseLease(device);
+      await stopKeyboardControl(device, true);
+      await releaseLease(device, force);
       setSelectedDeviceId("");
       setFeedback(`${deviceLabel(device)} 控制权已释放`);
     } catch (error) {
@@ -475,18 +464,12 @@ function App() {
     };
     setManualMotionByDevice((profiles) => {
       const updated = { ...profiles, [device.deviceId]: next };
-      localStorage.setItem(MANUAL_MOTION_STORAGE_KEY, JSON.stringify(updated));
+      localStorage.setItem(`${MANUAL_MOTION_STORAGE_KEY}:${auth.user?.id || "guest"}`, JSON.stringify(updated));
       return updated;
     });
 
-    const keyboard = keyboardRef.current;
-    if (
-      keyboard.active
-      && keyboard.lastMode
-      && manualControlRef.current.selectedDevice?.deviceId === device.deviceId
-    ) {
-      sendRealtimeCommand(device, keyboard.lastMode, undefined, next).catch(reportKeyboardError);
-    }
+    const mode = multiKeyboardRef.current?.mode(device.deviceId);
+    if (mode && mode !== "stop") sendRealtimeCommand(device, mode, undefined, next).catch(reportKeyboardError);
   }
 
   async function sendCommand(device, mode, override = null) {
@@ -583,177 +566,61 @@ function App() {
     setFeedback(error.message);
   }
 
-  function sendKeyboardFrame(mode, targetDevice = null, requestedVersion = null) {
-    const current = manualControlRef.current;
-    const device = targetDevice || current.selectedDevice;
-    const isStop = mode === "stop";
-    if ((!current.authenticated || current.page !== "manual") && !isStop) return;
-    if (!device) return;
-    const state = keyboardRef.current;
-    const version = requestedVersion ?? ++state.intentVersion;
-    if (!isStop && state.lastSentMode === mode && state.lastDeviceId === device.deviceId) return;
-    state.commandPromise = state.commandPromise
-      .catch(() => {})
-      .then(async () => {
-        // A newer keyboard snapshot supersedes an old turn before it reaches
-        // the transport queue. Commands already sent remain ordered by sequence.
-        if (version !== state.intentVersion && (isStop || state.lastMode)) return;
-        if (!isStop && (
-          !state.active
-          || state.lastMode !== mode
-          || state.lastDeviceId !== device.deviceId
-          || version !== state.intentVersion
-        )) return;
-        if (!isStop && !leaseIsMine(device.lease, auth.user)) {
-          if (!state.leasePromise) {
-            setLeaseBusy(true);
-            state.leasePromise = acquireLease(device, "manual")
-              .finally(() => {
-                state.leasePromise = null;
-                setLeaseBusy(false);
-              });
-          }
-          await state.leasePromise;
-          if (!state.active || state.lastMode !== mode || version !== state.intentVersion) return;
-        }
-        setKeyboardStatus({
-          phase: "queued",
-          mode,
-          deviceId: device.deviceId,
-          message: isStop ? "停止命令已排队" : `${MODE_LABELS[mode] || mode} 命令已排队`,
-        });
-        await sendRealtimeCommand(device, mode);
-        if (version === state.intentVersion) {
-          state.lastSentMode = mode;
-          state.lastDeviceId = device.deviceId;
-          setKeyboardStatus({
-            phase: "queued",
-            mode,
-            deviceId: device.deviceId,
-            message: isStop ? "停止命令已排队" : `${MODE_LABELS[mode] || mode} 已排队，等待设备状态确认`,
-          });
-        }
-      })
-      .catch((error) => {
-        if (!isStop && version === state.intentVersion) {
-          window.setTimeout(() => stopKeyboardControl(device, true), 0);
-        }
-        reportKeyboardError(error);
-      });
-  }
-
-  function stopKeyboardControl(targetDevice = null, forceStop = false) {
-    const state = keyboardRef.current;
-    const shouldStop = forceStop || state.active || state.lastMode || (state.lastSentMode && state.lastSentMode !== "stop");
-    const version = ++state.intentVersion;
-    state.active = false;
-    state.lastMode = "";
-    state.lastDeviceId = "";
-    state.lastSentMode = "stop";
-    state.turnOrder.clear();
-    if (!shouldStop) return Promise.resolve();
-    const targets = Array.isArray(targetDevice) ? targetDevice : [targetDevice || manualControlRef.current.selectedDevice];
-    targets.filter(Boolean).forEach((device) => sendKeyboardFrame("stop", device, version));
-    return state.commandPromise;
-  }
-
-  function updateKeyboardControl() {
-    const state = keyboardRef.current;
-    const current = manualControlRef.current;
-    if (!current.authenticated || current.page !== "manual" || !current.selectedDevice) {
-      stopKeyboardControl();
-      return;
-    }
-    const mode = keyboardMode(state.pressed, state.turnOrder);
-    if (mode === "stop") {
-      const wasActive = state.active || Boolean(state.lastMode);
-      stopKeyboardControl();
-      // S/Space is also an explicit stop for motion that was started outside
-      // the current keyboard loop (for example a previous command or vision).
-      if (!wasActive && (state.pressed.has("KeyS") || state.pressed.has("Space"))) {
-        sendKeyboardFrame("stop");
-      }
-      return;
-    }
-    state.active = true;
-    state.lastMode = mode;
-    state.lastDeviceId = current.selectedDevice.deviceId;
-    sendKeyboardFrame(mode);
+  function stopKeyboardControl(targetDevice = null) {
+    const driver = multiKeyboardRef.current;
+    if (!driver) return Promise.resolve();
+    return Array.isArray(targetDevice) ? Promise.all(targetDevice.map(device => driver.stop(device))) : driver.stop(targetDevice);
   }
 
   useEffect(() => {
-    function onKeyDown(event) {
-      if (!KEYBOARD_CODES.has(event.code) || isTypingTarget(event.target)) return;
-      event.preventDefault();
-      const state = keyboardRef.current;
-      if (state.pressed.has(event.code)) return;
-      state.pressed.add(event.code);
-      if (TURN_CODES.has(event.code)) {
-        state.turnOrder.set(event.code, ++state.turnSequence);
-      }
-      setPressedKeys(new Set(state.pressed));
-      updateKeyboardControl();
-    }
-    function onKeyUp(event) {
-      if (!KEYBOARD_CODES.has(event.code) || isTypingTarget(event.target)) return;
-      event.preventDefault();
-      const state = keyboardRef.current;
-      state.pressed.delete(event.code);
-      setPressedKeys(new Set(state.pressed));
-      updateKeyboardControl();
-    }
-    function releaseKeyboard() {
-      const state = keyboardRef.current;
-      state.pressed.clear();
-      state.turnOrder.clear();
-      setPressedKeys(new Set());
-      stopKeyboardControl();
-    }
-    const stopRenewal = startLeaseRenewal({
-      getTarget: () => {
+    const driver = createMultiKeyboard({
+      targets: () => {
         const current = manualControlRef.current;
-        const state = keyboardRef.current;
-        const device = current.selectedDevice;
-        return current.authenticated && current.page === "manual" && !document.hidden
-          && state.active && device?.deviceId === state.lastDeviceId
-          && leaseIsMine(device.lease, current.user)
-          ? device : null;
+        if (!current.authenticated || current.page !== "manual" || document.hidden) return [];
+        return devicesRef.current.filter(d => d.online && leaseIsMine(d.lease, current.user))
+          .filter(d => current.keyProfiles[d.deviceId]?.enabled || d.deviceId === current.selectedDevice?.deviceId)
+          .map(device => ({ device, keys: current.keyProfiles[device.deviceId]?.keys || DEFAULT_KEYS }));
       },
-      renew: async (device) => {
-        const response = await fetch("/api/leases", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ deviceId: device.deviceId, clientId: CONTROL_CLIENT_ID }),
-        });
-        if (!response.ok) throw new Error("控制权续期失败，已停止键盘控制");
-      },
-      onError: (error) => {
-        releaseKeyboard();
-        reportKeyboardError(error);
-      },
+      send: sendRealtimeCommand,
+      onError: reportKeyboardError,
     });
-    window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("keyup", onKeyUp);
-    window.addEventListener("blur", releaseKeyboard);
-    function onVisibilityChange() {
-      if (document.hidden) releaseKeyboard();
+    multiKeyboardRef.current = driver;
+    function keyDown(event) {
+      if (isTypingTarget(event.target) || event.ctrlKey || event.altKey || event.metaKey) return;
+      if (driver.key(event.code, true)) event.preventDefault();
     }
-    document.addEventListener("visibilitychange", onVisibilityChange);
+    function keyUp(event) { if (driver.key(event.code, false)) event.preventDefault(); }
+    function release() { driver.stop(); }
+    function visibility() { if (document.hidden) release(); }
+    let renewing = false;
+    const timer = window.setInterval(async () => {
+      driver.update();
+      if (renewing) return;
+      renewing = true;
+      try {
+        await Promise.all(driver.active().map(async device => {
+          const response = await fetch("/api/leases", { method: "PATCH", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ deviceId: device.deviceId, clientId: CONTROL_CLIENT_ID }) });
+          if (!response.ok) { await driver.stop(device); throw new Error("控制权已失效"); }
+        }));
+      } catch (error) { reportKeyboardError(error); }
+      finally { renewing = false; }
+    }, 1000);
+    window.addEventListener("keydown", keyDown);
+    window.addEventListener("keyup", keyUp);
+    window.addEventListener("blur", release);
+    document.addEventListener("visibilitychange", visibility);
     return () => {
-      stopRenewal();
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("keyup", onKeyUp);
-      window.removeEventListener("blur", releaseKeyboard);
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-      releaseKeyboard();
+      window.clearInterval(timer); release(); multiKeyboardRef.current = null;
+      window.removeEventListener("keydown", keyDown); window.removeEventListener("keyup", keyUp);
+      window.removeEventListener("blur", release); document.removeEventListener("visibilitychange", visibility);
     };
   }, []);
 
   useEffect(() => {
     if (page !== "manual" || !auth.authenticated) {
-      keyboardRef.current.pressed.clear();
-      keyboardRef.current.turnOrder.clear();
-      setPressedKeys(new Set());
+
+
       stopKeyboardControl();
     }
   }, [auth.authenticated, page]);
@@ -825,28 +692,55 @@ function App() {
     if (!firmwareFile.name.toLowerCase().endsWith(".bin")) { setOtaFeedback("只允许上传 .bin 文件"); return; }
     if (firmwareFile.size > 8 * 1024 * 1024) { setOtaFeedback("固件超过 8 MB 上限"); return; }
     setUploading(true);
+    setUploadProgress(0);
     setOtaFeedback("正在上传并校验固件…");
     try {
       const form = new FormData();
       form.append("firmware", firmwareFile);
-      const response = await fetch("/api/firmware", { method: "POST", body: form });
-      const raw = await response.text();
-      if (!response.ok) throw new Error(raw.trim() || "上传失败");
-      const info = JSON.parse(raw);
+      const info = await new Promise((resolve, reject) => {
+        const request = new XMLHttpRequest();
+        request.open("POST", "/api/firmware");
+        request.upload.addEventListener("progress", (event) => {
+          if (event.lengthComputable) setUploadProgress(Math.round((event.loaded / event.total) * 100));
+        });
+        request.addEventListener("load", () => {
+          const raw = request.responseText || "";
+          if (request.status < 200 || request.status >= 300) {
+            reject(new Error(raw.trim() || "上传失败"));
+            return;
+          }
+          try { resolve(JSON.parse(raw)); } catch { reject(new Error("服务器返回了无效的固件信息")); }
+        });
+        request.addEventListener("error", () => reject(new Error("上传连接失败")));
+        request.addEventListener("abort", () => reject(new Error("上传已取消")));
+        request.send(form);
+      });
       setFirmwareInfo(info);
+      setUploadProgress(100);
       setOtaFeedback(`固件已就绪 · ${info.name} · ${formatBytes(info.size)}`);
+      setFirmwareFile(null);
+      return info;
     } catch (uploadError) {
       setOtaFeedback(`上传失败：${uploadError.message}`);
+      return null;
     } finally {
       setUploading(false);
     }
   }
 
   async function startOta() {
-    if (!firmwareInfo.available) { setOtaFeedback("请先上传有效的 firmware.bin"); return; }
+    if (!firmwareInfo.available && !firmwareFile) { setOtaFeedback("请先选择 firmware.bin"); return; }
     if (!otaSelectedDevices.length || sending) { setOtaFeedback("请至少选择一台在线设备作为 OTA 目标"); return; }
-    if (!window.confirm(`确定使用 ${firmwareInfo.name || "当前固件"} 升级 ${otaSelectedDevices.length} 台设备？升级期间设备会停止并重启。`)) return;
+    const firmwareName = firmwareFile?.name || firmwareInfo.name || "当前固件";
+    if (!window.confirm(`确定使用 ${firmwareName} 升级 ${otaSelectedDevices.length} 台设备？升级期间设备会停止并重启。`)) return;
     setSending(true);
+    if (firmwareFile) {
+      const preparedFirmware = await uploadFirmware();
+      if (!preparedFirmware?.available) {
+        setSending(false);
+        return;
+      }
+    }
     setOtaFeedback(`正在向 ${otaSelectedDevices.length} 台设备创建 OTA 任务…`);
     const results = await Promise.allSettled(otaSelectedDevices.map(async (device) => {
       const response = await fetch("/api/ota", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deviceId: device.deviceId, name: deviceLabel(device) }) });
@@ -903,12 +797,15 @@ function App() {
         <div className={`workspace ${page}-workspace`}>
           <section className={`stage-column ${page === "vision" ? "vision-stage-column" : ""}`}>
             <VisionPanel
+              isAdmin={isAdmin}
+              user={auth.user}
               devices={devices}
               targetDeviceId={visionDeviceId}
               targetTrackId={visionTrackId}
               onTargetDeviceChange={setVisionDeviceId}
               onTargetTrackChange={setVisionTrackId}
               onVisionStateChange={handleVisionStateChange}
+              onClaimDevice={(device) => claimDevice(device, "vision")}
               mode={page === "manual" ? "manual" : "vision"}
               showTargetDeviceSelector={true}
               showControls={page === "vision"}
@@ -926,6 +823,8 @@ function App() {
             onMotionChange={updateManualMotion.bind(null, selectedDevice)}
             feedback={feedback}
             keyboardStatus={keyboardStatus}
+            keyProfile={keyProfiles[selectedDevice?.deviceId] || { keys: DEFAULT_KEYS, enabled: false }}
+            onKeysChange={profile => selectedDevice && saveKeys(selectedDevice.deviceId, profile)}
           />}
         </div>
       ) : (
@@ -942,10 +841,10 @@ function App() {
           firmwareFile={firmwareFile}
           setFirmwareFile={(file) => {
             setFirmwareFile(file);
-            setOtaFeedback(file ? "文件已选择，等待上传" : "请选择电脑上的 firmware.bin");
+            setOtaFeedback(file ? "文件已选择，点击开始升级" : "请选择电脑上的 firmware.bin");
           }}
           uploading={uploading}
-          uploadFirmware={uploadFirmware}
+          uploadProgress={uploadProgress}
           startOta={startOta}
           otaFeedback={otaFeedback}
           otaSelectedDevices={otaSelectedDevices}

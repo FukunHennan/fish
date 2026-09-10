@@ -21,17 +21,17 @@ void test_rejects_invalid_discovery_request() {
 
 void test_accepts_controller_offer_for_expected_device_and_nonce() {
     JsonDocument document;
-    deserializeJson(document, R"({"type":"controller.offer","protocolVersion":2,"nonce":"0011223344556677","deviceId":"AA:BB:CC:DD:EE:FF","controllerPort":8081,"proof":"proof-value"})");
+    deserializeJson(document, R"({"type":"controller.offer","protocolVersion":2,"nonce":"0011223344556677","deviceId":"AA:BB:CC:DD:EE:FF","controllerPort":8081,"proof":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})");
     uint16_t port = 0;
     String proof;
     TEST_ASSERT_TRUE(readControllerOffer(document, "AA:BB:CC:DD:EE:FF", "0011223344556677", port, proof));
     TEST_ASSERT_EQUAL_UINT16(8081, port);
-    TEST_ASSERT_EQUAL_STRING("proof-value", proof.c_str());
+    TEST_ASSERT_EQUAL_STRING("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", proof.c_str());
 }
 
 void test_rejects_controller_offer_for_another_device() {
     JsonDocument document;
-    deserializeJson(document, R"({"type":"controller.offer","protocolVersion":2,"nonce":"0011223344556677","deviceId":"11:22:33:44:55:66","controllerPort":8081,"proof":"proof-value"})");
+    deserializeJson(document, R"({"type":"controller.offer","protocolVersion":2,"nonce":"0011223344556677","deviceId":"11:22:33:44:55:66","controllerPort":8081,"proof":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})");
     uint16_t port = 0;
     String proof;
     TEST_ASSERT_FALSE(readControllerOffer(document, "AA:BB:CC:DD:EE:FF", "0011223344556677", port, proof));

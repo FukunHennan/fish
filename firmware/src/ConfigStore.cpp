@@ -16,4 +16,4 @@ bool ConfigStore::save(const DeviceConfig& c) {
     if (!c.valid()) return false; Preferences p; if (!p.begin("fishcfg",false)) return false;
     bool ok=writeAndVerifyDeviceConfig(p,c);p.end();return ok;
 }
-void ConfigStore::clear() { Preferences p; if(p.begin("fishcfg",false)){p.clear();p.end();} }
+void ConfigStore::clear() { Preferences p; if(p.begin("fishcfg",false)){p.clear();p.end();} Preferences cache;if(cache.begin("fish-endpoint",false)){cache.clear();cache.end();} }

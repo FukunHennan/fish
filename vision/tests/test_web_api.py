@@ -8,6 +8,10 @@ from web_api import create_app
 
 class VisionWebApiTests(unittest.TestCase):
     def setUp(self):
+        # Tests use virtual indexes, never the host machine camera inventory.
+        policy = patch("web_api.camera_blocked", return_value=False)
+        policy.start()
+        self.addCleanup(policy.stop)
         self.stopped = []
         self.service = VisionService(
             runner_factory=lambda index, _publish: lambda: self.stopped.append(index)
@@ -17,6 +21,13 @@ class VisionWebApiTests(unittest.TestCase):
             camera_provider=lambda: [CameraInfo(1, "RERVISION", 640, 480, 60)],
         )
         self.client = self.app.test_client()
+
+    def test_blocked_camera_cannot_start(self):
+        with patch("web_api.camera_blocked", return_value=True):
+            self.assertEqual(self.client.get("/cameras").get_json(), [])
+            self.assertEqual(self.client.post("/start", json={"cameraIndex": 0}).status_code, 403)
+            self.assertEqual(self.client.post("/sessions", json={"cameraIndex": 0, "cameraId": "camera-0"}).status_code, 403)
+            self.assertEqual(self.client.post("/sessions/example/camera", json={"cameraIndex": 0}).status_code, 403)
 
     def test_camera_start_action_status_and_stop_contract(self):
         cameras = self.client.get("/cameras")
@@ -44,6 +55,19 @@ class VisionWebApiTests(unittest.TestCase):
         self.assertEqual(
             self.client.post("/action", json={"type": "unknown"}).status_code,
             409,
+        )
+        response = self.client.post(
+            "/sessions",
+            json={
+                "cameraId": "camera-1",
+                "cameraIndex": 1,
+                "trackingMode": "unknown",
+            },
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.get_json()["error"]["code"],
+            "invalid_tracking_mode",
         )
 
     def test_session_envelope_contains_server_clock(self):

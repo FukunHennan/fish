@@ -30,8 +30,8 @@ VIDEO_WIDTH = 640
 VIDEO_HEIGHT = 480
 VIDEO_FPS = 30
 TARGET_FPS = VIDEO_FPS
-TARGET_WIDTH = VIDEO_WIDTH
-TARGET_HEIGHT = VIDEO_HEIGHT
+TARGET_WIDTH = int(os.environ.get("FISH_CAPTURE_WIDTH", "1920"))
+TARGET_HEIGHT = int(os.environ.get("FISH_CAPTURE_HEIGHT", "1080"))
 try:
     DEFAULT_CAMERA_INDEX = int(os.environ.get("FISH_CAMERA_INDEX", "0"))
 except ValueError:
@@ -52,7 +52,7 @@ MARKER_BL = 3
 # Fish detection and fixed marker tracking.
 YOLO_MODEL_PATH = os.path.join(ASSET_DIR, "best.pt")
 YOLO_CONF_THRESHOLD = 0.25
-YOLO_IMG_SIZE = 640
+YOLO_IMG_SIZE = int(os.environ.get("FISH_YOLO_IMGSZ", "1920"))
 YOLO_DEVICE = 0
 YOLO_DETECT_INTERVAL_S = 0.20
 MARKER_PROFILE_PATH = os.path.join(ASSET_DIR, "marker_profile.local.json")

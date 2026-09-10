@@ -3,6 +3,8 @@
 #include <Arduino.h>
 #endif
 #include "NetworkPolicy.h"
+#include "DiscoveryNonceWindow.h"
+#include <string>
 
 void test_unconfigured_device_provisions_immediately() {
     NetworkPolicy policy;
@@ -10,12 +12,12 @@ void test_unconfigured_device_provisions_immediately() {
     TEST_ASSERT_EQUAL_INT((int)NetworkAction::StartProvisioning, (int)policy.next(0));
 }
 
-void test_configured_device_falls_back_after_sixty_seconds() {
+void test_configured_device_falls_back_after_three_minutes() {
     NetworkPolicy policy;
     policy.begin(true, 0);
     TEST_ASSERT_EQUAL_INT((int)NetworkAction::Connect, (int)policy.next(0));
-    TEST_ASSERT_EQUAL_INT((int)NetworkAction::None, (int)policy.next(59999));
-    TEST_ASSERT_EQUAL_INT((int)NetworkAction::StartProvisioning, (int)policy.next(60000));
+    TEST_ASSERT_EQUAL_INT((int)NetworkAction::None, (int)policy.next(179999));
+    TEST_ASSERT_EQUAL_INT((int)NetworkAction::StartProvisioning, (int)policy.next(180000));
 }
 
 void test_connected_state_disables_fallback() {
@@ -26,11 +28,47 @@ void test_connected_state_disables_fallback() {
     TEST_ASSERT_EQUAL_INT((int)NetworkAction::None, (int)policy.next(70000));
 }
 
+void test_wifi_without_server_enters_recovery() {
+    NetworkPolicy p;p.begin(true,0);p.next(0);p.setConnected(true,1000);
+    TEST_ASSERT_EQUAL_INT((int)NetworkAction::None,(int)p.next(179999));
+    TEST_ASSERT_EQUAL_INT((int)NetworkAction::StartProvisioning,(int)p.next(180000));
+}
+void test_registration_and_later_disconnect_restart_deadline() {
+    NetworkPolicy p;p.begin(true,0);p.next(0);p.setConnected(true,1000);p.setRegistered(true,2000);
+    TEST_ASSERT_EQUAL_INT((int)NetworkAction::None,(int)p.next(300000));
+    p.setRegistered(false,300001);
+    TEST_ASSERT_EQUAL_INT((int)NetworkAction::None,(int)p.next(480000));
+    TEST_ASSERT_EQUAL_INT((int)NetworkAction::StartProvisioning,(int)p.next(480001));
+}
+
+void test_delayed_discovery_reply_and_expiry() {
+    DiscoveryNonceWindow<std::string> window;
+    window.remember("first",100);window.remember("second",1100);
+    TEST_ASSERT_TRUE(window.contains("first",1200));
+    TEST_ASSERT_TRUE(window.contains("second",1200));
+    TEST_ASSERT_FALSE(window.contains("unknown",1200));
+    TEST_ASSERT_FALSE(window.contains("first",10101));
+    TEST_ASSERT_TRUE(window.contains("second",10101));
+}
+void test_discovery_nonce_wraparound_and_eviction() {
+    DiscoveryNonceWindow<std::string> window;
+    window.remember("before-wrap",UINT32_MAX-100);
+    TEST_ASSERT_TRUE(window.contains("before-wrap",100));
+    TEST_ASSERT_FALSE(window.contains("before-wrap",10000));
+    for(int i=0;i<16;i++)window.remember(std::to_string(i),200);
+    TEST_ASSERT_FALSE(window.contains("before-wrap",201));
+    TEST_ASSERT_TRUE(window.contains("15",201));
+}
+
 void runTests() {
     UNITY_BEGIN();
     RUN_TEST(test_unconfigured_device_provisions_immediately);
-    RUN_TEST(test_configured_device_falls_back_after_sixty_seconds);
+    RUN_TEST(test_configured_device_falls_back_after_three_minutes);
     RUN_TEST(test_connected_state_disables_fallback);
+    RUN_TEST(test_wifi_without_server_enters_recovery);
+    RUN_TEST(test_registration_and_later_disconnect_restart_deadline);
+    RUN_TEST(test_delayed_discovery_reply_and_expiry);
+    RUN_TEST(test_discovery_nonce_wraparound_and_eviction);
     UNITY_END();
 }
 

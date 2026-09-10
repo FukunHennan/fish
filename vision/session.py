@@ -19,6 +19,11 @@ class VisionState(str, Enum):
     ERROR = "error"
 
 
+class TrackingMode(str, Enum):
+    YOLO = "yolo"
+    SINGLE_FISH = "single_fish"
+
+
 class InvalidTransition(RuntimeError):
     pass
 
@@ -63,6 +68,7 @@ class VisionSession:
     target_device_id: Optional[str]
     target_track_id: Optional[int]
     yolo_model: Optional[str]
+    tracking_mode: TrackingMode
     state: VisionState
     error: Optional[dict[str, str]] = None
     metrics: dict[str, Any] = field(default_factory=dict)
@@ -76,7 +82,9 @@ class VisionSession:
         target_device_id: Optional[str] = None,
         target_track_id: Optional[int] = None,
         yolo_model: Optional[str] = None,
+        tracking_mode: str = TrackingMode.YOLO.value,
     ) -> "VisionSession":
+        mode = TrackingMode(tracking_mode or TrackingMode.YOLO.value)
         return cls(
             session_id=secrets.token_urlsafe(24),
             camera_id=camera_id,
@@ -84,6 +92,7 @@ class VisionSession:
             target_device_id=target_device_id,
             target_track_id=target_track_id,
             yolo_model=yolo_model,
+            tracking_mode=mode,
             state=VisionState.OPENING,
         )
 
@@ -111,6 +120,7 @@ class VisionSession:
             "targetDeviceId": self.target_device_id,
             "targetTrackId": self.target_track_id,
             "yoloModel": os.path.basename(self.yolo_model) if self.yolo_model else None,
+            "trackingMode": self.tracking_mode.value,
             "error": self.error,
             "metrics": dict(self.metrics),
             "lastAction": self.last_action,

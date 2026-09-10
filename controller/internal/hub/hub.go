@@ -35,6 +35,7 @@ type Device struct {
 	VisionSessionID    string    `json:"visionSessionId"`
 	VisionSequence     uint32    `json:"visionSequence"`
 	OTAState           string    `json:"otaState"`
+	OTAProgress        int       `json:"otaProgress"`
 	LightSensorOnline  bool      `json:"lightSensorOnline"`
 	IlluminanceLux     float64   `json:"illuminanceLux"`
 	I2CAddresses       []int     `json:"i2cAddresses,omitempty"`
@@ -182,6 +183,9 @@ func (h *Hub) Update(id string, values map[string]any) {
 	}
 	if v, ok := values["otaState"].(string); ok {
 		e.device.OTAState = v
+	}
+	if v, ok := values["otaProgress"].(float64); ok && v >= 0 && v <= 100 {
+		e.device.OTAProgress = int(v)
 	}
 	if v, ok := values["lightSensorOnline"].(bool); ok {
 		e.device.LightSensorOnline = v
@@ -650,6 +654,7 @@ type deviceDisplayState struct {
 	VisionActive      bool
 	VisionSessionID   string
 	OTAState          string
+	OTAProgress       int
 	LightSensorOnline bool
 	IlluminanceLux    float64
 	I2CAddresses      []int
@@ -680,6 +685,7 @@ func deviceDisplaySignature(device Device) deviceDisplayState {
 		VisionActive:      device.VisionActive,
 		VisionSessionID:   device.VisionSessionID,
 		OTAState:          device.OTAState,
+		OTAProgress:       device.OTAProgress,
 		LightSensorOnline: device.LightSensorOnline,
 		IlluminanceLux:    device.IlluminanceLux,
 		I2CAddresses:      append([]int(nil), device.I2CAddresses...),

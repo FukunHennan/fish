@@ -30,6 +30,8 @@ def start_application_runner(
     startup_timeout=3.0,
     frame_sink=None,
     yolo_model_path=None,
+    application_sink=None,
+    **dependencies,
 ):
     application_options = {
         "camera_index": camera_index,
@@ -41,9 +43,12 @@ def start_application_runner(
         application_options["frame_sink"] = frame_sink
     if yolo_model_path is not None:
         application_options["yolo_model_path"] = yolo_model_path
+    application_options.update(dependencies)
     application = application_factory(
         **application_options,
     )
+    if application_sink is not None:
+        application_sink(application)
     thread = threading.Thread(
         target=application.run,
         name="fish-vision-application",
@@ -75,15 +80,18 @@ def run_http_server(app, serve=waitress_serve):
 
 def main():
     service = None
+    root_application = [None]
     webrtc = WebRTCServer().start()
 
-    def runner_factory(camera_index, _publish, yolo_model_path=None):
+    def runner_factory(camera_index, _publish, yolo_model_path=None, tracking_mode="yolo"):
         return start_application_runner(
             camera_index,
             service.next_action,
             service.publish,
             frame_sink=webrtc,
             yolo_model_path=yolo_model_path,
+            tracking_mode=tracking_mode,
+            application_sink=lambda application: root_application.__setitem__(0, application),
         )
 
     service = VisionService(runner_factory=runner_factory)
@@ -116,9 +124,15 @@ def main():
         camera_catalog=camera_catalog,
         webrtc_server=webrtc,
     )
+    from workspaces import WorkspaceDispatcher
+    dispatcher = WorkspaceDispatcher(
+        app, service, lambda: root_application[0],
+        start_application_runner, camera_catalog,
+    )
     try:
-        run_http_server(app)
+        run_http_server(dispatcher)
     finally:
+        dispatcher.close_all()
         webrtc.close()
 
 
