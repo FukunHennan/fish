@@ -1,0 +1,709 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fish Control 赛事端动效 Demo</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #020817;
+      --bg2: #031a3a;
+      --panel: rgba(4, 31, 66, .82);
+      --line: rgba(51, 188, 255, .34);
+      --line-hot: rgba(45, 232, 255, .88);
+      --cyan: #2de8ff;
+      --blue: #188cff;
+      --green: #32f59a;
+      --red: #ff4966;
+      --orange: #ffb33e;
+      --text: #edf9ff;
+      --muted: #8dbbdd;
+      font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      display: grid;
+      place-items: center;
+      margin: 0;
+      overflow: hidden;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 72% -12%, rgba(45, 232, 255, .16), transparent 30%),
+        radial-gradient(circle at 14% 0%, rgba(24, 140, 255, .16), transparent 34%),
+        linear-gradient(180deg, var(--bg2), var(--bg) 58%, #01040c);
+    }
+
+    body::before,
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    body::before {
+      opacity: .44;
+      background:
+        repeating-linear-gradient(0deg, rgba(87, 206, 255, .04) 0 1px, transparent 1px 8px),
+        linear-gradient(112deg, transparent 0 33%, rgba(78, 220, 255, .12) 36%, transparent 40% 100%);
+      animation: waterSweep 16s ease-in-out infinite alternate;
+    }
+
+    body::after { background: radial-gradient(ellipse at center, transparent 44%, rgba(0, 3, 12, .74)); }
+    button { cursor: pointer; color: inherit; font: inherit; }
+
+    .shell {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-rows: 7.66% 8.94% minmax(0, 1fr) 3.62%;
+      width: min(100vw, calc(100vh * 1672 / 940));
+      max-width: 100vw;
+      max-height: 100vh;
+      aspect-ratio: 1672 / 940;
+      padding: 0 .72%;
+    }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: 430fr 738fr 480fr;
+      align-items: center;
+      gap: .96%;
+      border-bottom: 1px solid rgba(45, 196, 255, .28);
+      background: linear-gradient(180deg, rgba(2, 17, 40, .96), rgba(2, 13, 31, .76));
+      box-shadow: 0 16px 42px rgba(0, 0, 0, .26);
+    }
+
+    .brand { display: grid; grid-template-columns: 86px minmax(0, 1fr); align-items: center; min-width: 0; }
+    .logo { position: relative; width: 78px; height: 46px; filter: drop-shadow(0 0 14px rgba(45, 232, 255, .6)); }
+    .logo::before {
+      content: "";
+      position: absolute;
+      left: 20px;
+      top: 10px;
+      width: 48px;
+      height: 25px;
+      border: 4px solid #48d9ff;
+      border-left-width: 8px;
+      border-radius: 58% 42% 48% 52%;
+      transform: skewX(-14deg);
+    }
+    .logo::after {
+      content: "";
+      position: absolute;
+      left: 4px;
+      top: 14px;
+      border-right: 28px solid #48d9ff;
+      border-top: 12px solid transparent;
+      border-bottom: 12px solid transparent;
+    }
+    .logo i { position: absolute; right: 17px; top: 19px; width: 5px; height: 5px; border-radius: 50%; background: white; box-shadow: 0 0 8px white; }
+    .brand h1 {
+      margin: 0;
+      overflow: hidden;
+      color: white;
+      font-size: 30px;
+      line-height: 1;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      text-transform: uppercase;
+      text-shadow: 0 0 16px rgba(45, 232, 255, .24);
+    }
+    .brand h1 span { color: var(--cyan); }
+    .brand p {
+      margin: 6px 0 0;
+      overflow: hidden;
+      color: #8dd4ff;
+      font-size: 13px;
+      letter-spacing: .14em;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .dock { display: flex; align-items: end; justify-content: center; gap: 1.9%; height: 100%; padding-bottom: 1.35%; }
+    .dock-item {
+      --scale: 1;
+      --lift: 0px;
+      position: relative;
+      display: grid;
+      grid-template-columns: 30px auto;
+      align-items: center;
+      gap: 12px;
+      flex: 0 1 168px;
+      height: 75%;
+      padding: 0 20px;
+      border: 1px solid rgba(74, 177, 255, .24);
+      border-radius: 7px;
+      background: linear-gradient(180deg, rgba(17, 62, 116, .6), rgba(5, 29, 66, .82));
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .04);
+      transform: translateY(var(--lift)) scale(var(--scale));
+      transform-origin: center bottom;
+      transition: border-color .16s ease, background .16s ease, box-shadow .16s ease;
+      will-change: transform;
+    }
+    .dock-item::after {
+      content: "";
+      position: absolute;
+      left: 22%;
+      right: 22%;
+      bottom: -8px;
+      height: 3px;
+      border-radius: 999px;
+      opacity: 0;
+      background: var(--cyan);
+      box-shadow: 0 0 18px var(--cyan);
+      transition: opacity .16s ease, left .16s ease, right .16s ease;
+    }
+    .dock-item span:last-child { overflow: hidden; font-size: 18px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+    .dock-item.active,
+    .dock-item:hover,
+    .dock-item:focus-visible {
+      border-color: var(--line-hot);
+      background: linear-gradient(180deg, rgba(22, 132, 236, .9), rgba(3, 66, 146, .9));
+      box-shadow: 0 0 22px rgba(45, 232, 255, .28), inset 0 0 22px rgba(45, 232, 255, .14);
+    }
+    .dock-item.active::after,
+    .dock-item:hover::after,
+    .dock-item:focus-visible::after { left: 15%; right: 15%; opacity: 1; }
+    .dock-icon { position: relative; width: 28px; height: 28px; transform: scale(calc(1 + (var(--scale) - 1) * 1.2)); }
+    .dock-icon.home { background: #c7f2ff; clip-path: polygon(50% 2%, 96% 40%, 84% 40%, 84% 96%, 58% 96%, 58% 66%, 42% 66%, 42% 96%, 16% 96%, 16% 40%, 4% 40%); }
+    .dock-icon.pad::before,
+    .dock-icon.pad::after { content: ""; position: absolute; border-radius: 999px; background: #c7f2ff; }
+    .dock-icon.pad::before { inset: 8px 1px 5px; }
+    .dock-icon.pad::after { width: 4px; height: 4px; top: 11px; right: 6px; box-shadow: 6px 2px 0 #c7f2ff, -14px 2px 0 #062b59, -18px 2px 0 #062b59, -16px 0 0 #062b59, -16px 4px 0 #062b59; }
+    .dock-icon.flag { background: linear-gradient(90deg, #c7f2ff 0 4px, transparent 4px), linear-gradient(135deg, #c7f2ff 0 58%, transparent 59%); }
+    .dock-icon.chart {
+      background: linear-gradient(90deg, #c7f2ff 0 5px, transparent 5px 9px, #c7f2ff 9px 14px, transparent 14px 18px, #c7f2ff 18px 23px);
+      clip-path: polygon(0 42%, 23% 42%, 23% 100%, 0 100%, 0 42%, 39% 14%, 62% 14%, 62% 100%, 39% 100%, 39% 14%, 78% 0, 100% 0, 100% 100%, 78% 100%);
+    }
+    .slogan { justify-self: end; margin: 0; overflow: hidden; max-width: 100%; color: #9fd5ff; font-size: 14px; letter-spacing: .16em; text-overflow: ellipsis; white-space: nowrap; }
+
+    .glass {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: linear-gradient(180deg, var(--panel), rgba(2, 18, 45, .84));
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .035), 0 0 26px rgba(24, 140, 255, .12);
+    }
+    .glass::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0;
+      background: linear-gradient(105deg, transparent 0 36%, rgba(255,255,255,.14) 50%, transparent 64% 100%);
+      transform: translateX(-70%);
+    }
+    .lift { transform: translateY(0) scale(1); transition: transform .2s cubic-bezier(.2, .9, .2, 1), border-color .2s ease, box-shadow .2s ease; will-change: transform; }
+    .lift:hover,
+    .lift:focus-within {
+      transform: translateY(-3px) scale(1.012);
+      border-color: var(--line-hot);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.04), 0 14px 34px rgba(0,0,0,.32), 0 0 26px rgba(45, 232, 255, .18);
+    }
+    .lift:hover::before,
+    .lift:focus-within::before { opacity: 1; animation: shine .65s ease both; }
+
+    .hud {
+      display: grid;
+      grid-template-columns: 340fr 360fr 120fr 126fr 126fr 126fr 172fr;
+      gap: .6%;
+      align-items: center;
+      padding: 11px 2px;
+    }
+    .mission { height: 62px; display: grid; align-content: center; padding: 0 18px; border-left: 2px solid var(--cyan); }
+    .mission h2 { margin: 0 0 6px; overflow: hidden; font-size: 19px; text-overflow: ellipsis; white-space: nowrap; }
+    .mission p { margin: 0; overflow: hidden; color: var(--muted); font-size: 12px; letter-spacing: .12em; text-overflow: ellipsis; white-space: nowrap; }
+    .score {
+      height: 62px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 11px;
+      clip-path: polygon(4% 0, 96% 0, 100% 100%, 0 100%);
+      background: linear-gradient(90deg, rgba(18, 128, 255, .62), rgba(3, 24, 58, .92) 50%, rgba(188, 31, 70, .62));
+    }
+    .score span { color: #bde8ff; font-size: 13px; }
+    .score strong { font-size: 30px; line-height: 1; font-variant-numeric: tabular-nums; }
+    .score .blue { color: #34ccff; }
+    .score .red { color: #ff5870; }
+    .timer,
+    .hud-card { height: 62px; display: grid; place-items: center; text-align: center; }
+    .timer span,
+    .hud-card span { display: block; color: var(--muted); font-size: 12px; }
+    .timer strong { display: block; font-size: 27px; letter-spacing: .04em; }
+    .hud-card strong { display: block; margin-top: 4px; font-size: 20px; }
+    .hud-card.green strong { color: var(--green); }
+    .hud-card.orange strong { color: var(--orange); }
+    .emergency {
+      height: 62px;
+      border: 1px solid rgba(255, 73, 102, .7);
+      border-radius: 8px;
+      color: #ffe1e6;
+      background: linear-gradient(180deg, rgba(178, 47, 67, .9), rgba(80, 13, 28, .94));
+      box-shadow: 0 0 24px rgba(255, 73, 102, .22);
+      font-size: 20px;
+      font-weight: 900;
+      transition: transform .18s ease, box-shadow .18s ease;
+    }
+    .emergency:hover { transform: translateY(-3px) scale(1.025); box-shadow: 0 0 32px rgba(255, 73, 102, .38); }
+
+    .content { display: grid; grid-template-columns: 356fr 918fr 376fr; gap: .6%; min-height: 0; }
+    .left,
+    .right { display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 10px; min-height: 0; }
+    .panel { padding: 14px; }
+    .panel-title { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+    .panel-title h2 { margin: 0; font-size: 20px; }
+    .panel-title span { color: var(--muted); font-size: 12px; white-space: nowrap; }
+
+    .control-id {
+      display: grid;
+      grid-template-columns: 58px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 12px;
+      min-height: 96px;
+      padding: 14px;
+      border: 1px solid rgba(61, 186, 255, .32);
+      border-radius: 8px;
+      background: rgba(5, 31, 68, .7);
+    }
+    .fish-mark { width: 52px; height: 30px; border-radius: 58% 42% 48% 52%; background: linear-gradient(90deg, #031a3a, #4fdcff); box-shadow: 0 0 16px rgba(79, 220, 255, .42); }
+    .control-id h3 { margin: 0; font-size: 38px; line-height: 1; }
+    .control-id p { margin: 7px 0 0; color: var(--muted); font-size: 12px; }
+    .chip { padding: 5px 9px; border: 1px solid rgba(45, 232, 255, .5); border-radius: 999px; color: #bff7ff; background: rgba(10, 86, 156, .48); font-size: 12px; white-space: nowrap; }
+    .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+    .metric { min-height: 66px; padding: 10px; border: 1px solid rgba(61, 186, 255, .18); border-radius: 7px; background: rgba(0, 12, 32, .58); }
+    .metric span { display: block; color: var(--muted); font-size: 11px; }
+    .metric strong { display: block; margin-top: 8px; font-size: 18px; line-height: 1; }
+    .control-pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
+    .control-pad button {
+      min-height: 72px;
+      border: 1px solid rgba(66, 186, 255, .42);
+      border-radius: 8px;
+      background: linear-gradient(180deg, rgba(35, 135, 238, .86), rgba(7, 59, 137, .86));
+      box-shadow: inset 0 0 18px rgba(81, 210, 255, .12);
+      font-size: 15px;
+      font-weight: 900;
+      transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+    }
+    .control-pad button:hover { transform: translateY(-3px) scale(1.035); border-color: var(--line-hot); box-shadow: 0 0 22px rgba(45, 232, 255, .26), inset 0 0 20px rgba(81, 210, 255, .18); }
+    .control-pad .forward { grid-column: 2; }
+    .control-pad .left { grid-column: 1; }
+    .control-pad .right { grid-column: 3; }
+    .control-pad .stop { grid-column: 1 / -1; background: linear-gradient(180deg, rgba(245, 72, 95, .96), rgba(115, 18, 38, .94)); border-color: rgba(255, 99, 119, .72); }
+
+    .team-card { display: grid; gap: 9px; }
+    .team-row,
+    .event-row {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 10px;
+      min-height: 42px;
+      padding: 9px 10px;
+      border: 1px solid rgba(61, 186, 255, .18);
+      border-radius: 7px;
+      background: rgba(0, 13, 34, .5);
+      transition: transform .18s ease, border-color .18s ease;
+    }
+    .team-row:hover,
+    .event-row:hover { transform: translateY(-2px) scale(1.01); border-color: rgba(45, 232, 255, .64); }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--green); box-shadow: 0 0 12px var(--green); }
+    .team-row strong,
+    .event-row strong { font-size: 14px; }
+    .team-row small,
+    .event-row small { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
+
+    .arena { display: grid; grid-template-rows: 48px minmax(0, 1fr) 36px; min-height: 0; padding: 8px; }
+    .arena-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 10px; font-weight: 900; }
+    .arena-head strong { font-size: 18px; }
+    .live { color: #ff795e; text-shadow: 0 0 12px rgba(255, 121, 94, .72); }
+    .pool {
+      position: relative;
+      min-height: 0;
+      overflow: hidden;
+      border: 1px solid rgba(54, 213, 255, .42);
+      border-radius: 8px;
+      background:
+        radial-gradient(circle at 24% 29%, rgba(255,255,255,.32), transparent 3%),
+        radial-gradient(circle at 76% 55%, rgba(255,255,255,.25), transparent 4%),
+        linear-gradient(145deg, rgba(86, 229, 255, .46), rgba(4, 91, 164, .92) 58%, rgba(1, 42, 91, .96));
+      box-shadow: inset 0 0 60px rgba(255,255,255,.12), inset 0 0 120px rgba(0, 0, 0, .28);
+    }
+    .pool::before {
+      content: "";
+      position: absolute;
+      inset: -18%;
+      opacity: .55;
+      mix-blend-mode: screen;
+      background:
+        repeating-linear-gradient(36deg, transparent 0 24px, rgba(255,255,255,.12) 25px 28px, transparent 29px 58px),
+        repeating-linear-gradient(112deg, transparent 0 28px, rgba(45,232,255,.1) 29px 32px, transparent 33px 66px);
+      animation: caustics 9s linear infinite alternate;
+    }
+    .base {
+      position: absolute;
+      z-index: 1;
+      top: 22%;
+      bottom: 25%;
+      width: 78px;
+      display: grid;
+      place-items: center;
+      color: white;
+      font-size: 22px;
+      font-weight: 900;
+      writing-mode: vertical-rl;
+      letter-spacing: .15em;
+    }
+    .base.blue { left: 28px; background: rgba(14, 89, 240, .44); }
+    .base.red { right: 28px; background: rgba(232, 42, 64, .42); }
+    .fish-token,
+    .resource,
+    .eco,
+    .handoff { position: absolute; z-index: 2; transform: translate(-50%, -50%); transition: transform .18s ease, filter .18s ease; will-change: transform; }
+    .fish-token {
+      width: 70px;
+      height: 34px;
+      border: 3px solid var(--cyan);
+      border-radius: 11px;
+      box-shadow: 0 0 15px rgba(45, 232, 255, .68);
+      animation: bob 3.3s ease-in-out infinite;
+    }
+    .fish-token::before {
+      content: "";
+      position: absolute;
+      left: 13px;
+      top: 7px;
+      width: 40px;
+      height: 19px;
+      border-radius: 58% 42% 45% 55%;
+      background: linear-gradient(90deg, #061b38, #4fdcff);
+      transform: skewX(-14deg);
+    }
+    .fish-token::after {
+      content: attr(data-label);
+      position: absolute;
+      left: 50%;
+      top: -30px;
+      transform: translateX(-50%);
+      padding: 3px 8px;
+      border-radius: 5px;
+      background: rgba(2, 70, 171, .9);
+      color: white;
+      font-size: 15px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+    .fish-token.red { border-color: var(--red); box-shadow: 0 0 15px rgba(255, 73, 102, .7); }
+    .fish-token.red::before { background: linear-gradient(90deg, #170713, #ff536d); }
+    .fish-token.red::after { background: rgba(184, 13, 43, .9); }
+    .fish-token:hover { transform: translate(-50%, -50%) scale(1.12); filter: drop-shadow(0 0 16px white); }
+    .resource {
+      width: 32px;
+      height: 32px;
+      border: 3px solid rgba(255,255,255,.86);
+      border-radius: 50%;
+      background: currentColor;
+      box-shadow: 0 0 16px currentColor;
+      animation: pulse 2.3s ease-in-out infinite;
+    }
+    .resource::after {
+      content: attr(data-label);
+      position: absolute;
+      left: 50%;
+      top: -29px;
+      transform: translateX(-50%);
+      padding: 4px 7px;
+      border-radius: 5px;
+      color: white;
+      background: rgba(5, 35, 71, .92);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .resource:hover,
+    .eco:hover,
+    .handoff:hover { transform: translate(-50%, -50%) scale(1.12); filter: brightness(1.2); }
+    .resource.blue { color: #158dff; left: 38%; top: 41%; }
+    .resource.green { color: #36fa8a; left: 31%; top: 61%; }
+    .resource.yellow { color: #ffca21; left: 58%; top: 36%; }
+    .resource.purple { color: #a64dff; left: 66%; top: 59%; }
+    .resource.red-dot { color: #ff3046; left: 42%; top: 75%; }
+    .resource.black { color: #0a111a; left: 62%; top: 74%; }
+    .eco,
+    .handoff {
+      display: grid;
+      place-items: center;
+      width: 68px;
+      height: 68px;
+      border-radius: 50%;
+      color: white;
+      font-size: 11px;
+      font-weight: 900;
+      text-align: center;
+    }
+    .eco { border: 2px solid rgba(50,245,154,.72); background: radial-gradient(circle, var(--green) 0 31%, rgba(50,245,154,.26) 33% 58%, transparent 60%); box-shadow: 0 0 24px rgba(50,245,154,.48); }
+    .eco.a { left: 50%; top: 32%; }
+    .eco.b { left: 51%; top: 74%; }
+    .handoff { left: 50%; top: 52%; border: 2px solid rgba(255,179,62,.82); background: radial-gradient(circle, #ff9f18 0 31%, rgba(255,159,24,.27) 33% 58%, transparent 60%); box-shadow: 0 0 24px rgba(255,179,62,.48); }
+    .arena-foot { display: flex; align-items: center; justify-content: space-between; padding: 0 8px; color: var(--muted); font-size: 12px; }
+
+    .mini-map { height: 176px; margin-bottom: 10px; border: 1px solid rgba(61, 186, 255, .22); border-radius: 7px; background: rgba(0, 13, 34, .5); }
+    .mini-map .pool { height: 100%; border: 0; border-radius: 7px; }
+    .mini-map .pool::before { opacity: .25; }
+    .mini-map .base { width: 38px; font-size: 14px; }
+    .mini-map .base.blue { left: 10px; }
+    .mini-map .base.red { right: 10px; }
+    .mini-map .fish-token { width: 34px; height: 18px; border-width: 2px; animation: none; }
+    .mini-map .fish-token::before { display: none; }
+    .mini-map .fish-token::after { top: -20px; font-size: 10px; padding: 2px 5px; }
+    .advice-card {
+      display: grid;
+      grid-template-columns: 40px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 10px;
+      padding: 12px;
+      border: 1px solid rgba(50,245,154,.42);
+      border-radius: 7px;
+      background: linear-gradient(90deg, rgba(13, 138, 111, .38), rgba(5, 40, 76, .72));
+    }
+    .cube { width: 32px; height: 32px; background: linear-gradient(135deg, #81ffdf, #16a0ff); clip-path: polygon(50% 0, 100% 24%, 100% 76%, 50% 100%, 0 76%, 0 24%); box-shadow: 0 0 16px rgba(50,245,154,.4); }
+    .advice-card p { margin: 0; min-width: 0; }
+    .advice-card strong { display: block; overflow: hidden; color: #d0fff3; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+    .advice-card small { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.4; }
+    .signal-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .signal-grid button {
+      min-height: 42px;
+      border: 1px solid rgba(61, 186, 255, .3);
+      border-radius: 7px;
+      background: linear-gradient(180deg, rgba(12, 92, 174, .72), rgba(3, 39, 84, .86));
+      font-size: 12px;
+      font-weight: 800;
+      transition: transform .18s ease, box-shadow .18s ease;
+    }
+    .signal-grid button:hover { transform: translateY(-2px) scale(1.02); box-shadow: 0 0 20px rgba(45, 232, 255, .2); }
+    .bottom { display: flex; align-items: center; justify-content: space-between; color: #79aacc; border-top: 1px solid rgba(45, 196, 255, .22); font-size: 12px; letter-spacing: .07em; }
+
+    @keyframes waterSweep { from { transform: translateX(-1.5%); } to { transform: translateX(1.5%); } }
+    @keyframes shine { from { transform: translateX(-70%); } to { transform: translateX(70%); } }
+    @keyframes caustics { from { transform: translate3d(-2.5%, -2%, 0); } to { transform: translate3d(2.5%, 2%, 0); } }
+    @keyframes bob { 0%, 100% { margin-top: 0; } 50% { margin-top: -6px; } }
+    @keyframes pulse { 0%, 100% { box-shadow: 0 0 14px currentColor, 0 0 0 0 rgba(255,255,255,.18); } 50% { box-shadow: 0 0 22px currentColor, 0 0 0 8px transparent; } }
+
+    @media (max-height: 760px) {
+      .shell { grid-template-rows: 68px 76px minmax(0, 1fr) 30px; }
+      .hud { padding: 8px 2px; }
+      .mission, .score, .timer, .hud-card, .emergency { height: 58px; }
+      .control-pad button { min-height: 60px; }
+      .mini-map { height: 144px; }
+      .metric { min-height: 56px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after { animation: none !important; transition: none !important; }
+      .dock-item,
+      .lift,
+      .control-pad button,
+      .emergency,
+      .fish-token,
+      .resource,
+      .eco,
+      .handoff { transform: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <section class="brand">
+        <div class="logo" aria-hidden="true"><i></i></div>
+        <div>
+          <h1>FISH <span>CONTROL</span> 学生赛事端</h1>
+          <p>水下机器鱼 2v2 生态科技赛</p>
+        </div>
+      </section>
+
+      <nav class="dock" aria-label="赛事端导航">
+        <button class="dock-item" type="button"><span class="dock-icon home"></span><span>比赛大厅</span></button>
+        <button class="dock-item active" type="button"><span class="dock-icon pad"></span><span>操控台</span></button>
+        <button class="dock-item" type="button"><span class="dock-icon flag"></span><span>自主任务</span></button>
+        <button class="dock-item" type="button"><span class="dock-icon chart"></span><span>比赛记录</span></button>
+      </nav>
+
+      <p class="slogan">科技让水中运动更精彩</p>
+    </header>
+
+    <section class="hud">
+      <div class="mission glass lift">
+        <h2>生态资源应急修复对抗 · 2v2</h2>
+        <p>控制 · 策略 · 协作 · 共建水下生态</p>
+      </div>
+      <div class="score glass lift"><span>本局积分</span><strong class="blue">72</strong><strong>:</strong><strong class="red">60</strong></div>
+      <div class="timer glass lift"><span>剩余时间</span><strong>01:28</strong></div>
+      <div class="hud-card glass lift"><span>资源采集</span><strong>3/6</strong></div>
+      <div class="hud-card glass lift green"><span>生态点修复</span><strong>1/2</strong></div>
+      <div class="hud-card glass lift orange"><span>协同交付</span><strong>1/2</strong></div>
+      <button class="emergency" type="button">急停</button>
+    </section>
+
+    <section class="content">
+      <aside class="left">
+        <section class="panel glass lift">
+          <div class="panel-title"><h2>我的控制</h2><span>为团队而战</span></div>
+          <article class="control-id">
+            <span class="fish-mark" aria-hidden="true"></span>
+            <div><h3>B1</h3><p>资源采集手 · 当前控制</p></div>
+            <span class="chip">视觉正常</span>
+          </article>
+          <div class="metrics">
+            <div class="metric"><span>电量</span><strong>78%</strong></div>
+            <div class="metric"><span>网络</span><strong>良好</strong></div>
+            <div class="metric"><span>航向角</span><strong>128°</strong></div>
+          </div>
+          <div class="metrics">
+            <div class="metric"><span>X 坐标</span><strong>-1.25</strong></div>
+            <div class="metric"><span>Y 坐标</span><strong>0.36</strong></div>
+            <div class="metric"><span>延迟</span><strong>12ms</strong></div>
+          </div>
+          <div class="control-pad" aria-label="运动控制">
+            <button class="forward" type="button">W<br />前进</button>
+            <button class="left" type="button">A<br />左转</button>
+            <button class="right" type="button">D<br />右转</button>
+            <button class="stop" type="button">SPACE<br />紧急停止</button>
+          </div>
+        </section>
+
+        <section class="panel glass lift">
+          <div class="panel-title"><h2>队友状态</h2><span>B2</span></div>
+          <div class="team-card">
+            <div class="team-row"><span class="dot"></span><div><strong>B2 修复协作</strong><small>仅查看，不可控制</small></div><b>82%</b></div>
+            <div class="team-row"><span class="dot"></span><div><strong>队内通信</strong><small>连接稳定</small></div><b>正常</b></div>
+          </div>
+        </section>
+      </aside>
+
+      <section class="arena glass lift">
+        <header class="arena-head">
+          <strong>实时场地画面（顶部视角）</strong>
+          <span class="live">LIVE　高清 / 30 FPS</span>
+        </header>
+        <div class="pool">
+          <div class="base blue">蓝队基地</div>
+          <div class="base red">红队基地</div>
+          <div class="fish-token" data-label="B1" style="left: 24%; top: 38%;"></div>
+          <div class="fish-token" data-label="B2" style="left: 23%; top: 78%; animation-delay: -.8s;"></div>
+          <div class="fish-token red" data-label="R1" style="left: 79%; top: 40%; animation-delay: -.35s;"></div>
+          <div class="fish-token red" data-label="R2" style="left: 78%; top: 78%; animation-delay: -1.1s;"></div>
+          <div class="resource blue" data-label="资源 #1"></div>
+          <div class="resource green" data-label="资源 #3"></div>
+          <div class="resource yellow" data-label="资源 #2"></div>
+          <div class="resource purple" data-label="资源 #4"></div>
+          <div class="resource red-dot" data-label="资源 #5"></div>
+          <div class="resource black" data-label="资源 #6"></div>
+          <div class="eco a">生态修复点 A</div>
+          <div class="handoff">协同交付点</div>
+          <div class="eco b">生态修复点 B</div>
+        </div>
+        <footer class="arena-foot"><span>水池尺寸：6.0m × 4.0m</span><span>2026-09-11 14:32:18</span></footer>
+      </section>
+
+      <aside class="right">
+        <section class="panel glass lift">
+          <div class="panel-title"><h2>资源任务态势</h2><span>任务地图</span></div>
+          <div class="mini-map">
+            <div class="pool">
+              <div class="base blue">蓝</div>
+              <div class="base red">红</div>
+              <div class="fish-token" data-label="B1" style="left: 27%; top: 36%;"></div>
+              <div class="fish-token" data-label="B2" style="left: 27%; top: 71%;"></div>
+              <div class="fish-token red" data-label="R1" style="left: 76%; top: 36%;"></div>
+              <div class="fish-token red" data-label="R2" style="left: 76%; top: 71%;"></div>
+            </div>
+          </div>
+          <div class="metrics">
+            <div class="metric"><span>最近资源</span><strong>0.72m</strong></div>
+            <div class="metric"><span>生态点 A</span><strong>1.38m</strong></div>
+            <div class="metric"><span>完成进度</span><strong>3/6</strong></div>
+          </div>
+        </section>
+
+        <section class="panel glass lift">
+          <div class="panel-title"><h2>战术建议</h2><span>基于视觉识别</span></div>
+          <div class="advice-card lift">
+            <span class="cube" aria-hidden="true"></span>
+            <p><strong>建议：采集资源 #3</strong><small>位于左侧中部，距离较近，优先前往采集。</small></p>
+            <span>›</span>
+          </div>
+        </section>
+
+        <section class="panel glass lift">
+          <div class="panel-title"><h2>快捷团队信号</h2><span>一键协作</span></div>
+          <div class="signal-grid">
+            <button type="button">采集资源</button>
+            <button type="button">修复生态点</button>
+            <button type="button">协同交付</button>
+          </div>
+        </section>
+
+        <section class="panel glass lift">
+          <div class="panel-title"><h2>赛事事件</h2><span>实时记录</span></div>
+          <div class="team-card">
+            <div class="event-row"><span>14:31</span><div><strong>资源状态更新</strong><small>蓝队靠近资源 #3</small></div><b>+10</b></div>
+            <div class="event-row"><span>14:32</span><div><strong>协同交付确认</strong><small>B1 与 B2 路径同步</small></div><b>+15</b></div>
+          </div>
+        </section>
+      </aside>
+    </section>
+
+    <footer class="bottom">
+      <span>边界保护：正常　队内通信：正常　延迟：12ms　丢包：0%</span>
+      <span>FISH CONTROL · STUDENT COMPETITION PLATFORM</span>
+    </footer>
+  </main>
+
+  <script>
+    const dock = document.querySelector(".dock");
+    const items = [...document.querySelectorAll(".dock-item")];
+    let raf = 0;
+
+    function setItem(item, scale, lift) {
+      item.style.setProperty("--scale", scale.toFixed(3));
+      item.style.setProperty("--lift", `${lift.toFixed(1)}px`);
+    }
+
+    function updateDock(clientX) {
+      items.forEach((item) => {
+        const rect = item.getBoundingClientRect();
+        const center = rect.left + rect.width / 2;
+        const distance = Math.abs(clientX - center);
+        const influence = Math.max(0, 1 - distance / 190);
+        const eased = influence * influence * (3 - 2 * influence);
+        setItem(item, 1 + eased * .18, -eased * 8);
+      });
+    }
+
+    function resetDock() {
+      items.forEach((item) => setItem(item, 1, 0));
+    }
+
+    dock.addEventListener("mousemove", (event) => {
+      window.cancelAnimationFrame(raf);
+      raf = window.requestAnimationFrame(() => updateDock(event.clientX));
+    });
+
+    dock.addEventListener("mouseleave", resetDock);
+
+    items.forEach((item) => {
+      item.addEventListener("click", () => {
+        items.forEach((candidate) => candidate.classList.remove("active"));
+        item.classList.add("active");
+      });
+    });
+  </script>
+</body>
+</html>
