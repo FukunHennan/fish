@@ -139,6 +139,8 @@
         if (confirmCard()) confirmCard().hidden = false;
         ensureVideoSurface();
         observeRenders();
+        ensureRefereeBar();
+        document.addEventListener("click", handleRefereeClick, true);
         return refreshDevices();
       })
       .catch(function (error) {
@@ -408,6 +410,105 @@
       }, 200);
     });
     observer.observe(document.body, { childList: true, subtree: true });
+  }
+
+  // ---------------------------------------------------------------- 裁判端
+  // 裁判端设计稿的按钮是内联 onclick 的演示逻辑，无法直接反向绑定。
+  // 这里注入一个真实比赛控制条，直接驱动后端裁判流程接口。
+  var referee = { match: null, elapsedMs: 0, running: false, bar: null, poll: null };
+
+  function isRefereePage() {
+    return !!document.getElementById("clock") || !!document.querySelector(".videoStage");
+  }
+
+  function fmtClock(ms) {
+    var total = Math.max(0, Math.floor(ms / 1000));
+    var minutes = Math.floor(total / 60), seconds = total % 60;
+    return (minutes < 10 ? "0" : "") + minutes + ":" + (seconds < 10 ? "0" : "") + seconds;
+  }
+
+  function stateText(state) {
+    return ({
+      waiting: "等待开始", signup: "签到中", ready: "可以开始",
+      running: "进行中", paused: "已暂停", finished: "已结束",
+    })[state] || state || "未知";
+  }
+
+  function refereeAction(action, body) {
+    return api("/api/competition/match/" + action, { method: "POST", body: body || {} })
+      .then(function () { return refreshReferee(); })
+      .catch(function (error) { setBadge("裁判操作失败：" + error.message, "error"); });
+  }
+
+  function refreshReferee() {
+    if (!isRefereePage()) return Promise.resolve();
+    return api("/api/competition/match")
+      .then(function (payload) {
+        referee.match = payload.match;
+        referee.elapsedMs = payload.elapsedMs || 0;
+        referee.running = !!payload.running;
+        paintReferee();
+      })
+      .catch(function () { /* 未登录等场景静默 */ });
+  }
+
+  function paintReferee() {
+    if (!referee.bar || !referee.match) return;
+    var match = referee.match;
+    var clock = referee.bar.querySelector("#fishRefClock");
+    var score = referee.bar.querySelector("#fishRefScore");
+    var info = referee.bar.querySelector("#fishRefInfo");
+    var toggle = referee.bar.querySelector("#fishRefToggle");
+    if (clock) clock.textContent = fmtClock(referee.elapsedMs);
+    if (score) score.textContent = match.blue.score + " : " + match.red.score;
+    if (info) {
+      info.textContent = (match.matchNo || "未建赛") + " · " + stateText(match.state)
+        + " · " + (match.blue.name || "蓝队") + " vs " + (match.red.name || "红队");
+    }
+    if (toggle) toggle.textContent = referee.running ? "暂停" : "开始";
+  }
+
+  function ensureRefereeBar() {
+    if (referee.bar || !document.body || !isRefereePage()) return;
+    var bar = document.createElement("div");
+    bar.id = "fishRefereeBar";
+    bar.style.cssText = [
+      "position:fixed", "right:14px", "bottom:14px", "z-index:2147483000",
+      "display:flex", "align-items:center", "gap:8px", "padding:8px 10px",
+      "border-radius:12px", "font-size:12px", "color:#dff2ff",
+      "font-family:system-ui,'Microsoft YaHei',sans-serif",
+      "background:rgba(3,18,41,.92)", "border:1px solid rgba(120,200,255,.35)",
+      "backdrop-filter:blur(8px)", "box-shadow:0 8px 24px rgba(0,0,0,.35)",
+    ].join(";");
+    bar.innerHTML =
+      '<span id="fishRefInfo" style="opacity:.85;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>' +
+      '<b id="fishRefClock" style="font-variant-numeric:tabular-nums;font-size:15px">00:00</b>' +
+      '<b id="fishRefScore" style="font-variant-numeric:tabular-nums;font-size:15px">0 : 0</b>' +
+      '<button type="button" data-ref="blue+1" style="' + REF_BTN + '">蓝 +1</button>' +
+      '<button type="button" data-ref="red+1" style="' + REF_BTN + '">红 +1</button>' +
+      '<button type="button" id="fishRefToggle" data-ref="toggle" style="' + REF_BTN + '">开始</button>' +
+      '<button type="button" data-ref="finish" style="' + REF_BTN + '">结束</button>';
+    document.body.appendChild(bar);
+    referee.bar = bar;
+    refreshReferee();
+    if (!referee.poll) referee.poll = setInterval(refreshReferee, 2000);
+  }
+
+  var REF_BTN = [
+    "border:1px solid rgba(120,200,255,.4)", "background:rgba(20,60,110,.7)",
+    "color:#dff2ff", "border-radius:8px", "padding:5px 9px", "font-size:12px", "cursor:pointer",
+  ].join(";");
+
+  function handleRefereeClick(event) {
+    var target = event.target;
+    if (!target || !target.closest) return;
+    var button = target.closest("[data-ref]");
+    if (!button) return;
+    var action = button.getAttribute("data-ref");
+    if (action === "blue+1") refereeAction("score", { side: "blue", delta: 1 });
+    else if (action === "red+1") refereeAction("score", { side: "red", delta: 1 });
+    else if (action === "toggle") refereeAction("clock", { action: referee.running ? "pause" : "start" });
+    else if (action === "finish") refereeAction("finish");
   }
 
   // ---------------------------------------------------------------- SSE

@@ -44,6 +44,7 @@ type server struct {
 	calibrationPath string
 	auth            *authStore
 	leases          *leaseStore
+	competition     *competitionStore
 }
 
 type deviceView struct {
@@ -144,7 +145,8 @@ func newHandler(h *hub.Hub, key []byte, apiAddress, streamAddress, firmwarePath 
 	s := &server{
 		hub: h, key: append([]byte(nil), key...), firmwarePath: firmwarePath,
 		calibrationPath: motionCalibrationPath(), auth: newAuthStore(authStorePath()),
-		leases: newLeaseStore(60 * time.Second),
+		leases:      newLeaseStore(60 * time.Second),
+		competition: newCompetitionStore(competitionPath()),
 	}
 	if s.authActive() {
 		if err := s.leases.loadReservations(authStorePath() + ".reservations.json"); err != nil {
@@ -207,6 +209,7 @@ func newHandler(h *hub.Hub, key []byte, apiAddress, streamAddress, firmwarePath 
 	m.HandleFunc("/api/emergency-stop", s.emergencyStop)
 	m.HandleFunc("/api/motion-calibrations", s.motionCalibrations)
 	m.HandleFunc("/api/rgb", s.rgb)
+	m.HandleFunc("/api/competition/", s.competitionAPI)
 	m.HandleFunc("/api/ota", s.ota)
 	m.HandleFunc("/api/firmware", s.firmwareAPI)
 	m.HandleFunc("/api/firmware/current.bin", s.firmware)
