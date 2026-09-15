@@ -1,3 +1,11 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#031229" />
+<title>Fish Control 学生赛事端</title>
+<style>
 *,
 *::before,
 *::after {
@@ -53,7 +61,7 @@ button {
   position: relative;
   display: grid;
   width: 100%;
-  height: 100dvh;
+  height: 100vh;
   place-items: center;
   padding: 0;
   overflow: hidden;
@@ -87,7 +95,7 @@ button {
   z-index: 1;
   display: grid;
   container-type: size;
-  width: min(100vw, calc(100dvh * var(--ratio-value)));
+  width: min(100vw, calc(100vh * var(--ratio-value)));
   max-width: 100vw;
   max-height: 100dvh;
   aspect-ratio: var(--page-ratio);
@@ -2090,3 +2098,136 @@ p {
     transform: none;
   }
 }
+
+</style>
+</head>
+<body>
+<div id="competition-root"></div>
+<script>
+(function () {
+  const pages = [
+    { id: "lobby", label: "比赛大厅", icon: "home", ratio: "1685 / 934", ratioValue: 1.8041 },
+    { id: "control", label: "操控台", icon: "pad", ratio: "1672 / 940", ratioValue: 1.7787 },
+    { id: "missions", label: "自主任务", icon: "flag", ratio: "1682 / 935", ratioValue: 1.7989 },
+    { id: "records", label: "比赛记录", icon: "chart", ratio: "1674 / 940", ratioValue: 1.7809 },
+  ];
+  const resources = [
+    ["资源 #1", "blue", 38, 41], ["资源 #2", "yellow", 58, 36], ["资源 #3", "green", 31, 61],
+    ["资源 #4", "purple", 66, 59], ["资源 #5", "red-dot", 42, 75], ["资源 #6", "black", 62, 74],
+  ];
+  const taskList = [
+    ["智能走迷宫", "在复杂水下迷宫中自主规划路径", "maze"],
+    ["定点巡航", "按顺序到达多个指定点位完成巡航任务", "pin"],
+    ["多鱼跟随 · 8字形", "三条机器鱼协同跟随完成轨迹运动", "fish"],
+    ["自主水上足球", "自主识别目标，制定进攻策略并实现协同", "ball"],
+  ];
+  const records = [
+    ["生态资源应急修复对抗", "2025-05-18 14:30", "128 分", "2v2 对抗"],
+    ["多鱼跟随（8字形）", "2025-05-18 10:12", "95 分", "技术挑战"],
+    ["智能走迷宫", "2025-05-17 16:20", "78 分", "自主任务"],
+    ["生态资源应急修复对抗", "2025-05-16 15:08", "112 分", "2v2 对抗"],
+    ["多鱼跟随（8字形）", "2025-05-15 11:26", "88 分", "技术挑战"],
+    ["智能走迷宫", "2025-05-14 09:42", "67 分", "自主任务"],
+  ];
+  const validPageIds = new Set(pages.map((item) => item.id));
+  const root = document.getElementById("competition-root");
+
+  function pageFromHash() {
+    const id = window.location.hash.replace(/^#/, "");
+    return validPageIds.has(id) ? id : "lobby";
+  }
+
+  function fishLogo() {
+    return '<span class="fishLogo" aria-hidden="true"><i></i></span>';
+  }
+
+  function statusTile(label, value, tone = "cyan") {
+    return '<section class="statusTile ' + tone + '"><span>' + label + '</span><strong>' + value + '</strong></section>';
+  }
+
+  function controlPool(options = {}) {
+    const compact = options.compact ? " compact" : "";
+    const mission = options.mission ? " mission" : "";
+    if (options.mission) {
+      return '<div class="poolStage' + compact + mission + '"><div class="poolWater"></div><div class="poolCaustics"></div><div class="poolGrid"></div><span class="poolAxis x">X (m)</span><span class="poolAxis y">Y (m)</span><div class="baseZone blue">蓝队基地</div><div class="baseZone red">红队基地</div><div class="figureTrack main"></div><div class="figureTrack yellow"></div><div class="figureTrack red"></div><span class="fishMarker blue leader" style="left:67%;top:34%" data-label="蓝色 · 领航"></span><span class="fishMarker yellow" style="left:23%;top:40%" data-label="黄色 · 跟随"></span><span class="fishMarker red" style="left:38%;top:58%" data-label="红色 · 跟随"></span></div>';
+    }
+    const markers = resources.map(([label, tone, left, top]) => '<span class="resourceMarker ' + tone + '" data-label="' + label + '" style="left:' + left + '%;top:' + top + '%"></span>').join('');
+    return '<div class="poolStage' + compact + '"><div class="poolWater"></div><div class="poolCaustics"></div><div class="poolGrid"></div><div class="baseZone blue">蓝队基地</div><div class="baseZone red">红队基地</div><span class="fishMarker blue" style="left:24%;top:38%" data-label="B1"></span><span class="fishMarker blue" style="left:23%;top:78%" data-label="B2"></span><span class="fishMarker red" style="left:79%;top:40%" data-label="R1"></span><span class="fishMarker red" style="left:78%;top:78%" data-label="R2"></span>' + markers + '<span class="ecoPoint a">生态修复点 A</span><span class="handoffPoint">协同交付点</span><span class="ecoPoint b">生态修复点 B</span></div>';
+  }
+
+  function nav(page) {
+    return '<nav class="dockNav" aria-label="赛事端导航">' + pages.map((item) => '<button class="dockItem ' + (page === item.id ? 'active' : '') + '" type="button" data-page="' + item.id + '" ' + (page === item.id ? 'aria-current="page"' : '') + '><span class="dockIcon ' + item.icon + '"></span><span>' + item.label + '</span></button>').join('') + '</nav>';
+  }
+
+  function header(page) {
+    return '<header class="competitionHeader"><section class="brandBlock">' + fishLogo() + '<div><h1>FISH <span>CONTROL</span> 学生赛事端</h1><p>水下机器鱼 2v2 生态科技赛</p></div></section>' + nav(page) + '<p class="headerSlogan">' + (page === 'control' ? '科技让水中运动更精彩' : '科技 · 协作 · 挑战 · 成长') + '</p></header>';
+  }
+
+  function lobbyPage() {
+    const training = ["视觉手动操控", "智能走迷宫", "多鱼跟随（8字形）"].map((title, index) => '<button type="button" class="trainingCard hoverCard"><span class="trainingImage t' + index + '"></span><strong>' + title + '</strong><small>' + (index === 0 ? '熟悉基础操控，提升控制能力' : index === 1 ? '基于视觉的路径规划训练' : '练习多鱼协同与编队控制') + '</small><i>›</i></button>').join('');
+    return '<section class="screen lobbyScreen"><aside class="spacePanel glassCard hoverCard"><header><h2>我的空间</h2><button type="button">›</button></header><div class="teamBadge">' + fishLogo() + '</div><h3>海洋先锋队</h3><p>探索 · 协作 · 创新<br>用科技让海洋更美好</p><div class="deviceStatus"><i></i>已连接设备 2 台 · 视觉系统正常</div><button class="outlineButton" type="button">管理我的设备</button><small>更聪明的鱼<br>守护更美的海</small></aside><main class="lobbyHero glassCard hoverCard"><div class="waterBeam"></div><h2>从一个任务开始</h2><p>在这里，开启你的海洋科技探索之旅</p><div class="heroCards"><article class="heroCard hoverCard"><span class="heroIcon trophy"></span><h3>赛事任务</h3><p>进入已分配的赛事任务</p><b>有 1 个待开始任务</b><button type="button" data-page="missions">查看任务</button></article><article class="heroCard hoverCard"><span class="heroIcon compass"></span><h3>训练入口</h3><p>练习操控、路径规划与多鱼协同</p><button type="button" data-page="control">开始训练</button></article><article class="heroCard hoverCard"><span class="heroIcon link"></span><h3>连接设备</h3><p>连接机器鱼并检查视觉状态</p><button type="button">连接设备</button></article></div></main><aside class="lobbyStatus"><section class="glassCard hoverCard"><h2>当前状态</h2><div class="statusList">' + statusTile('赛事任务', '1 个待开始', 'orange') + statusTile('训练记录', '本周 3 次') + statusTile('设备连接', '2 台在线', 'green') + statusTile('系统状态', '正常', 'green') + '</div></section><section class="continuePanel glassCard hoverCard"><h2>最近继续</h2><div><span class="docIcon"></span><p><strong>自主训练</strong><small>上次训练进度</small></p><button type="button" data-page="control">继续</button></div></section></aside><section class="quickPanel glassCard hoverCard"><header><h2>快速训练</h2><button type="button">更多训练 ›</button></header><div class="trainingCards">' + training + '</div></section></section>';
+  }
+
+  function matchHud() {
+    return '<section class="matchHud"><div class="hudTop"><div class="hudTitle"><h2>生态资源应急修复对抗 · 2v2</h2><p>控制 · 策略 · 协作 · 共建水下生态</p></div><div class="hudScore"><span>本局积分</span><b class="blue">72</b><em>:</em><b class="red">60</b></div>' + statusTile('剩余时间', '01:28') + statusTile('资源采集', '3/6') + statusTile('生态点修复', '1/2', 'green') + statusTile('协同交付', '1/2', 'orange') + '<button type="button" class="visionBadge">视觉定位在线</button><button type="button" class="stopButton">急停</button></div><div class="phaseRail" aria-label="比赛准备进度"><span class="done">连接设备</span><span class="done">赛前试动</span><span class="active">正式操控</span><b>一切准备就绪 · 开始你的战术表现！</b></div></section>';
+  }
+
+  function controlPage() {
+    return '<section class="screen controlScreen">' + matchHud() + '<aside class="controlRail glassCard hoverCard"><header><h2>我的控制</h2><span>专注操控 · 为团队而战</span></header><article class="controlFish"><span class="fishChip"></span><div><h3>B1</h3><p>资源采集手</p></div><b>我在控制</b></article><div class="telemetryGrid">' + statusTile('电量', '78%', 'green') + statusTile('网络', '良好') + statusTile('视觉', '正常') + statusTile('X', '-1.25') + statusTile('Y', '0.36') + statusTile('航向角', '128°') + '</div><div class="wasdPad"><button type="button" class="forward">W<span>前进</span></button><button type="button">A<span>左转</span></button><button type="button">D<span>右转</span></button><button type="button" class="space">SPACE<span>紧急停止</span></button></div><section class="railStatus"><h3>队友状态</h3><p><span>B2</span><b>修复协作</b><em>仅查看，不可控制</em></p></section></aside><main class="fieldPanel glassCard hoverCard"><header><h2>实时场地画面（顶部视角）</h2><span>LIVE　高清 / 30 FPS</span></header>' + controlPool() + '<footer><span>水池尺寸：6.0m × 4.0m</span><span>2026-09-11 14:32:18</span></footer></main><aside class="tacticsPanel"><section class="glassCard hoverCard"><header><h2>资源任务态势</h2><span>任务地图</span></header>' + controlPool({ compact: true }) + '<div class="sideMetricRow">' + statusTile('最近资源', '0.72 m', 'orange') + statusTile('距生态点 A', '1.38 m', 'green') + '</div><article class="adviceCard hoverCard"><span class="cube"></span><p><b>建议：采集资源 #3</b><small>位于左侧中部，距离较近，优先前往采集</small></p><i>›</i></article></section><section class="glassCard hoverCard"><h2>快捷团队信号</h2><div class="signalButtons"><button type="button">采集资源</button><button type="button">修复生态点</button><button type="button">协同交付</button></div></section><section class="glassCard hoverCard"><h2>赛事事件记录</h2><p class="eventLine"><span>14:31</span>资源状态更新</p><p class="eventLine"><span>14:32</span>协同交付确认</p></section></aside></section>';
+  }
+
+  function missionsPage() {
+    const tasks = taskList.map(([title, text, icon], index) => '<button type="button" class="taskCard ' + (index === 2 ? 'selected' : '') + '"><span class="taskIcon ' + icon + '"></span><strong>' + title + '</strong><small>' + text + '</small><i></i></button>').join('');
+    return '<section class="screen missionScreen"><aside class="taskSelect glassCard hoverCard"><h2>任务选择</h2><p>选择本次比赛要执行的自主任务</p><div>' + tasks + '</div><section class="requirements"><h3>任务要求</h3><p>红、黄、蓝三条鱼</p><p>蓝鱼领航，红黄跟随</p><p>完成 2 轮 8 字形</p><p>限时 120 秒</p><p>禁止越界</p></section></aside><main class="missionArena glassCard hoverCard"><header><h2>多鱼跟随 · 8 字形轨迹</h2><div><span>三鱼视觉定位在线</span><span>编队路径已验证</span></div></header>' + controlPool({ mission: true }) + '<div class="missionStats">' + statusTile('机器鱼', '3 条') + statusTile('轨迹', '2 轮') + statusTile('预计', '48 s') + statusTile('平均编队间距', '0.35 m') + '</div></main><aside class="strategyPanel glassCard hoverCard"><h2>策略与编程</h2><p>通过图形化编程设计算法策略，控制机器鱼完成任务</p><div class="strategyTabs"><button>路径规划</button><button class="active">图形化编程</button><button>Python（进阶）</button></div><div class="blockStack"><div class="block purple">当 任务开始</div><div class="block blue">设置蓝鱼为领航</div><div class="block blue">生成 8 字形轨迹</div><div class="block violet">红鱼、黄鱼跟随蓝鱼</div><div class="block orange">重复执行 2 轮</div><div class="block blue indent">沿 8 字形轨迹运动</div><div class="block red">完成 2 轮后停止</div></div><div class="strategyActions"><button type="button">仿真运行</button><button type="button">保存策略</button><button type="button" class="deploy">部署到比赛场地</button></div><div class="evalGrid">' + statusTile('红鱼间距', '0.34 m', 'red') + statusTile('黄鱼间距', '0.36 m', 'orange') + statusTile('轨迹偏差', '0.08 m') + statusTile('完成进度', '1/2') + '</div></aside></section>';
+  }
+
+  function recordsPage() {
+    const recordItems = records.map(([title, date, score, type], index) => '<button type="button" class="recordItem ' + (index === 0 ? 'active' : '') + '"><span class="recordThumb"></span><strong>' + title + '</strong><small>' + date + '</small><b>' + score + '</b><em>' + type + '</em></button>').join('');
+    return '<section class="screen recordsScreen"><aside class="recordList glassCard hoverCard"><header><h2>任务记录</h2><button type="button">全部类型</button></header>' + recordItems + '</aside><main class="replayPanel"><section class="recordHeader glassCard hoverCard"><div><h2>生态资源应急修复对抗 · 任务回放</h2><p>学生组 · 2v2 对抗任务</p></div><div class="winnerScore"><span>本局结果</span><strong>128 : 104</strong><b>本局获胜</b></div></section><section class="replayStage glassCard hoverCard"><header><h2>比赛视频回放</h2><select><option>多视角：俯视视角</option></select></header>' + controlPool() + '<footer class="playbar"><button type="button">暂停</button><span>01:27 / 04:00</span><i></i><select><option>1×</option></select></footer></section><section class="recordSummary"><article class="glassCard hoverCard"><h3>任务完成概览</h3><p>资源回收 <b>5/6</b></p><p>生态点修复 <b>2/2</b></p><p>协同交付 <b>2 次</b></p><p>违规 <b>0 次</b></p></article><article class="glassCard hoverCard"><h3>我的操控统计（B1）</h3><p>前进 <b>46%</b></p><p>左转 <b>18%</b></p><p>右转 <b>22%</b></p><p>停止 <b>14%</b></p></article><article class="glassCard hoverCard"><h3>队友协同表现（B2）</h3><p>资源传递 <b>6 次</b></p><p>修复支援 <b>4 次</b></p><p>协同距离 <b>1.2 m</b></p><p>有效协作时间 <b>72%</b></p></article></section></main><aside class="scorePanel glassCard hoverCard"><h2>本局积分</h2><div class="scoreTiles">' + statusTile('资源采集', '42 / 36') + statusTile('生态点修复', '40 / 30', 'green') + statusTile('协同交付', '30 / 30', 'orange') + statusTile('安全规范', '16 / 8') + '</div><section class="keyEvents"><h3>关键事件</h3><p><span>00:42</span> 蓝队 采集资源 #3 <b>+10</b></p><p><span>01:18</span> 红队 修复生态点 <b>+20</b></p><p><span>02:43</span> 蓝队 协同交付 <b>+15</b></p><p><span>04:00</span> 任务结束 <b>-</b></p></section><button type="button" class="retryButton">再次挑战</button></aside></section>';
+  }
+
+  function render() {
+    const page = pageFromHash();
+    const pageConfig = pages.find((item) => item.id === page) || pages[0];
+    const content = page === 'lobby' ? lobbyPage() : page === 'control' ? controlPage() : page === 'missions' ? missionsPage() : recordsPage();
+    root.innerHTML = '<main class="competitionApp page-' + page + '" style="--page-ratio:' + pageConfig.ratio + ';--ratio-value:' + pageConfig.ratioValue + '"><div class="designShell">' + header(page) + content + '<footer class="competitionFooter"><span>边界保护：正常　队内通信：正常　延迟：12ms　丢包：0%</span><span>FISH CONTROL · STUDENT COMPETITION PLATFORM</span></footer></div></main>';
+    bindInteractions();
+  }
+
+  function bindInteractions() {
+    root.querySelectorAll('[data-page]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const nextPage = button.getAttribute('data-page');
+        if (!validPageIds.has(nextPage)) return;
+        if (window.location.hash !== '#' + nextPage) window.location.hash = nextPage;
+        else render();
+      });
+    });
+    root.querySelectorAll('.dockNav').forEach((navEl) => {
+      navEl.addEventListener('mousemove', (event) => {
+        if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+        navEl.querySelectorAll('.dockItem').forEach((item) => {
+          const rect = item.getBoundingClientRect();
+          const distance = Math.abs(event.clientX - (rect.left + rect.width / 2));
+          const influence = Math.max(0, 1 - distance / 180);
+          const eased = influence * influence * (3 - 2 * influence);
+          item.style.setProperty('--dock-scale', String((1 + eased * 0.18).toFixed(3)));
+          item.style.setProperty('--dock-lift', (-eased * 8).toFixed(1) + 'px');
+        });
+      });
+      navEl.addEventListener('mouseleave', () => {
+        navEl.querySelectorAll('.dockItem').forEach((item) => {
+          item.style.setProperty('--dock-scale', '1');
+          item.style.setProperty('--dock-lift', '0px');
+        });
+      });
+    });
+  }
+
+  window.addEventListener('hashchange', render);
+  if (!validPageIds.has(pageFromHash())) window.location.hash = 'lobby';
+  render();
+})();
+</script>
+</body>
+</html>

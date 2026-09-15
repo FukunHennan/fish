@@ -1388,16 +1388,25 @@ func texts(v any) []string {
 	return result
 }
 
+// dashboard serves the operator console at "/" plus any other top-level
+// entry page built into the same embedded dist (for example
+// /competition.html). Every page shares the /assets/ bundle below.
 func (s *server) dashboard(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
+	name := strings.TrimPrefix(r.URL.Path, "/")
+	if name == "" {
+		name = "index.html"
+	}
+	// Only top-level .html entry pages are exposed; sub-paths and any other
+	// extension fall through to 404 instead of reaching the embedded FS.
+	if strings.ContainsAny(name, `/\`) || !strings.HasSuffix(name, ".html") {
 		http.NotFound(w, r)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	index, err := frontendFiles.ReadFile("dist/index.html")
+	page, err := frontendFiles.ReadFile("dist/" + name)
 	if err != nil {
-		http.Error(w, "网页资源不可用", http.StatusInternalServerError)
+		http.NotFound(w, r)
 		return
 	}
-	_, _ = w.Write(index)
+	_, _ = w.Write(page)
 }

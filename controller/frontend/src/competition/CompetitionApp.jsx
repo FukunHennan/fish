@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const pages = [
   { id: "lobby", label: "比赛大厅", icon: "home", ratio: "1685 / 934", ratioValue: 1.8041 },
@@ -32,6 +32,13 @@ const records = [
   ["智能走迷宫", "2025-05-14 09:42", "67 分", "自主任务"],
 ];
 
+const validPageIds = new Set(pages.map((item) => item.id));
+
+function pageFromHash() {
+  const id = window.location.hash.replace(/^#/, "");
+  return validPageIds.has(id) ? id : "lobby";
+}
+
 function DockNav({ page, onPageChange }) {
   const navRef = useRef(null);
   const reduceMotion = useMemo(() => window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches, []);
@@ -64,6 +71,7 @@ function DockNav({ page, onPageChange }) {
           className={`dockItem ${page === item.id ? "active" : ""}`}
           type="button"
           key={item.id}
+          aria-current={page === item.id ? "page" : undefined}
           onClick={() => onPageChange(item.id)}
         >
           <span className={`dockIcon ${item.icon}`} />
@@ -106,7 +114,15 @@ function StatusTile({ label, value, tone = "cyan" }) {
 function ControlPool({ compact = false, mission = false }) {
   return (
     <div className={`poolStage ${compact ? "compact" : ""} ${mission ? "mission" : ""}`}>
+      <div className="poolWater" />
+      <div className="poolCaustics" />
       <div className="poolGrid" />
+      {mission && (
+        <>
+          <span className="poolAxis x">X (m)</span>
+          <span className="poolAxis y">Y (m)</span>
+        </>
+      )}
       <div className="baseZone blue">蓝队基地</div>
       <div className="baseZone red">红队基地</div>
       {mission ? (
@@ -216,17 +232,25 @@ function LobbyPage({ onPageChange }) {
 function MatchHud() {
   return (
     <section className="matchHud">
-      <div className="hudTitle">
-        <h2>生态资源应急修复对抗 · 2v2</h2>
-        <p>控制 · 策略 · 协作 · 共建水下生态</p>
+      <div className="hudTop">
+        <div className="hudTitle">
+          <h2>生态资源应急修复对抗 · 2v2</h2>
+          <p>控制 · 策略 · 协作 · 共建水下生态</p>
+        </div>
+        <div className="hudScore"><span>本局积分</span><b className="blue">72</b><em>:</em><b className="red">60</b></div>
+        <StatusTile label="剩余时间" value="01:28" />
+        <StatusTile label="资源采集" value="3/6" />
+        <StatusTile label="生态点修复" value="1/2" tone="green" />
+        <StatusTile label="协同交付" value="1/2" tone="orange" />
+        <button type="button" className="visionBadge">视觉定位在线</button>
+        <button type="button" className="stopButton">急停</button>
       </div>
-      <div className="hudScore"><span>本局积分</span><b className="blue">72</b><em>:</em><b className="red">60</b></div>
-      <StatusTile label="剩余时间" value="01:28" />
-      <StatusTile label="资源采集" value="3/6" />
-      <StatusTile label="生态点修复" value="1/2" tone="green" />
-      <StatusTile label="协同交付" value="1/2" tone="orange" />
-      <button type="button" className="visionBadge">视觉定位在线</button>
-      <button type="button" className="stopButton">急停</button>
+      <div className="phaseRail" aria-label="比赛准备进度">
+        <span className="done">连接设备</span>
+        <span className="done">赛前试动</span>
+        <span className="active">正式操控</span>
+        <b>一切准备就绪 · 开始你的战术表现！</b>
+      </div>
     </section>
   );
 }
@@ -417,8 +441,24 @@ function RecordsPage() {
 }
 
 export default function CompetitionApp() {
-  const [page, setPage] = useState("lobby");
+  const [page, setPage] = useState(pageFromHash);
   const pageConfig = pages.find((item) => item.id === page) || pages[0];
+
+  useEffect(() => {
+    function syncPageFromHash() {
+      setPage(pageFromHash());
+    }
+    window.addEventListener("hashchange", syncPageFromHash);
+    return () => window.removeEventListener("hashchange", syncPageFromHash);
+  }, []);
+
+  function changePage(nextPage) {
+    if (!validPageIds.has(nextPage)) return;
+    setPage(nextPage);
+    if (window.location.hash !== `#${nextPage}`) {
+      window.history.replaceState(null, "", `#${nextPage}`);
+    }
+  }
 
   return (
     <main
@@ -426,8 +466,8 @@ export default function CompetitionApp() {
       style={{ "--page-ratio": pageConfig.ratio, "--ratio-value": pageConfig.ratioValue }}
     >
       <div className="designShell">
-        <Header page={page} onPageChange={setPage} />
-        {page === "lobby" && <LobbyPage onPageChange={setPage} />}
+        <Header page={page} onPageChange={changePage} />
+        {page === "lobby" && <LobbyPage onPageChange={changePage} />}
         {page === "control" && <ControlPage />}
         {page === "missions" && <MissionsPage />}
         {page === "records" && <RecordsPage />}
