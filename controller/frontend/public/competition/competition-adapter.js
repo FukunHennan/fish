@@ -59,6 +59,12 @@
     return device.name || device.deviceId || device.id || "";
   }
 
+  function escapeHtml(value) {
+    return String(value == null ? "" : value).replace(/[&<>"']/g, function (char) {
+      return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char];
+    });
+  }
+
   // ---------------------------------------------------------------- 状态角标
   var badge = null;
   function setBadge(text, tone) {
@@ -141,8 +147,7 @@
         if (confirmCard()) confirmCard().hidden = false;
         ensureVideoSurface();
         observeRenders();
-        ensureRefereeBar();
-        document.addEventListener("click", handleRefereeClick, true);
+        ensureRefereeIntegration();
         return refreshDevices();
       })
       .catch(function (error) {
@@ -440,6 +445,8 @@
         pending = null;
         ensureVideoSurface();
         paintDeviceInfo();
+        ensureRefereeIntegration();
+        refreshFishAssignments();
       }, 200);
     });
     observer.observe(document.body, { childList: true, subtree: true });
@@ -448,7 +455,7 @@
   // ---------------------------------------------------------------- 裁判端
   // 裁判端设计稿的按钮是内联 onclick 的演示逻辑，无法直接反向绑定。
   // 这里注入一个真实比赛控制条，直接驱动后端裁判流程接口。
-  var referee = { match: null, elapsedMs: 0, running: false, bar: null, poll: null };
+  var referee = { match: null, elapsedMs: 0, running: false, bar: null, poll: null, clickBound: false };
 
   function isRefereePage() {
     return !!document.getElementById("clock") || !!document.querySelector(".videoStage");
@@ -539,6 +546,17 @@
     if (!referee.poll) referee.poll = setInterval(refreshReferee, 2000);
   }
 
+  function ensureRefereeIntegration() {
+    if (!isRefereePage()) return;
+    ensureRefereeBar();
+    if (!referee.clickBound) {
+      document.addEventListener("click", handleRefereeClick, true);
+      referee.clickBound = true;
+    }
+    refreshReferee();
+    refreshFishAssignments();
+  }
+
   var REF_BTN = [
     "border:1px solid rgba(120,200,255,.4)", "background:rgba(20,60,110,.7)",
     "color:#dff2ff", "border-radius:8px", "padding:5px 9px", "font-size:12px", "cursor:pointer",
@@ -546,6 +564,98 @@
 
   // ---------------------------------------------------------------- 签到鱼绑定
   // 裁判签到时为每个席位分配机器鱼，形成比赛期间的归属关系。
+  function normalizeSlot(slot) {
+    return String(slot || "").trim().toUpperCase();
+  }
+
+  function assignedToSlot(device, slot) {
+    var normalized = normalizeSlot(slot);
+    if (!device || !normalized) return false;
+    if (normalizeSlot(device.slot) === normalized) return true;
+    var assignedTo = normalizeSlot(device.assignedTo);
+    return assignedTo === normalized || assignedTo.slice(-1 * normalized.length) === normalized;
+  }
+
+  function devicesForSlot(devices, slot) {
+    return (devices || []).filter(function (device) {
+      if (!device.online) return false;
+      return !device.assignedTo || assignedToSlot(device, slot);
+    });
+  }
+
+  function currentDeviceForSlot(devices, slot) {
+    var list = devices || [];
+    for (var index = 0; index < list.length; index += 1) {
+      if (assignedToSlot(list[index], slot)) return list[index];
+    }
+    return null;
+  }
+
+  function deviceLabel(device) {
+    return deviceName(device) || "未命名机器鱼";
+  }
+
+  function loadCompetitionDevices() {
+    return api("/api/competition/devices").then(function (payload) {
+      return (payload && payload.devices) || [];
+    });
+  }
+
+  function paintSignupFish(devices) {
+    document.querySelectorAll(".player").forEach(function (card) {
+      var title = card.querySelector(".playerTop b");
+      var slot = title ? normalizeSlot(String(title.textContent).split("·")[0]) : "";
+      if (!slot) return;
+      var current = currentDeviceForSlot(devices, slot);
+      card.querySelectorAll(".meta").forEach(function (meta) {
+        var label = meta.querySelector("span");
+        var value = meta.querySelector("strong");
+        if (label && value && label.textContent.trim() === "机器鱼") {
+          value.textContent = current ? deviceLabel(current) : "未分配";
+        }
+      });
+    });
+  }
+
+  function paintSelectFish(devices) {
+    document.querySelectorAll(".selectPlayer[data-slot]").forEach(function (button) {
+      var slot = button.getAttribute("data-slot");
+      var current = currentDeviceForSlot(devices, slot);
+      var available = devicesForSlot(devices, slot);
+      var summary = current ? ("已分配：" + deviceLabel(current))
+        : (available.length ? ("可分配：" + available.length + " 条") : "暂无可分配机器鱼");
+      var preview = button.querySelector(".fishAssignPreview");
+      if (!preview) {
+        preview = document.createElement("small");
+        preview.className = "fishAssignPreview";
+        preview.style.cssText = "margin-top:2px;color:#7ee6c5;font-size:8px";
+        var text = button.querySelector("div");
+        if (text) text.appendChild(preview);
+      }
+      if (preview) preview.textContent = summary;
+    });
+  }
+
+  function paintConfirmFish(devices, slot) {
+    var current = currentDeviceForSlot(devices, slot);
+    var field = document.getElementById("confirmFish");
+    if (field && normalizeSlot(document.getElementById("confirmSlot") ? document.getElementById("confirmSlot").textContent : "") === normalizeSlot(slot)) {
+      field.textContent = current ? deviceLabel(current) : "未分配";
+    }
+  }
+
+  function refreshFishAssignments() {
+    if (!isRefereePage()) return Promise.resolve();
+    return loadCompetitionDevices()
+      .then(function (devices) {
+        paintSignupFish(devices);
+        paintSelectFish(devices);
+        var slotNode = document.getElementById("confirmSlot");
+        if (slotNode) paintConfirmFish(devices, slotNode.textContent);
+      })
+      .catch(function () { /* 签到鱼列表失败不影响主界面 */ });
+  }
+
   function injectFishSelect(slot) {
     var step = document.getElementById("confirmStep");
     if (!step || !slot) return;
@@ -564,23 +674,28 @@
     var select = row.querySelector("#fishAssignSelect");
     var hint = row.querySelector("#fishAssignHint");
     select.setAttribute("data-slot", slot);
-    return api("/api/competition/devices").then(function (payload) {
-      var list = (payload && payload.devices) || [];
+    if (hint) hint.textContent = "读取中…";
+    return loadCompetitionDevices().then(function (list) {
+      var available = devicesForSlot(list, slot);
+      var currentDevice = currentDeviceForSlot(list, slot);
       var options = ['<option value="">（暂不分配）</option>'];
-      var current = "";
-      list.forEach(function (device) {
-        if (!device.online) return;
-        var mine = device.slot && String(device.slot).toUpperCase() === String(slot).toUpperCase();
-        if (device.assignedTo && !mine) return;   // 已归属其他席位的鱼不在此列出
-        if (mine) current = device.deviceId;
-        var label = (device.name || device.deviceId) + (mine ? "（本席位）" : "");
-        options.push('<option value="' + device.deviceId + '"' + (mine ? " selected" : "") + ">" + label + "</option>");
+      available.forEach(function (device) {
+        var mine = assignedToSlot(device, slot);
+        var id = device.deviceId || device.id || "";
+        var label = deviceLabel(device) + (mine ? "（本席位）" : "");
+        options.push('<option value="' + escapeHtml(id) + '"' + (mine ? " selected" : "") + ">" + escapeHtml(label) + "</option>");
       });
       select.innerHTML = options.join("");
+      if (currentDevice) select.value = currentDevice.deviceId || currentDevice.id || "";
       if (hint) {
-        hint.textContent = list.filter(function (d) { return d.online; }).length ? "" : "无在线机器鱼";
+        var onlineCount = list.filter(function (device) { return device.online; }).length;
+        hint.textContent = available.length ? ("可分配 " + available.length + " 条")
+          : (onlineCount ? "在线机器鱼均已分配" : "无在线机器鱼");
       }
-      return current;
+      paintSignupFish(list);
+      paintSelectFish(list);
+      paintConfirmFish(list, slot);
+      return currentDevice;
     }).catch(function () {
       if (hint) hint.textContent = "读取机器鱼失败";
     });
@@ -725,16 +840,19 @@
       });
     });
 
+    observeRenders();
+    ensureRefereeIntegration();
+
     checkSession().then(function (authenticated) {
       if (authenticated) {
         // 已有会话：直接进入终端，跳过设计稿的登录层
         var layer = document.getElementById("teamAuthLayer");
         if (layer) layer.hidden = true;
-        if (location.hash !== "#control") location.hash = "control";
+        if (!isRefereePage() && location.hash !== "#control") location.hash = "control";
         setBadge("已登录：" + (state.user.email || "当前账号"), "ok");
         refreshDevices();
         ensureVideoSurface();
-        observeRenders();
+        ensureRefereeIntegration();
       } else {
         setBadge("请先登录战队账号", "info");
       }
