@@ -2090,3 +2090,237 @@ p {
     transform: none;
   }
 }
+
+/* Backend-connected competition states */
+.competitionLoading,
+.competitionLogin {
+  width: 100%;
+  height: 100dvh;
+  display: grid;
+  place-items: center;
+  color: #dff9ff;
+  background:
+    radial-gradient(circle at 20% 12%, rgba(34, 231, 255, 0.18), transparent 30%),
+    linear-gradient(180deg, #020c1f 0%, #031a32 52%, #02101f 100%);
+}
+
+.competitionLoading {
+  font-size: 16px;
+  letter-spacing: 0.08em;
+}
+
+.competitionLoginCard {
+  width: min(420px, calc(100vw - 32px));
+  display: grid;
+  gap: 14px;
+  padding: 34px;
+  border: 1px solid rgba(57, 190, 255, 0.42);
+  border-radius: 18px;
+  background: rgba(4, 28, 55, 0.9);
+  box-shadow: 0 18px 70px rgba(0, 0, 0, 0.35), inset 0 0 34px rgba(0, 166, 255, 0.1);
+}
+
+.competitionLoginCard .fishLogo {
+  width: 52px;
+  height: 52px;
+  margin-bottom: 4px;
+}
+
+.competitionLoginCard .eyebrow {
+  margin: 0;
+  color: #70dff4;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+}
+
+.competitionLoginCard h1,
+.competitionLoginCard p {
+  margin: 0;
+}
+
+.competitionLoginCard h1 {
+  font-size: 28px;
+}
+
+.competitionLoginCard > p:not(.eyebrow) {
+  color: #91b7c8;
+  line-height: 1.7;
+}
+
+.competitionLoginCard label {
+  display: grid;
+  gap: 6px;
+  color: #9bc7d8;
+  font-size: 12px;
+}
+
+.competitionLoginCard input {
+  width: 100%;
+  padding: 11px 12px;
+  color: #e8fbff;
+  background: rgba(1, 14, 29, 0.86);
+  border: 1px solid rgba(92, 210, 255, 0.28);
+  border-radius: 8px;
+  outline: none;
+}
+
+.competitionLoginCard input:focus {
+  border-color: #22e7ff;
+  box-shadow: 0 0 0 3px rgba(34, 231, 255, 0.12);
+}
+
+.competitionLoginError,
+.competitionApiError {
+  color: #ffb6c2;
+  background: rgba(112, 25, 52, 0.36);
+  border: 1px solid rgba(255, 70, 101, 0.34);
+  border-radius: 8px;
+}
+
+.competitionLoginError {
+  padding: 9px 11px;
+  font-size: 12px;
+}
+
+.loginButton {
+  min-height: 42px;
+  color: #031229;
+  background: #29f5a2;
+  border: 0;
+  border-radius: 8px;
+  font-weight: 800;
+}
+
+.loginButton:disabled,
+.matchHud button:disabled,
+.controlRail button:disabled,
+.controlRail select:disabled,
+.tacticsPanel button:disabled,
+.retryButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.headerMeta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.8em;
+}
+
+.backendBadge,
+.userBadge {
+  white-space: nowrap;
+}
+
+.backendBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  color: #91b7c8;
+  font-size: 0.75em;
+}
+
+.backendBadge i,
+.deviceStatus i {
+  width: 0.55em;
+  height: 0.55em;
+  display: inline-block;
+  border-radius: 50%;
+  background: #ffbb3b;
+  box-shadow: 0 0 10px currentColor;
+}
+
+.backendBadge.online i {
+  color: #29f5a2;
+  background: #29f5a2;
+}
+
+.userBadge {
+  padding: 0.45em 0.7em;
+  color: #c7effa;
+  background: rgba(11, 69, 110, 0.5);
+  border: 1px solid rgba(92, 210, 255, 0.25);
+  border-radius: 7px;
+  font-size: 0.75em;
+}
+
+.competitionApiError {
+  position: absolute;
+  top: 7.8%;
+  right: 1.5%;
+  z-index: 4;
+  max-width: 34%;
+  padding: 0.65em 0.9em;
+  font-size: 0.76em;
+}
+
+.phaseRail button {
+  padding: 0.35em 0.65em;
+  color: #bff5ff;
+  background: rgba(14, 78, 119, 0.52);
+  border: 1px solid rgba(92, 210, 255, 0.28);
+  border-radius: 6px;
+  font-size: 0.78em;
+}
+
+.assignmentPanel {
+  display: grid;
+  gap: 0.55em;
+  margin-top: 0.9em;
+  padding-top: 0.8em;
+  border-top: 1px solid rgba(92, 210, 255, 0.16);
+}
+
+.assignmentPanel h3 {
+  margin: 0;
+  color: #a9e8ff;
+  font-size: 0.85em;
+}
+
+.deviceAssignment {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  gap: 0.55em;
+  align-items: center;
+  color: #8eb8c9;
+  font-size: 0.73em;
+}
+
+.deviceAssignment span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deviceAssignment select {
+  min-width: 0;
+  padding: 0.45em 0.5em;
+  color: #dff9ff;
+  background: rgba(2, 18, 36, 0.84);
+  border: 1px solid rgba(92, 210, 255, 0.24);
+  border-radius: 5px;
+  font-size: 0.95em;
+}
+
+.emptyState {
+  padding: 1.5em;
+  color: #7faabd;
+  font-size: 0.82em;
+}
+
+@media (max-width: 1100px) {
+  .headerSlogan {
+    display: none;
+  }
+
+  .headerMeta {
+    gap: 0.45em;
+  }
+
+  .competitionApiError {
+    max-width: 48%;
+  }
+}

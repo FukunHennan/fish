@@ -1,4 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  competitionApi,
+  competitionStateLabel,
+  formatCompetitionClock,
+} from "./competitionApi.js";
 
 const pages = [
   { id: "lobby", label: "比赛大厅", icon: "home", ratio: "1685 / 934", ratioValue: 1.8041 },
@@ -23,20 +28,82 @@ const taskList = [
   ["自主水上足球", "自主识别目标，制定进攻策略并实现协同", "ball"],
 ];
 
-const records = [
-  ["生态资源应急修复对抗", "2025-05-18 14:30", "128 分", "2v2 对抗"],
-  ["多鱼跟随（8字形）", "2025-05-18 10:12", "95 分", "技术挑战"],
-  ["智能走迷宫", "2025-05-17 16:20", "78 分", "自主任务"],
-  ["生态资源应急修复对抗", "2025-05-16 15:08", "112 分", "2v2 对抗"],
-  ["多鱼跟随（8字形）", "2025-05-15 11:26", "88 分", "技术挑战"],
-  ["智能走迷宫", "2025-05-14 09:42", "67 分", "自主任务"],
-];
-
 const validPageIds = new Set(pages.map((item) => item.id));
+
+const EMPTY_MATCH = {
+  matchNo: "暂无比赛",
+  group: "未设置组别",
+  venue: "未设置赛场",
+  state: "waiting",
+  blue: { side: "blue", name: "蓝队", score: 0, players: [] },
+  red: { side: "red", name: "红队", score: 0, players: [] },
+  elapsedMs: 0,
+};
+
+function normalizeMatch(match) {
+  if (!match) return null;
+  return {
+    ...EMPTY_MATCH,
+    ...match,
+    blue: { ...EMPTY_MATCH.blue, ...(match.blue || {}) },
+    red: { ...EMPTY_MATCH.red, ...(match.red || {}) },
+  };
+}
+
+function playerForSlot(team, slot) {
+  return team?.players?.find((player) => String(player.slot).toUpperCase() === slot) || {
+    slot,
+    name: "",
+    signedIn: false,
+    deviceId: "",
+  };
+}
+
+function deviceLabel(device) {
+  return device?.name || device?.deviceId || "未分配";
+}
+
+function formatRecordTime(value) {
+  if (!value) return "未记录时间";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("zh-CN", { hour12: false });
+}
+
+function normalizeLoginAccount(value) {
+  const account = String(value || "").trim();
+  if (!account || account.includes("@")) return account;
+  return `${account}@example.com`;
+}
 
 function pageFromHash() {
   const id = window.location.hash.replace(/^#/, "");
   return validPageIds.has(id) ? id : "lobby";
+}
+
+function LoginGate({ onLogin, busy, error }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
+  function submit(event) {
+    event.preventDefault();
+    onLogin(normalizeLoginAccount(email), password);
+  }
+
+  return (
+    <main className="competitionLogin">
+      <form className="competitionLoginCard" onSubmit={submit}>
+        <FishLogo />
+        <p className="eyebrow">FISH CONTROL / COMPETITION</p>
+        <h1>登录赛事端</h1>
+        <p>请使用赛事账号登录，比赛状态和裁判操作将由后端统一保存。</p>
+        <label><span>账号</span><input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="username" placeholder="请输入账号或邮箱" /></label>
+        <label><span>密码</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" placeholder="请输入密码" /></label>
+        {error && <div className="competitionLoginError">{error}</div>}
+        <button className="loginButton" type="submit" disabled={busy}>{busy ? "登录中…" : "进入赛事端"}</button>
+      </form>
+    </main>
+  );
 }
 
 function DockNav({ page, onPageChange }) {
@@ -86,7 +153,7 @@ function FishLogo() {
   return <span className="fishLogo" aria-hidden="true"><i /></span>;
 }
 
-function Header({ page, onPageChange }) {
+function Header({ page, onPageChange, user, backendStatus, onLogout }) {
   return (
     <header className="competitionHeader">
       <section className="brandBlock">
@@ -97,7 +164,13 @@ function Header({ page, onPageChange }) {
         </div>
       </section>
       <DockNav page={page} onPageChange={onPageChange} />
-      <p className="headerSlogan">{page === "control" ? "科技让水中运动更精彩" : "科技 · 协作 · 挑战 · 成长"}</p>
+      <div className="headerMeta">
+        <p className="headerSlogan">{page === "control" ? "科技让水中运动更精彩" : "科技 · 协作 · 挑战 · 成长"}</p>
+        <span className={`backendBadge ${backendStatus === "online" ? "online" : "offline"}`}>
+          <i />{backendStatus === "online" ? "后端已接入" : "后端连接中"}
+        </span>
+        {user && <button className="userBadge" type="button" onClick={onLogout} title="退出登录">{user.name || user.email} · 退出</button>}
+      </div>
     </header>
   );
 }
@@ -152,15 +225,18 @@ function ControlPool({ compact = false, mission = false }) {
   );
 }
 
-function LobbyPage({ onPageChange }) {
+function LobbyPage({ onPageChange, match, devices, records: recordList }) {
+  const onlineCount = devices.filter((device) => device.online).length;
+  const assignedCount = devices.filter((device) => device.assignedTo).length;
+  const currentMatch = match || EMPTY_MATCH;
   return (
     <section className="screen lobbyScreen">
       <aside className="spacePanel glassCard hoverCard">
         <header><h2>我的空间</h2><button type="button">›</button></header>
         <div className="teamBadge"><FishLogo /></div>
-        <h3>海洋先锋队</h3>
-        <p>探索 · 协作 · 创新<br />用科技让海洋更美好</p>
-        <div className="deviceStatus"><i />已连接设备 2 台 · 视觉系统正常</div>
+        <h3>{currentMatch.blue.name || "蓝队"}</h3>
+        <p>{currentMatch.matchNo || "暂无比赛"}<br />{currentMatch.group || "赛事数据由后端同步"}</p>
+        <div className="deviceStatus"><i />已连接设备 {onlineCount} 台 · 已分配 {assignedCount} 台</div>
         <button className="outlineButton" type="button">管理我的设备</button>
         <small>更聪明的鱼<br />守护更美的海</small>
       </aside>
@@ -196,10 +272,10 @@ function LobbyPage({ onPageChange }) {
         <section className="glassCard hoverCard">
           <h2>当前状态</h2>
           <div className="statusList">
-            <StatusTile label="赛事任务" value="1 个待开始" tone="orange" />
-            <StatusTile label="训练记录" value="本周 3 次" />
-            <StatusTile label="设备连接" value="2 台在线" tone="green" />
-            <StatusTile label="系统状态" value="正常" tone="green" />
+            <StatusTile label="赛事任务" value={competitionStateLabel(currentMatch.state)} tone="orange" />
+            <StatusTile label="比赛记录" value={`${recordList.length} 场`} />
+            <StatusTile label="设备连接" value={`${onlineCount} 台在线`} tone="green" />
+            <StatusTile label="系统状态" value="后端正常" tone="green" />
           </div>
         </section>
         <section className="continuePanel glassCard hoverCard">
@@ -229,91 +305,124 @@ function LobbyPage({ onPageChange }) {
   );
 }
 
-function MatchHud() {
+function MatchHud({ match, elapsedMs, onAction, busy }) {
+  const current = match || EMPTY_MATCH;
+  const isRunning = current.state === "running";
+  const isFinished = current.state === "finished";
   return (
     <section className="matchHud">
       <div className="hudTop">
         <div className="hudTitle">
-          <h2>生态资源应急修复对抗 · 2v2</h2>
-          <p>控制 · 策略 · 协作 · 共建水下生态</p>
+          <h2>{current.matchNo} · {current.group || "学生组"}</h2>
+          <p>{current.venue || "未设置赛场"} · {current.blue.name || "蓝队"} vs {current.red.name || "红队"}</p>
         </div>
-        <div className="hudScore"><span>本局积分</span><b className="blue">72</b><em>:</em><b className="red">60</b></div>
-        <StatusTile label="剩余时间" value="01:28" />
-        <StatusTile label="资源采集" value="3/6" />
-        <StatusTile label="生态点修复" value="1/2" tone="green" />
-        <StatusTile label="协同交付" value="1/2" tone="orange" />
-        <button type="button" className="visionBadge">视觉定位在线</button>
-        <button type="button" className="stopButton">急停</button>
+        <div className="hudScore"><span>本局积分</span><b className="blue">{current.blue.score}</b><em>:</em><b className="red">{current.red.score}</b></div>
+        <StatusTile label="比赛用时" value={formatCompetitionClock(elapsedMs)} />
+        <StatusTile label="比赛状态" value={competitionStateLabel(current.state)} tone={isRunning ? "green" : "orange"} />
+        <button type="button" className="visionBadge" onClick={() => onAction("clock", { action: isRunning ? "pause" : "start" })} disabled={busy || isFinished}>{isRunning ? "暂停比赛" : "开始比赛"}</button>
+        <button type="button" className="stopButton" onClick={() => onAction("finish")} disabled={busy || isFinished}>结束比赛</button>
       </div>
       <div className="phaseRail" aria-label="比赛准备进度">
-        <span className="done">连接设备</span>
-        <span className="done">赛前试动</span>
-        <span className="active">正式操控</span>
-        <b>一切准备就绪 · 开始你的战术表现！</b>
+        <span className={current.blue.players?.every((player) => player.signedIn) ? "done" : ""}>蓝队签到</span>
+        <span className={current.red.players?.every((player) => player.signedIn) ? "done" : ""}>红队签到</span>
+        <span className={isRunning ? "active" : ""}>{competitionStateLabel(current.state)}</span>
+        <button type="button" onClick={() => onAction("score", { side: "blue", delta: 1 })} disabled={busy || isFinished}>蓝队 +1</button>
+        <button type="button" onClick={() => onAction("score", { side: "red", delta: 1 })} disabled={busy || isFinished}>红队 +1</button>
       </div>
     </section>
   );
 }
 
-function ControlPage() {
+function DeviceAssignment({ team, slot, devices, onAssign, busy }) {
+  const player = playerForSlot(team, slot);
+  const availableDevices = devices.filter((device) => (
+    device.online && (!device.assignedTo || device.assignedTo.toUpperCase() === `${team.side}/${slot}`.toUpperCase())
+  ));
+  return (
+    <label className="deviceAssignment">
+      <span>{slot} · {player.name || "待签到"}</span>
+      <select
+        value={player.deviceId || ""}
+        disabled={busy}
+        onChange={(event) => onAssign(team.side, slot, event.target.value)}
+      >
+        <option value="">未分配机器鱼</option>
+        {availableDevices.map((device) => <option key={device.deviceId} value={device.deviceId}>{deviceLabel(device)}</option>)}
+      </select>
+    </label>
+  );
+}
+
+function ControlPage({ match, elapsedMs, devices, onAction, busy }) {
+  const current = match || EMPTY_MATCH;
+  const b1 = playerForSlot(current.blue, "B1");
+  const b2 = playerForSlot(current.blue, "B2");
   return (
     <section className="screen controlScreen">
-      <MatchHud />
+      <MatchHud match={current} elapsedMs={elapsedMs} onAction={onAction} busy={busy} />
       <aside className="controlRail glassCard hoverCard">
         <header><h2>我的控制</h2><span>专注操控 · 为团队而战</span></header>
         <article className="controlFish">
           <span className="fishChip" />
-          <div><h3>B1</h3><p>资源采集手</p></div>
-          <b>我在控制</b>
+          <div><h3>B1</h3><p>{b1.name || "蓝队选手"}</p></div>
+          <b>{b1.deviceId ? "已分配" : "待分配"}</b>
         </article>
         <div className="telemetryGrid">
-          <StatusTile label="电量" value="78%" tone="green" />
-          <StatusTile label="网络" value="良好" />
-          <StatusTile label="视觉" value="正常" />
-          <StatusTile label="X" value="-1.25" />
-          <StatusTile label="Y" value="0.36" />
-          <StatusTile label="航向角" value="128°" />
+          <StatusTile label="设备" value={b1.deviceId ? deviceLabel(devices.find((device) => device.deviceId === b1.deviceId)) : "未绑定"} tone={b1.deviceId ? "green" : "orange"} />
+          <StatusTile label="在线机器鱼" value={`${devices.filter((device) => device.online).length} 台`} />
+          <StatusTile label="比赛状态" value={competitionStateLabel(current.state)} tone={current.state === "running" ? "green" : "orange"} />
+          <StatusTile label="蓝队签到" value={`${current.blue.players?.filter((player) => player.signedIn).length || 0}/${current.blue.players?.length || 2}`} />
+          <StatusTile label="红队签到" value={`${current.red.players?.filter((player) => player.signedIn).length || 0}/${current.red.players?.length || 2}`} />
+          <StatusTile label="场地" value={current.venue || "未设置"} />
         </div>
+        <section className="assignmentPanel">
+          <h3>机器鱼席位</h3>
+          <DeviceAssignment team={current.blue} slot="B1" devices={devices} onAssign={(side, slot, deviceId) => onAction(deviceId ? "assign" : "unassign", { side, slot, ...(deviceId ? { deviceId } : {}) })} busy={busy} />
+          <DeviceAssignment team={current.blue} slot="B2" devices={devices} onAssign={(side, slot, deviceId) => onAction(deviceId ? "assign" : "unassign", { side, slot, ...(deviceId ? { deviceId } : {}) })} busy={busy} />
+          <DeviceAssignment team={current.red} slot="R1" devices={devices} onAssign={(side, slot, deviceId) => onAction(deviceId ? "assign" : "unassign", { side, slot, ...(deviceId ? { deviceId } : {}) })} busy={busy} />
+          <DeviceAssignment team={current.red} slot="R2" devices={devices} onAssign={(side, slot, deviceId) => onAction(deviceId ? "assign" : "unassign", { side, slot, ...(deviceId ? { deviceId } : {}) })} busy={busy} />
+        </section>
         <div className="wasdPad">
-          <button type="button" className="forward">W<span>前进</span></button>
-          <button type="button">A<span>左转</span></button>
-          <button type="button">D<span>右转</span></button>
-          <button type="button" className="space">SPACE<span>紧急停止</span></button>
+          <button type="button" className="forward" disabled={!b1.deviceId || current.state !== "running"}>W<span>前进</span></button>
+          <button type="button" disabled={!b1.deviceId || current.state !== "running"}>A<span>左转</span></button>
+          <button type="button" disabled={!b1.deviceId || current.state !== "running"}>D<span>右转</span></button>
+          <button type="button" className="space" onClick={() => onAction("clock", { action: "pause" })} disabled={busy || current.state !== "running"}>SPACE<span>紧急停止</span></button>
         </div>
         <section className="railStatus">
           <h3>队友状态</h3>
-          <p><span>B2</span><b>修复协作</b><em>仅查看，不可控制</em></p>
+          <p><span>B2</span><b>{b2.name || "待签到"}</b><em>{b2.deviceId ? deviceLabel(devices.find((device) => device.deviceId === b2.deviceId)) : "未分配机器鱼"}</em></p>
         </section>
       </aside>
 
       <main className="fieldPanel glassCard hoverCard">
         <header><h2>实时场地画面（顶部视角）</h2><span>LIVE　高清 / 30 FPS</span></header>
         <ControlPool />
-        <footer><span>水池尺寸：6.0m × 4.0m</span><span>2026-09-11 14:32:18</span></footer>
+        <footer><span>水池尺寸：6.0m × 4.0m</span><span>{current.matchNo} · {competitionStateLabel(current.state)}</span></footer>
       </main>
 
       <aside className="tacticsPanel">
         <section className="glassCard hoverCard">
-          <header><h2>资源任务态势</h2><span>任务地图</span></header>
+          <header><h2>比赛态势</h2><span>{current.group || "学生组"}</span></header>
           <ControlPool compact />
           <div className="sideMetricRow">
-            <StatusTile label="最近资源" value="0.72 m" tone="orange" />
-            <StatusTile label="距生态点 A" value="1.38 m" tone="green" />
+            <StatusTile label="蓝队积分" value={current.blue.score} tone="cyan" />
+            <StatusTile label="红队积分" value={current.red.score} tone="red" />
           </div>
-          <article className="adviceCard hoverCard"><span className="cube" /><p><b>建议：采集资源 #3</b><small>位于左侧中部，距离较近，优先前往采集</small></p><i>›</i></article>
+          <article className="adviceCard hoverCard"><span className="cube" /><p><b>{competitionStateLabel(current.state)}</b><small>{current.state === "ready" ? "双方签到完成，可以开始比赛" : current.state === "running" ? "比赛正在进行，操作会实时保存" : "使用上方控制按钮推进比赛流程"}</small></p><i>›</i></article>
         </section>
         <section className="glassCard hoverCard">
-          <h2>快捷团队信号</h2>
+          <h2>快捷记分</h2>
           <div className="signalButtons">
-            <button type="button">采集资源</button>
-            <button type="button">修复生态点</button>
-            <button type="button">协同交付</button>
+            <button type="button" onClick={() => onAction("score", { side: "blue", delta: 1 })} disabled={busy || current.state === "finished"}>蓝队 +1</button>
+            <button type="button" onClick={() => onAction("score", { side: "red", delta: 1 })} disabled={busy || current.state === "finished"}>红队 +1</button>
+            <button type="button" onClick={() => onAction("clock", { action: "reset" })} disabled={busy}>重置计时</button>
           </div>
         </section>
         <section className="glassCard hoverCard">
-          <h2>赛事事件记录</h2>
-          <p className="eventLine"><span>14:31</span>资源状态更新</p>
-          <p className="eventLine"><span>14:32</span>协同交付确认</p>
+          <h2>比赛事件</h2>
+          <p className="eventLine"><span>{formatCompetitionClock(elapsedMs)}</span>{competitionStateLabel(current.state)}</p>
+          <p className="eventLine"><span>{current.blue.score}:{current.red.score}</span>当前比分</p>
+          <p className="eventLine"><span>{devices.filter((device) => device.online).length}</span>在线机器鱼</p>
         </section>
       </aside>
     </section>
@@ -386,55 +495,56 @@ function MissionsPage() {
   );
 }
 
-function RecordsPage() {
+function RecordsPage({ records: recordList }) {
+  const selected = recordList[0] || null;
   return (
     <section className="screen recordsScreen">
       <aside className="recordList glassCard hoverCard">
         <header><h2>任务记录</h2><button type="button">全部类型</button></header>
-        {records.map(([title, date, score, type], index) => (
-          <button type="button" className={`recordItem ${index === 0 ? "active" : ""}`} key={`${title}-${date}`}>
+        {recordList.length === 0 && <p className="emptyState">暂无已结束比赛</p>}
+        {recordList.map((record, index) => (
+          <button type="button" className={`recordItem ${index === 0 ? "active" : ""}`} key={`${record.matchNo}-${record.finishedAt}-${index}`}>
             <span className="recordThumb" />
-            <strong>{title}</strong>
-            <small>{date}</small>
-            <b>{score}</b>
-            <em>{type}</em>
+            <strong>{record.matchNo || "赛事对抗"}</strong>
+            <small>{formatRecordTime(record.finishedAt)}</small>
+            <b>{record.blueScore} : {record.redScore}</b>
+            <em>{record.group || "学生组"}</em>
           </button>
         ))}
       </aside>
 
       <main className="replayPanel">
         <section className="recordHeader glassCard hoverCard">
-          <div><h2>生态资源应急修复对抗 · 任务回放</h2><p>学生组 · 2v2 对抗任务</p></div>
-          <div className="winnerScore"><span>本局结果</span><strong>128 : 104</strong><b>本局获胜</b></div>
+          <div><h2>{selected ? selected.matchNo : "等待比赛结束"} · 比赛回放</h2><p>{selected ? `${selected.group || "学生组"} · ${selected.venue || "未设置赛场"}` : "完成一场比赛后，这里会显示后端保存的记录"}</p></div>
+          <div className="winnerScore"><span>本局结果</span><strong>{selected ? `${selected.blueScore} : ${selected.redScore}` : "- : -"}</strong><b>{selected ? (selected.blueScore === selected.redScore ? "平局" : "已完成") : "暂无结果"}</b></div>
         </section>
         <section className="replayStage glassCard hoverCard">
           <header><h2>比赛视频回放</h2><select defaultValue="top"><option value="top">多视角：俯视视角</option></select></header>
           <ControlPool />
-          <footer className="playbar"><button type="button">暂停</button><span>01:27 / 04:00</span><i /><select><option>1×</option></select></footer>
+          <footer className="playbar"><button type="button" disabled={!selected}>暂停</button><span>{selected ? formatCompetitionClock(selected.elapsedMs) : "00:00"}</span><i /><select disabled={!selected}><option>1×</option></select></footer>
         </section>
         <section className="recordSummary">
-          <article className="glassCard hoverCard"><h3>任务完成概览</h3><p>资源回收 <b>5/6</b></p><p>生态点修复 <b>2/2</b></p><p>协同交付 <b>2 次</b></p><p>违规 <b>0 次</b></p></article>
-          <article className="glassCard hoverCard"><h3>我的操控统计（B1）</h3><p>前进 <b>46%</b></p><p>左转 <b>18%</b></p><p>右转 <b>22%</b></p><p>停止 <b>14%</b></p></article>
-          <article className="glassCard hoverCard"><h3>队友协同表现（B2）</h3><p>资源传递 <b>6 次</b></p><p>修复支援 <b>4 次</b></p><p>协同距离 <b>1.2 m</b></p><p>有效协作时间 <b>72%</b></p></article>
+          <article className="glassCard hoverCard"><h3>比赛概要</h3><p>蓝队 <b>{selected?.blueName || "-"}</b></p><p>红队 <b>{selected?.redName || "-"}</b></p><p>比赛用时 <b>{selected ? formatCompetitionClock(selected.elapsedMs) : "-"}</b></p><p>结束时间 <b>{selected ? formatRecordTime(selected.finishedAt) : "-"}</b></p></article>
+          <article className="glassCard hoverCard"><h3>数据来源</h3><p>记录状态 <b>{selected ? "后端已保存" : "等待数据"}</b></p><p>比赛编号 <b>{selected?.matchNo || "-"}</b></p><p>比赛组别 <b>{selected?.group || "-"}</b></p><p>比赛场地 <b>{selected?.venue || "-"}</b></p></article>
+          <article className="glassCard hoverCard"><h3>提示</h3><p>比赛记录 <b>自动同步</b></p><p>计时数据 <b>来自裁判端</b></p><p>比分数据 <b>来自赛事服务</b></p><p>设备归属 <b>按签到保存</b></p></article>
         </section>
       </main>
 
       <aside className="scorePanel glassCard hoverCard">
         <h2>本局积分</h2>
         <div className="scoreTiles">
-          <StatusTile label="资源采集" value="42 / 36" />
-          <StatusTile label="生态点修复" value="40 / 30" tone="green" />
-          <StatusTile label="协同交付" value="30 / 30" tone="orange" />
-          <StatusTile label="安全规范" value="16 / 8" />
+          <StatusTile label="蓝队得分" value={selected?.blueScore ?? 0} />
+          <StatusTile label="红队得分" value={selected?.redScore ?? 0} tone="red" />
+          <StatusTile label="比赛用时" value={selected ? formatCompetitionClock(selected.elapsedMs) : "00:00"} tone="orange" />
+          <StatusTile label="比赛场地" value={selected?.venue || "-"} />
         </div>
         <section className="keyEvents">
           <h3>关键事件</h3>
-          <p><span>00:42</span> 蓝队 采集资源 #3 <b>+10</b></p>
-          <p><span>01:18</span> 红队 修复生态点 <b>+20</b></p>
-          <p><span>02:43</span> 蓝队 协同交付 <b>+15</b></p>
-          <p><span>04:00</span> 任务结束 <b>-</b></p>
+          <p><span>{selected ? formatRecordTime(selected.finishedAt) : "-"}</span> 比赛结束 <b>已保存</b></p>
+          <p><span>{selected ? selected.blueScore : 0}</span> 蓝队最终得分 <b>-</b></p>
+          <p><span>{selected ? selected.redScore : 0}</span> 红队最终得分 <b>-</b></p>
         </section>
-        <button type="button" className="retryButton">再次挑战</button>
+        <button type="button" className="retryButton" disabled={!selected}>再次挑战</button>
       </aside>
     </section>
   );
@@ -442,7 +552,88 @@ function RecordsPage() {
 
 export default function CompetitionApp() {
   const [page, setPage] = useState(pageFromHash);
+  const [auth, setAuth] = useState({ loading: true, authenticated: false, user: null });
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [backendStatus, setBackendStatus] = useState("connecting");
+  const [apiError, setApiError] = useState("");
+  const [actionBusy, setActionBusy] = useState(false);
+  const [matchPayload, setMatchPayload] = useState({ match: null, elapsedMs: 0, running: false, fetchedAt: Date.now() });
+  const [recordList, setRecordList] = useState([]);
+  const [devices, setDevices] = useState([]);
+  const [clockNow, setClockNow] = useState(Date.now());
+  const createdMatchRef = useRef(false);
   const pageConfig = pages.find((item) => item.id === page) || pages[0];
+
+  useEffect(() => {
+    let active = true;
+    competitionApi.authMe()
+      .then((result) => {
+        if (!active) return;
+        setAuth({ loading: false, authenticated: Boolean(result?.authenticated), user: result?.user || null });
+      })
+      .catch((error) => {
+        if (!active) return;
+        setAuth({ loading: false, authenticated: false, user: null });
+        setAuthError(error.message || "无法连接认证服务");
+      });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!matchPayload.running) return undefined;
+    const timer = window.setInterval(() => setClockNow(Date.now()), 250);
+    return () => window.clearInterval(timer);
+  }, [matchPayload.running]);
+
+  async function refreshCompetition({ createIfMissing = false } = {}) {
+    const [nextMatch, nextRecords, nextDevices] = await Promise.all([
+      competitionApi.getMatch(),
+      competitionApi.getRecords(),
+      competitionApi.getDevices(),
+    ]);
+    let matchResult = nextMatch;
+    if (!matchResult?.match && createIfMissing && !createdMatchRef.current) {
+      createdMatchRef.current = true;
+      matchResult = await competitionApi.updateMatch({
+        matchNo: "第 01 场",
+        group: "学生组",
+        venue: "A 赛场",
+        blue: { name: "蓝队" },
+        red: { name: "红队" },
+      });
+    }
+    setMatchPayload({
+      match: normalizeMatch(matchResult?.match),
+      elapsedMs: Number(matchResult?.elapsedMs || 0),
+      running: Boolean(matchResult?.running),
+      fetchedAt: Date.now(),
+    });
+    setRecordList(Array.isArray(nextRecords?.records) ? nextRecords.records : []);
+    setDevices(Array.isArray(nextDevices?.devices) ? nextDevices.devices : []);
+    setBackendStatus("online");
+    setApiError("");
+  }
+
+  useEffect(() => {
+    if (!auth.authenticated) return undefined;
+    let active = true;
+    const refresh = () => refreshCompetition({ createIfMissing: true }).catch((error) => {
+      if (!active) return;
+      if (error.status === 401) {
+        setAuth({ loading: false, authenticated: false, user: null });
+        return;
+      }
+      setBackendStatus("offline");
+      setApiError(error.message || "赛事数据同步失败");
+    });
+    refresh();
+    const timer = window.setInterval(refresh, 3000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [auth.authenticated]);
 
   useEffect(() => {
     function syncPageFromHash() {
@@ -460,19 +651,82 @@ export default function CompetitionApp() {
     }
   }
 
+  async function login(email, password) {
+    if (!email || !password) {
+      setAuthError("请输入账号和密码");
+      return;
+    }
+    setAuthBusy(true);
+    setAuthError("");
+    try {
+      const result = await competitionApi.login(email, password);
+      setAuth({ loading: false, authenticated: true, user: result.user || null });
+    } catch (error) {
+      setAuthError(error.message || "登录失败");
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  async function logout() {
+    await competitionApi.logout().catch(() => {});
+    setAuth({ loading: false, authenticated: false, user: null });
+    setMatchPayload({ match: null, elapsedMs: 0, running: false, fetchedAt: Date.now() });
+    setRecordList([]);
+    setDevices([]);
+  }
+
+  async function performAction(action, body) {
+    if (actionBusy) return;
+    setActionBusy(true);
+    setApiError("");
+    try {
+      const result = await competitionApi.action(action, body);
+      setMatchPayload({
+        match: normalizeMatch(result?.match),
+        elapsedMs: Number(result?.elapsedMs || 0),
+        running: Boolean(result?.running),
+        fetchedAt: Date.now(),
+      });
+      const [nextRecords, nextDevices] = await Promise.all([competitionApi.getRecords(), competitionApi.getDevices()]);
+      setRecordList(Array.isArray(nextRecords?.records) ? nextRecords.records : []);
+      setDevices(Array.isArray(nextDevices?.devices) ? nextDevices.devices : []);
+      setBackendStatus("online");
+    } catch (error) {
+      setApiError(error.message || "赛事操作失败");
+      if (error.status === 401) setAuth({ loading: false, authenticated: false, user: null });
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  const displayedElapsedMs = matchPayload.running
+    ? matchPayload.elapsedMs + Math.max(0, clockNow - matchPayload.fetchedAt)
+    : matchPayload.elapsedMs;
+
+  if (auth.loading) {
+    return <main className="competitionLoading">正在连接赛事服务…</main>;
+  }
+  if (!auth.authenticated) {
+    return <LoginGate onLogin={login} busy={authBusy} error={authError} />;
+  }
+
+  const currentMatch = matchPayload.match;
+
   return (
     <main
       className={`competitionApp page-${page}`}
       style={{ "--page-ratio": pageConfig.ratio, "--ratio-value": pageConfig.ratioValue }}
     >
       <div className="designShell">
-        <Header page={page} onPageChange={changePage} />
-        {page === "lobby" && <LobbyPage onPageChange={changePage} />}
-        {page === "control" && <ControlPage />}
+        <Header page={page} onPageChange={changePage} user={auth.user} backendStatus={backendStatus} onLogout={logout} />
+        {apiError && <div className="competitionApiError" role="status">{apiError}</div>}
+        {page === "lobby" && <LobbyPage onPageChange={changePage} match={currentMatch} devices={devices} records={recordList} />}
+        {page === "control" && <ControlPage match={currentMatch} elapsedMs={displayedElapsedMs} devices={devices} onAction={performAction} busy={actionBusy} />}
         {page === "missions" && <MissionsPage />}
-        {page === "records" && <RecordsPage />}
+        {page === "records" && <RecordsPage records={recordList} />}
         <footer className="competitionFooter">
-          <span>边界保护：正常　队内通信：正常　延迟：12ms　丢包：0%</span>
+          <span>比赛数据：{backendStatus === "online" ? "实时同步" : "等待重连"}　设备归属：后端管理</span>
           <span>FISH CONTROL · STUDENT COMPETITION PLATFORM</span>
         </footer>
       </div>
