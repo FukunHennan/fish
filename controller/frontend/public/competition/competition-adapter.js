@@ -137,6 +137,8 @@
         setBadge("已登录：" + (state.user.email || "") + "（等待绑定设备）", "ok");
         if (loginCard()) loginCard().hidden = true;
         if (confirmCard()) confirmCard().hidden = false;
+        ensureVideoSurface();
+        observeRenders();
         return refreshDevices();
       })
       .catch(function (error) {
@@ -263,6 +265,144 @@
     });
   }
 
+  // ---------------------------------------------------------------- 视频
+  // 把后端 WebRTC 画面接到界面的“实时赛场”区域。共享视觉会话提供赛场
+  // 画面，因此使用 root 会话；连接建立后只重新挂载 video 元素，
+  // 页面切换不会重建媒体连接。
+  var video = { peer: null, stream: null, sessionId: null, timer: null, connecting: false };
+
+  function videoSurface() {
+    return document.querySelector(".poolStage.matchPool") || document.querySelector(".poolStage");
+  }
+
+  function waitForIce(peer) {
+    return new Promise(function (resolve) {
+      if (peer.iceGatheringState === "complete") return resolve();
+      var settled = false;
+      function finish() { if (settled) return; settled = true; resolve(); }
+      peer.addEventListener("icegatheringstatechange", function () {
+        if (peer.iceGatheringState === "complete") finish();
+      });
+      setTimeout(finish, 1500);
+    });
+  }
+
+  function scheduleVideoReconnect(reason, delay) {
+    if (video.timer) return;
+    video.timer = setTimeout(function () {
+      video.timer = null;
+      if (video.peer) { try { video.peer.close(); } catch (e) { /* 忽略 */ } }
+      video.peer = null;
+      video.stream = null;
+      connectVideo();
+    }, delay || 3000);
+    if (reason) setBadge("视频重连中：" + reason, "warn");
+  }
+
+  function connectVideo() {
+    if (video.connecting || video.peer) return;
+    video.connecting = true;
+    api("/api/vision/sessions/current")
+      .then(function (payload) {
+        var session = payload && (payload.data || payload);
+        if (!session || !session.sessionId) throw new Error("视觉会话尚未建立");
+        video.sessionId = session.sessionId;
+        return api("/api/vision/webrtc/config");
+      })
+      .then(function (config) {
+        if (config && config.available === false) throw new Error("WebRTC 服务未启用");
+        var peer = new window.RTCPeerConnection({
+          iceServers: (config && Array.isArray(config.iceServers)) ? config.iceServers : [],
+        });
+        video.peer = peer;
+        peer.addTransceiver("video", { direction: "recvonly" });
+        peer.ontrack = function (event) {
+          video.stream = (event.streams && event.streams[0]) || new window.MediaStream([event.track]);
+          mountVideoSurface();
+        };
+        peer.onconnectionstatechange = function () {
+          if (peer.connectionState === "failed") scheduleVideoReconnect("连接失败");
+          else if (peer.connectionState === "disconnected") {
+            setTimeout(function () {
+              if (peer.connectionState === "disconnected") scheduleVideoReconnect("连接中断");
+            }, 4000);
+          } else if (peer.connectionState === "connected") {
+            setBadge("赛场画面已接入", "ok");
+          }
+        };
+        return peer.createOffer()
+          .then(function (offer) { return peer.setLocalDescription(offer); })
+          .then(function () { return waitForIce(peer); })
+          .then(function () {
+            return api("/api/vision/webrtc/offer", {
+              method: "POST",
+              body: {
+                sessionId: video.sessionId,
+                quality: "smooth",
+                type: peer.localDescription.type,
+                sdp: peer.localDescription.sdp,
+              },
+            });
+          })
+          .then(function (answer) {
+            if (!answer || !answer.sdp) throw new Error("视频信令失败");
+            return peer.setRemoteDescription(answer);
+          });
+      })
+      .catch(function (error) {
+        // 没有摄像头/未启动视觉时属于正常等待状态，放慢重试避免刷屏
+        var waiting = /会话尚未建立/.test(error.message);
+        setBadge(waiting ? "等待视觉会话（请先在控制台启动摄像头）" : "视频接入失败：" + error.message,
+                 waiting ? "info" : "error");
+        scheduleVideoReconnect(waiting ? null : error.message, waiting ? 10000 : 3000);
+      })
+      .then(function () { video.connecting = false; });
+  }
+
+  function mountVideoSurface() {
+    var stage = videoSurface();
+    if (!stage) return;
+    var element = stage.querySelector("video[data-fish-video]");
+    if (!element) {
+      element = document.createElement("video");
+      element.setAttribute("data-fish-video", "1");
+      element.autoplay = true;
+      element.muted = true;
+      element.setAttribute("playsinline", "");
+      element.style.cssText = [
+        "position:absolute", "inset:0", "width:100%", "height:100%",
+        "object-fit:contain", "z-index:0", "background:transparent",
+        "pointer-events:none",
+      ].join(";");
+      stage.insertBefore(element, stage.firstChild);
+    }
+    if (video.stream && element.srcObject !== video.stream) {
+      element.srcObject = video.stream;
+      var played = element.play();
+      if (played && played.catch) played.catch(function () { /* 自动播放被拦截时忽略 */ });
+    }
+  }
+
+  function ensureVideoSurface() {
+    if (!state.user) return;       // 未登录不请求视觉接口
+    mountVideoSurface();
+    if (!video.peer) connectVideo();
+  }
+
+  function observeRenders() {
+    if (typeof window.MutationObserver !== "function" || !document.body) return;
+    var pending = null;
+    var observer = new window.MutationObserver(function () {
+      if (pending) return;
+      pending = setTimeout(function () {
+        pending = null;
+        ensureVideoSurface();
+        paintDeviceInfo();
+      }, 200);
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
+
   // ---------------------------------------------------------------- SSE
   function subscribe() {
     if (typeof window.EventSource !== "function") return;
@@ -338,6 +478,8 @@
         if (location.hash !== "#control") location.hash = "control";
         setBadge("已登录：" + (state.user.email || "当前账号"), "ok");
         refreshDevices();
+        ensureVideoSurface();
+        observeRenders();
       } else {
         setBadge("请先登录战队账号", "info");
       }
