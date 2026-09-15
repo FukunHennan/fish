@@ -80,7 +80,11 @@ func testKey() []byte { return make([]byte, 32) }
 
 func TestHealthAndDashboard(t *testing.T) {
 	handler := NewHandler(hub.New(), testKey())
-	for _, tc := range []struct{ path, contains string }{{"/healthz", "ok"}, {"/", "机器鱼控制台"}} {
+	for _, tc := range []struct{ path, contains string }{
+		{"/healthz", "ok"},
+		{"/", "赛事界面总入口"},
+		{"/console.html", "机器鱼控制台"},
+	} {
 		r := httptest.NewRequest("GET", tc.path, nil)
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, r)
@@ -574,14 +578,32 @@ func TestDynamicChallengeRegistersDevice(t *testing.T) {
 	}
 }
 
-func TestDashboardServesReactApplication(t *testing.T) {
+// The React operator console moved from "/" to "/console.html" when the
+// competition platform page took over the root path.
+func TestConsoleServesReactApplication(t *testing.T) {
 	handler := NewHandler(hub.New(), testKey())
-	r := httptest.NewRequest("GET", "/", nil)
+	r := httptest.NewRequest("GET", "/console.html", nil)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, r)
 	body := w.Body.String()
-	if !strings.Contains(body, `id="root"`) || !strings.Contains(body, `<script type="module"`) {
-		t.Fatalf("首页没有提供 React 应用入口: %s", body)
+	if w.Code != 200 || !strings.Contains(body, `id="root"`) || !strings.Contains(body, `<script type="module"`) {
+		t.Fatalf("主操控台没有提供 React 应用入口: %d %s", w.Code, body)
+	}
+}
+
+// The embedded competition prototype bundle stays reachable under /competition/.
+func TestCompetitionPrototypeBundleIsServed(t *testing.T) {
+	handler := NewHandler(hub.New(), testKey())
+	for _, path := range []string{
+		"/competition/player_interface.html",
+		"/competition/referee_interface.html",
+		"/competition/competition_flowchart.svg",
+	} {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+		if w.Code != 200 {
+			t.Fatalf("%s 不可访问: %d", path, w.Code)
+		}
 	}
 }
 

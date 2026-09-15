@@ -166,8 +166,33 @@ func newHandler(h *hub.Hub, key []byte, apiAddress, streamAddress, firmwarePath 
 	if err != nil {
 		panic(err)
 	}
-	m.Handle("/assets/", http.FileServer(http.FS(staticFiles)))
-	m.HandleFunc("/", s.dashboard)
+	// Serve the embedded build for every path, except "/" which shows the
+	// competition platform page (player/referee switch). The operator console
+	// stays reachable at /index.html, the React competition app at
+	// /competition.html, and the prototype bundle under /competition/.
+	// http.FileServer resolves index.html for directories and rejects paths
+	// that escape the embedded FS.
+	embedded := http.FileServer(http.FS(staticFiles))
+	m.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/", "/console.html":
+			// "/" 是赛事平台页面；"/console.html" 保留原主操控台入口，
+			// 因为 http.FileServer 会把 /index.html 重定向到 "/"。
+			name := "dist/competition/fish_competition_interfaces.html"
+			if r.URL.Path == "/console.html" {
+				name = "dist/index.html"
+			}
+			page, err := frontendFiles.ReadFile(name)
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write(page)
+		default:
+			embedded.ServeHTTP(w, r)
+		}
+	})
 	m.HandleFunc("/healthz", s.health)
 	m.HandleFunc("/api/auth/me", s.authMe)
 	m.HandleFunc("/api/auth/login", s.authLogin)
@@ -1388,25 +1413,5 @@ func texts(v any) []string {
 	return result
 }
 
-// dashboard serves the operator console at "/" plus any other top-level
-// entry page built into the same embedded dist (for example
-// /competition.html). Every page shares the /assets/ bundle below.
-func (s *server) dashboard(w http.ResponseWriter, r *http.Request) {
-	name := strings.TrimPrefix(r.URL.Path, "/")
-	if name == "" {
-		name = "index.html"
-	}
-	// Only top-level .html entry pages are exposed; sub-paths and any other
-	// extension fall through to 404 instead of reaching the embedded FS.
-	if strings.ContainsAny(name, `/\`) || !strings.HasSuffix(name, ".html") {
-		http.NotFound(w, r)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	page, err := frontendFiles.ReadFile("dist/" + name)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	_, _ = w.Write(page)
-}
+// dashboard was replaced by the static file server registered in
+// newHandler, which serves every page in the embedded dist.

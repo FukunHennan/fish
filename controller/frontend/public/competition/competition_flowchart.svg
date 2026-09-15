@@ -1,0 +1,144 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="980" viewBox="0 0 2400 980">
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#061a2d"/><stop offset="1" stop-color="#03101c"/></linearGradient>
+  <linearGradient id="blue" x1="0" x2="1"><stop stop-color="#0b6fa6"/><stop offset="1" stop-color="#0e93c6"/></linearGradient>
+  <linearGradient id="green" x1="0" x2="1"><stop stop-color="#126f59"/><stop offset="1" stop-color="#1b9c72"/></linearGradient>
+  <linearGradient id="cyan" x1="0" x2="1"><stop stop-color="#0c7192"/><stop offset="1" stop-color="#14a8bd"/></linearGradient>
+  <linearGradient id="red" x1="0" x2="1"><stop stop-color="#873a4d"/><stop offset="1" stop-color="#b4475e"/></linearGradient>
+  <filter id="shadow"><feDropShadow dx="0" dy="8" stdDeviation="9" flood-color="#000" flood-opacity=".28"/></filter>
+  <marker id="arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,0 L12,6 L0,12 z" fill="#55dff7"/></marker>
+  <style>
+    text{font-family:'Noto Sans CJK SC','Microsoft YaHei',sans-serif;fill:#eafaff}
+    .title{font-size:54px;font-weight:900}.sub{font-size:24px;fill:#7eb5ce}
+    .stepNo{font-size:24px;font-weight:900;fill:#052238}.stepTitle{font-size:28px;font-weight:900}.stepDesc{font-size:19px;fill:#a9d4e7}
+    .role{font-size:21px;font-weight:900}.roleText{font-size:18px;fill:#a9c9d8}
+    .state{font-size:17px;font-weight:800;fill:#8ff0ff;letter-spacing:1px}
+    .footerTitle{font-size:22px;font-weight:900}.footerText{font-size:18px;fill:#a5c8d8}
+  </style>
+</defs>
+<rect width="2400" height="980" fill="url(#bg)"/>
+<circle cx="500" cy="0" r="420" fill="#0aaed0" opacity=".05"/><circle cx="1900" cy="150" r="420" fill="#1769ff" opacity=".05"/>
+
+<text x="90" y="90" class="title">FISH CONTROL · 一场比赛的标准流程</text>
+<text x="92" y="132" class="sub">核心原则：裁判控制比赛流程，选手确认设备并控制自己的机器鱼，服务端保存唯一真实状态。</text>
+
+<!-- phase labels -->
+<rect x="85" y="182" width="170" height="44" rx="22" fill="#0b3352" stroke="#236e91"/><text x="170" y="211" text-anchor="middle" class="state">赛前准备</text>
+<rect x="1215" y="182" width="170" height="44" rx="22" fill="#0b4a45" stroke="#228e79"/><text x="1300" y="211" text-anchor="middle" class="state">正式比赛</text>
+<rect x="2055" y="182" width="170" height="44" rx="22" fill="#43233a" stroke="#9a4f70"/><text x="2140" y="211" text-anchor="middle" class="state">赛后归档</text>
+
+<!-- arrows -->
+<g stroke="#55dff7" stroke-width="4" fill="none" marker-end="url(#arrow)" opacity=".9">
+ <path d="M330 360 H420"/><path d="M620 360 H710"/><path d="M910 360 H1000"/><path d="M1200 360 H1290"/><path d="M1490 360 H1580"/><path d="M1780 360 H1870"/><path d="M2070 360 H2160"/>
+</g>
+
+<!-- step 1 -->
+<g filter="url(#shadow)">
+<rect x="80" y="255" width="250" height="330" rx="22" fill="#08253f" stroke="#1d7aa2" stroke-width="2"/>
+<circle cx="120" cy="300" r="25" fill="#4fdcf2"/><text x="120" y="309" text-anchor="middle" class="stepNo">1</text>
+<text x="155" y="309" class="stepTitle">签到</text>
+<text x="105" y="358" class="role" fill="#67e2ff">裁判</text><text x="105" y="391" class="roleText">指定 B1/B2/R1/R2</text><text x="105" y="420" class="roleText">确认选手与机器鱼绑定</text>
+<line x1="105" y1="452" x2="305" y2="452" stroke="#245270"/>
+<text x="105" y="490" class="role" fill="#7ff2c0">选手</text><text x="105" y="523" class="roleText">登录赛事终端</text><text x="105" y="552" class="roleText">查看自己的席位与设备</text>
+</g>
+
+<!-- step 2 -->
+<g filter="url(#shadow)">
+<rect x="420" y="255" width="250" height="330" rx="22" fill="#08253f" stroke="#1d7aa2" stroke-width="2"/>
+<circle cx="460" cy="300" r="25" fill="#4fdcf2"/><text x="460" y="309" text-anchor="middle" class="stepNo">2</text>
+<text x="495" y="309" class="stepTitle">场地准备</text>
+<text x="445" y="358" class="role" fill="#67e2ff">裁判</text><text x="445" y="391" class="roleText">检查相机 / Mark / 坐标</text><text x="445" y="420" class="roleText">锁定场地配置</text>
+<line x1="445" y1="452" x2="645" y2="452" stroke="#245270"/>
+<text x="445" y="490" class="role" fill="#7ff2c0">选手</text><text x="445" y="523" class="roleText">赛事中心显示“准备中”</text><text x="445" y="552" class="roleText">此时不能控制机器鱼</text>
+</g>
+
+<!-- step 3 -->
+<g filter="url(#shadow)">
+<rect x="710" y="255" width="250" height="330" rx="22" fill="#092d3d" stroke="#1b9ab0" stroke-width="2"/>
+<circle cx="750" cy="300" r="25" fill="#58e4d5"/><text x="750" y="309" text-anchor="middle" class="stepNo">3</text>
+<text x="785" y="309" class="stepTitle">设备测试</text>
+<text x="735" y="358" class="role" fill="#67e2ff">裁判</text><text x="735" y="391" class="roleText">开放受限试动</text><text x="735" y="420" class="roleText">只查看确认结果</text>
+<line x1="735" y1="452" x2="935" y2="452" stroke="#24606a"/>
+<text x="735" y="490" class="role" fill="#7ff2c0">选手</text><text x="735" y="523" class="roleText">自行试动自己的机器鱼</text><text x="735" y="552" class="roleText">提交“正常 / 异常”</text>
+</g>
+
+<!-- step 4 -->
+<g filter="url(#shadow)">
+<rect x="1000" y="255" width="250" height="330" rx="22" fill="#0b3140" stroke="#27aab7" stroke-width="2"/>
+<circle cx="1040" cy="300" r="25" fill="#65e8c2"/><text x="1040" y="309" text-anchor="middle" class="stepNo">4</text>
+<text x="1075" y="309" class="stepTitle">等待开始</text>
+<text x="1025" y="358" class="role" fill="#67e2ff">裁判</text><text x="1025" y="391" class="roleText">确认 4 / 4 设备正常</text><text x="1025" y="420" class="roleText">准备开始比赛</text>
+<line x1="1025" y1="452" x2="1225" y2="452" stroke="#24606a"/>
+<text x="1025" y="490" class="role" fill="#7ff2c0">选手</text><text x="1025" y="523" class="roleText">显示“等待裁判开始”</text><text x="1025" y="552" class="roleText">正式控制仍然锁定</text>
+</g>
+
+<!-- step 5 -->
+<g filter="url(#shadow)">
+<rect x="1290" y="255" width="250" height="330" rx="22" fill="#0a3b3b" stroke="#24a87f" stroke-width="2"/>
+<circle cx="1330" cy="300" r="25" fill="#5be4a7"/><text x="1330" y="309" text-anchor="middle" class="stepNo">5</text>
+<text x="1365" y="309" class="stepTitle">比赛进行</text>
+<text x="1315" y="358" class="role" fill="#67e2ff">裁判</text><text x="1315" y="391" class="roleText">开始计时 / 计分</text><text x="1315" y="420" class="roleText">记录比赛事件</text>
+<line x1="1315" y1="452" x2="1515" y2="452" stroke="#26665b"/>
+<text x="1315" y="490" class="role" fill="#7ff2c0">选手</text><text x="1315" y="523" class="roleText">正式控制自己的机器鱼</text><text x="1315" y="552" class="roleText">查看比分 / 时间 / 状态</text>
+</g>
+
+<!-- step 6 -->
+<g filter="url(#shadow)">
+<rect x="1580" y="255" width="250" height="330" rx="22" fill="#352536" stroke="#9a6177" stroke-width="2"/>
+<circle cx="1620" cy="300" r="25" fill="#f08da1"/><text x="1620" y="309" text-anchor="middle" class="stepNo">6</text>
+<text x="1655" y="309" class="stepTitle">暂停 / 继续</text>
+<text x="1605" y="358" class="role" fill="#ffb7c5">裁判</text><text x="1605" y="391" class="roleText">可暂停处理异常</text><text x="1605" y="420" class="roleText">继续后恢复比赛</text>
+<line x1="1605" y1="452" x2="1805" y2="452" stroke="#704357"/>
+<text x="1605" y="490" class="role" fill="#ffd0d8">选手</text><text x="1605" y="523" class="roleText">暂停期间控制锁定</text><text x="1605" y="552" class="roleText">继续后重新获得控制权</text>
+</g>
+
+<!-- step 7 -->
+<g filter="url(#shadow)">
+<rect x="1870" y="255" width="250" height="330" rx="22" fill="#102f48" stroke="#3c8db7" stroke-width="2"/>
+<circle cx="1910" cy="300" r="25" fill="#6bcdf0"/><text x="1910" y="309" text-anchor="middle" class="stepNo">7</text>
+<text x="1945" y="309" class="stepTitle">比赛结束</text>
+<text x="1895" y="358" class="role" fill="#67e2ff">裁判</text><text x="1895" y="391" class="roleText">结束计时与控制</text><text x="1895" y="420" class="roleText">固化比分和事件</text>
+<line x1="1895" y1="452" x2="2095" y2="452" stroke="#2d5872"/>
+<text x="1895" y="490" class="role" fill="#7ff2c0">选手</text><text x="1895" y="523" class="roleText">不能继续控制</text><text x="1895" y="552" class="roleText">查看最终比分</text>
+</g>
+
+<!-- step 8 -->
+<g filter="url(#shadow)">
+<rect x="2160" y="255" width="190" height="330" rx="22" fill="#35263e" stroke="#8065a9" stroke-width="2"/>
+<circle cx="2200" cy="300" r="25" fill="#b8a0ee"/><text x="2200" y="309" text-anchor="middle" class="stepNo">8</text>
+<text x="2235" y="309" class="stepTitle">归档回放</text>
+<text x="2185" y="358" class="role" fill="#d8caff">系统</text><text x="2185" y="391" class="roleText">保存 MP4 + JSON</text><text x="2185" y="420" class="roleText">生成比赛记录</text>
+<line x1="2185" y1="452" x2="2325" y2="452" stroke="#625078"/>
+<text x="2185" y="490" class="role" fill="#d8caff">双方</text><text x="2185" y="523" class="roleText">历史成绩</text><text x="2185" y="552" class="roleText">视频 / 事件回放</text>
+</g>
+
+<!-- state strip -->
+<text x="90" y="655" class="footerTitle">服务端状态</text>
+<g font-family="'Noto Sans CJK SC'" font-size="18" font-weight="850" text-anchor="middle">
+<rect x="250" y="626" width="210" height="52" rx="12" fill="#0a2e4a" stroke="#28799d"/><text x="355" y="660">CHECKIN</text>
+<path d="M470 652 H510" stroke="#55dff7" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="520" y="626" width="210" height="52" rx="12" fill="#0a2e4a" stroke="#28799d"/><text x="625" y="660">FIELD_SETUP</text>
+<path d="M740 652 H780" stroke="#55dff7" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="790" y="626" width="170" height="52" rx="12" fill="#0b3e48" stroke="#2995a2"/><text x="875" y="660">TEST</text>
+<path d="M970 652 H1010" stroke="#55dff7" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="1020" y="626" width="170" height="52" rx="12" fill="#0b4740" stroke="#2b9477"/><text x="1105" y="660">READY</text>
+<path d="M1200 652 H1240" stroke="#55dff7" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="1250" y="626" width="190" height="52" rx="12" fill="#0b5b47" stroke="#32b286"/><text x="1345" y="660">RUNNING</text>
+<path d="M1450 652 H1490" stroke="#55dff7" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="1500" y="626" width="180" height="52" rx="12" fill="#56303e" stroke="#b25e78"/><text x="1590" y="660">PAUSED</text>
+<path d="M1690 652 H1730" stroke="#55dff7" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="1740" y="626" width="170" height="52" rx="12" fill="#12384f" stroke="#4089ad"/><text x="1825" y="660">ENDED</text>
+<path d="M1920 652 H1960" stroke="#55dff7" stroke-width="3" marker-end="url(#arrow)"/>
+<rect x="1970" y="626" width="210" height="52" rx="12" fill="#412e51" stroke="#8b69ad"/><text x="2075" y="660">ARCHIVED</text>
+</g>
+
+<!-- responsibilities -->
+<rect x="80" y="730" width="2270" height="180" rx="22" fill="#061c30" stroke="#164e70"/>
+<text x="110" y="778" class="footerTitle">数据与控制原则</text>
+<g>
+<rect x="110" y="805" width="500" height="70" rx="12" fill="#082945"/><text x="140" y="835" class="footerText"><tspan font-weight="900" fill="#68e2ff">裁判端：</tspan> 改变比赛流程、计分、处理异常</text><text x="140" y="862" class="footerText">不直接操作选手浏览器</text>
+<rect x="635" y="805" width="500" height="70" rx="12" fill="#082945"/><text x="665" y="835" class="footerText"><tspan font-weight="900" fill="#7ff2c0">选手端：</tspan> 确认自己的设备并发送控制指令</text><text x="665" y="862" class="footerText">只有 TEST / RUNNING 的对应权限下生效</text>
+<rect x="1160" y="805" width="500" height="70" rx="12" fill="#082945"/><text x="1190" y="835" class="footerText"><tspan font-weight="900" fill="#ffe69b">比赛服务端：</tspan> 唯一权威状态源</text><text x="1190" y="862" class="footerText">负责计时、比分、状态校验与广播</text>
+<rect x="1685" y="805" width="635" height="70" rx="12" fill="#082945"/><text x="1715" y="835" class="footerText"><tspan font-weight="900" fill="#bcd7ff">视觉 / ESP32：</tspan> 提供位置、画面、在线与执行状态</text><text x="1715" y="862" class="footerText">比赛结束后视频与 JSON 使用同一 basename 配对归档</text>
+</g>
+</svg>

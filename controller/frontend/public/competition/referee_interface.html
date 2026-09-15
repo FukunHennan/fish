@@ -1,0 +1,2381 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fish Control · 裁判工作台 · 视频回放</title>
+<style>
+:root{
+  --bg:#04111f;--panel:#071b30;--panel2:#0a223a;--line:#184566;
+  --cyan:#39d8ff;--green:#41e6a2;--yellow:#ffc95f;--red:#ff6479;
+  --text:#effaff;--muted:#89abc0;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:Inter,"PingFang SC","Microsoft YaHei",system-ui,sans-serif}
+body{min-width:1180px;background:radial-gradient(circle at 20% -10%,rgba(42,125,195,.20),transparent 35%),linear-gradient(180deg,#04101d,#07182a 60%,#04111f)}
+button,input,select{font:inherit}
+button{cursor:pointer}
+.app{height:100vh;display:grid;grid-template-rows:58px 58px 1fr 26px;overflow:hidden}
+.topbar{display:grid;grid-template-columns:1fr auto;align-items:center;padding:0 16px;border-bottom:1px solid rgba(70,187,248,.14);background:rgba(4,16,29,.94)}
+.brand{display:flex;align-items:center;gap:10px}.logo{width:30px;height:30px;border:2px solid var(--cyan);border-radius:50%;position:relative}
+.logo:before{content:"";position:absolute;left:7px;top:10px;width:14px;height:6px;border-radius:70% 40% 40% 70%;background:var(--cyan)}
+.logo:after{content:"";position:absolute;right:3px;top:9px;border-left:7px solid var(--cyan);border-top:5px solid transparent;border-bottom:5px solid transparent}
+.brand b{font-size:15px;letter-spacing:.08em}.brand small{display:block;color:var(--muted);font-size:9px;margin-top:1px}
+.nav{display:flex;gap:6px}.nav button{border:1px solid rgba(74,184,239,.16);border-radius:8px;padding:8px 12px;background:#081e34;color:#8fb7ce;font-size:9px}.nav button.active{color:#fff;border-color:rgba(57,216,255,.35);background:rgba(27,96,145,.28)}.nav button.done{color:#9effcf}
+.matchbar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:0 18px;border-bottom:1px solid rgba(70,187,248,.10);background:rgba(5,23,42,.78)}
+.matchbar small{display:block;color:var(--muted);font-size:8px}.matchbar strong{font-size:11px}.teams{font-size:11px}.teams b:first-child{color:#42dcff}.teams b:last-child{color:#ff6d82}.teams span{margin:0 8px;color:#6c8da3}.statusTop{justify-self:end;text-align:right}.statusTop b{font-size:10px;color:#9effcf}
+.main{min-height:0;padding:10px 12px 12px;overflow:hidden}
+.footer{display:flex;justify-content:space-between;align-items:center;padding:0 12px;border-top:1px solid rgba(70,187,248,.10);color:#6f90a4;font-size:8px}
+.panel{background:linear-gradient(180deg,rgba(10,33,56,.95),rgba(6,24,42,.96));border:1px solid rgba(71,176,235,.17);border-radius:10px;box-shadow:0 12px 30px rgba(0,0,0,.11)}
+.btn{border:1px solid rgba(74,184,239,.25);background:#0a2946;color:#dbf6ff;border-radius:6px;padding:6px 8px;font-size:9px}.btn.good{background:linear-gradient(180deg,#23cb8d,#12845d);border-color:#37dca2;color:#03261a;font-weight:900}.btn.warn{background:#3a2b15;border-color:#8d6728;color:#ffda91}.btn:disabled{opacity:.35;cursor:not-allowed}
+.hidden{display:none!important}
+.blueTxt{color:#42dcff}.redTxt{color:#ff6d82}
+
+/* shared arena */
+.arena{position:relative;overflow:hidden;border-radius:8px;border:1px solid rgba(65,193,245,.22);background:radial-gradient(circle at 50% 43%,rgba(48,200,235,.25),transparent 30%),linear-gradient(180deg,#1b7da5,#0c4667)}
+.arena:before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(0deg,transparent 0 34px,rgba(255,255,255,.03) 35px 36px),repeating-linear-gradient(90deg,transparent 0 46px,rgba(255,255,255,.028) 47px 48px)}
+.pool{position:absolute;left:8%;right:8%;top:9%;bottom:9%;border:2px solid rgba(235,251,255,.70);border-radius:6px}.pool:before{content:"";position:absolute;left:50%;top:0;bottom:0;border-left:1px dashed rgba(255,255,255,.28)}
+.goal{position:absolute;top:35%;height:30%;width:2.4%;border:2px solid}.goal.l{left:-2.4%;border-color:#47b8ff;border-right:0}.goal.r{right:-2.4%;border-color:#ff697e;border-left:0}
+.mark{position:absolute;width:18px;height:18px;display:grid;place-items:center;border:2px solid #ffe266;background:#111;color:#ffe266;border-radius:3px;font-size:7px;font-weight:900;z-index:5}.m1{left:7%;top:8%}.m2{right:7%;top:8%}.m4{right:7%;bottom:8%}.m3{left:7%;bottom:8%}
+.fish{position:absolute;width:42px;height:20px;border-radius:60% 45% 45% 60%;z-index:4}.fish:after{content:"";position:absolute;right:-11px;top:4px;border-left:12px solid currentColor;border-top:6px solid transparent;border-bottom:6px solid transparent}.fish span{position:absolute;top:-15px;font-size:8px;font-weight:900;color:#fff}
+.fish.blue{background:#35aaff;color:#35aaff}.fish.red{background:#ff6279;color:#ff6279}.f1{left:27%;top:34%;rotate:15deg}.f2{left:32%;top:62%;rotate:-10deg}.f3{right:28%;top:35%;rotate:170deg}.f4{right:34%;top:64%;rotate:190deg}
+.ball{position:absolute;left:49%;top:49%;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:inset 0 0 0 5px #222;z-index:5}
+
+/* signup */
+.signup{height:100%;display:grid;grid-template-columns:1fr 210px 1fr;gap:10px}
+.teamCard{padding:10px;display:grid;grid-template-rows:auto 1fr;min-height:0}.teamHead{display:flex;justify-content:space-between;align-items:end;padding-bottom:8px;border-bottom:1px solid rgba(70,180,235,.10)}.teamHead h2{font-size:13px;margin:0}.teamHead span{font-size:8px;color:#83a9bf}.teamCard.blue .teamHead h2{color:#42dcff}.teamCard.red .teamHead h2{color:#ff6d82}
+.players{display:grid;align-content:start;gap:7px;padding-top:8px}.player{padding:9px;border:1px dashed rgba(70,180,235,.18);border-radius:8px;background:#081e34}.player.done{border-style:solid;border-color:rgba(65,230,162,.24);background:rgba(7,43,46,.72)}
+.playerTop{display:flex;justify-content:space-between}.playerTop b{font-size:10px}.status{font-size:8px;padding:4px 6px;border-radius:999px;background:#0b2a44;color:#8fb7cc}.done .status{color:#9effcf;background:rgba(18,84,60,.25)}
+.playerMeta{display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-top:7px}.meta{padding:5px 6px;border-radius:6px;background:#06192b}.meta span{display:block;color:#779eb5;font-size:7px}.meta strong{font-size:8px}.playerTime{margin-top:6px;color:#75a4bb;font-size:7px}
+.centerAction{display:grid;place-items:center}.actionBox{width:100%;padding:12px;text-align:center;border:1px solid rgba(73,190,243,.18);border-radius:10px;background:linear-gradient(180deg,rgba(10,37,63,.96),rgba(6,25,44,.96))}
+.actionIcon{width:54px;height:54px;margin:0 auto 8px;display:grid;place-items:center;border-radius:50%;border:1px solid rgba(57,216,255,.34);background:rgba(17,72,108,.30);font-size:24px;color:#7ceaff}
+.actionBox h3{font-size:12px;margin:0}.actionBox p{font-size:8px;color:#83a9bf;line-height:1.45}.bigBtn{width:100%;border:1px solid #39d8ff;background:linear-gradient(180deg,#168bd2,#0f5f99);color:#fff;border-radius:8px;padding:10px 8px;font-size:10px;font-weight:900}.nextBtn{width:100%;margin-top:6px}
+.modalWrap{position:fixed;inset:0;background:rgba(1,8,16,.72);backdrop-filter:blur(5px);display:none;place-items:center;z-index:30}.modalWrap.show{display:grid}.modal{width:760px;padding:14px;border:1px solid rgba(74,190,244,.24);border-radius:12px;background:linear-gradient(180deg,#0a2037,#07182a)}
+.modalHead{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.modalHead h2{font-size:14px;margin:0}.close{border:0;background:transparent;color:#8fb6cc;font-size:18px}.selectGrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.selectGroup{padding:8px;border:1px solid rgba(70,180,235,.14);border-radius:8px;background:#081e34}.selectGroup h3{font-size:10px;margin:0 0 6px}.selectGroup.blue h3{color:#42dcff}.selectGroup.red h3{color:#ff6d82}.selectPlayer{width:100%;display:grid;grid-template-columns:1fr auto;align-items:center;text-align:left;padding:8px;margin-top:5px;border:1px solid rgba(70,180,235,.14);border-radius:7px;background:#06192b;color:#fff}.selectPlayer:disabled{opacity:.35}.selectPlayer b{font-size:9px}.selectPlayer small{display:block;color:#7fa7bd;font-size:7px}.confirmCard{display:none}.confirmCard.show{display:block}.identity{display:grid;grid-template-columns:70px 1fr;gap:10px;align-items:center;padding:10px;border-radius:8px;background:#081e34}.avatar{width:60px;height:60px;border-radius:50%;display:grid;place-items:center;background:#0f466e;color:#8cecff;font-size:22px;font-weight:900}.identity h3{font-size:13px;margin:0}.identity p{font-size:8px;color:#83a9bf}.confirmMeta{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:8px}.confirmActions{display:flex;justify-content:flex-end;gap:6px;margin-top:10px}
+
+/* calibration */
+.calibration{height:100%;display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:10px}.viewCard{padding:9px;display:grid;grid-template-rows:38px 1fr 42px;gap:7px;min-height:0}.viewHead,.viewFoot{display:flex;justify-content:space-between;align-items:center}.viewHead h2{font-size:13px;margin:0}.badges{display:flex;gap:5px}.badge{padding:4px 6px;border-radius:5px;background:#081e34;font-size:7px;color:#b9eaff}.axisX,.axisY{position:absolute;background:#65ffd0;z-index:6}.axisX{left:10%;top:11%;width:20%;height:2px}.axisY{left:8.6%;top:14%;height:20%;width:2px}.crop{position:absolute;left:6%;right:6%;top:7%;bottom:7%;border:2px solid #38ddff;box-shadow:0 0 0 100em rgba(2,12,23,.20);z-index:7}.side{display:grid;grid-template-rows:auto auto auto auto 1fr auto;gap:7px}.card{padding:8px}.card h3{font-size:10px;margin:0 0 5px}.formrow{display:grid;grid-template-columns:80px 1fr;gap:6px;align-items:center;margin:5px 0}.formrow label{font-size:8px;color:#9bb9cb}.formrow select,.formrow input[type=number]{width:100%;height:25px;background:#06192b;color:white;border:1px solid rgba(73,176,229,.28);border-radius:5px;font-size:8px;padding:3px 5px}.formrow input[type=range]{width:100%}.statuslist{display:grid;gap:4px}.statusitem{display:flex;justify-content:space-between;padding:6px;border-radius:6px;background:#081e34;font-size:8px}.statusitem b{color:#9effcf}.lockBox{padding:9px;border:1px solid rgba(65,230,162,.24);background:linear-gradient(180deg,rgba(15,74,59,.32),rgba(7,28,42,.90));border-radius:10px}.lockBox h3{font-size:10px;margin:0}.lockBox p{font-size:7px;color:#85aebe}
+
+/* match */
+.match{height:100%;display:grid;grid-template-columns:minmax(0,1fr) 360px;grid-template-rows:70px 1fr 58px;gap:8px}.scorebar{grid-column:1/-1;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:8px 12px}.sideScore{display:flex;align-items:center;gap:9px}.sideScore.red{justify-content:flex-end}.sideScore span{font-size:9px;color:#8cafc5}.sideScore b{font-size:34px}.clock{text-align:center}.clock strong{display:block;font-size:26px}.clock small{font-size:8px;color:#83aac1}.arenaCard{padding:8px;display:grid;grid-template-rows:30px 1fr 28px;gap:5px;min-height:0}.arenaHead,.arenaFoot{display:flex;justify-content:space-between;align-items:center}.arenaHead h2{font-size:11px;margin:0}.arenaHead span,.arenaFoot{font-size:8px;color:#8eb4c8}.scoreSidePanel{display:grid;grid-template-rows:auto auto 1fr;gap:6px}.teamQuick{padding:8px}.teamQuickHead{display:flex;justify-content:space-between}.teamQuick h3{font-size:10px;margin:0}.teamQuick b{font-size:22px}.quickBtns{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-top:6px}.quickBtns button{padding:7px 2px;border-radius:6px;border:1px solid rgba(74,184,239,.22);font-size:8px;font-weight:800}.goalBtn{background:#0d568e;color:#fff}.assistBtn{background:#0d654b;color:#fff}.outBtn{background:#6e2030;color:#fff}.events{padding:8px;display:grid;grid-template-rows:auto 1fr;gap:5px;min-height:0}.eventList{display:grid;align-content:start;gap:3px;overflow:auto}.event{display:grid;grid-template-columns:39% 1fr 12%;gap:4px;padding:5px;border-left:3px solid #2ce0ff;border-radius:5px;background:#081e34;font-size:7px}.event.red{border-left-color:#ff6479}.event small{color:#7ca8c0}.event b{text-align:right}.bottom{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:8px}.health{padding:7px;display:grid;grid-template-columns:repeat(4,1fr);gap:5px}.h{padding:6px;border-radius:6px;background:#081e34}.h span{display:block;color:#83a9bf;font-size:7px}.h b{font-size:8px}.controls{padding:7px;display:grid;grid-template-columns:repeat(3,1fr);gap:5px}
+
+/* records */
+.records{height:100%;display:grid;grid-template-columns:320px minmax(0,1fr);gap:8px}.history{padding:9px;display:grid;grid-template-rows:auto auto 1fr;gap:7px;min-height:0}.historyHead{display:flex;justify-content:space-between}.historyHead h2{font-size:12px;margin:0}.filters{display:grid;grid-template-columns:1fr 92px;gap:5px}.filters input,.filters select{height:28px;background:#06192b;color:#fff;border:1px solid rgba(73,176,229,.28);border-radius:6px;padding:4px 7px;font-size:8px}.matchList{display:grid;align-content:start;gap:5px;overflow:auto}.matchItem{padding:8px;border:1px solid rgba(70,180,235,.13);border-radius:8px;background:#081e34;color:#fff;text-align:left}.matchItem.active{border-color:rgba(57,216,255,.40);background:rgba(12,55,88,.86);box-shadow:inset 3px 0 0 #39d8ff}.matchTop{display:flex;justify-content:space-between}.matchTop b{font-size:9px}.matchTop span{font-size:7px;color:#7fa7bd}.matchTeams{margin-top:5px;display:grid;grid-template-columns:1fr auto 1fr;font-size:8px}.matchTeams .blue{color:#42dcff}.matchTeams .red{color:#ff6d82;text-align:right}.matchTeams strong{font-size:13px}.detail{display:grid;grid-template-rows:100px 1fr;gap:8px;min-height:0}.hero{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:10px 14px}.teamInfo h2{font-size:12px;margin:0}.teamInfo p{font-size:8px;color:#83a9bf}.teamInfo.red{text-align:right}.score{display:flex;align-items:center;gap:9px}.score b{font-size:40px}.score em{font-style:normal;color:#62849a}.winner{display:block;text-align:center;color:#9effcf;font-size:8px}.detailBody{display:grid;grid-template-columns:290px minmax(0,1fr);gap:8px;min-height:0}.summary{padding:8px;display:grid;align-content:start;gap:7px}.summaryGrid{display:grid;grid-template-columns:1fr 1fr;gap:5px}.item{padding:7px;border-radius:7px;background:#081e34}.item span{display:block;color:#83a9bf;font-size:7px}.item b{font-size:9px}.breakdown{display:grid;grid-template-columns:1fr 1fr;gap:5px}.teamBreak{padding:7px;border-radius:7px;background:#081e34}.line{display:flex;justify-content:space-between;padding:4px 0;border-top:1px solid rgba(70,180,235,.09);font-size:7px}.timeline{padding:8px;display:grid;grid-template-rows:auto 1fr;gap:6px;min-height:0}.table{display:grid;align-content:start;overflow:auto;border:1px solid rgba(70,180,235,.13);border-radius:7px}.tr{display:grid;grid-template-columns:12% 15% 14% 1fr 10%;gap:4px;padding:6px;border-bottom:1px solid rgba(70,180,235,.08);font-size:8px}.tr.head{background:#0a2745;color:#a6cce0;font-size:7px;font-weight:800}.tr b{text-align:right}
+.toast{position:fixed;right:18px;bottom:36px;padding:8px 10px;border:1px solid rgba(67,203,255,.28);border-radius:7px;background:#08253a;font-size:8px;opacity:0;transform:translateY(7px);transition:.18s;z-index:40}.toast.show{opacity:1;transform:none}
+
+/* ===== layout stability / readability overrides ===== */
+html,body{min-height:720px}
+body{min-width:1180px}
+.app{min-height:720px;grid-template-rows:58px 56px minmax(0,1fr) 28px}
+.main{min-height:0;overflow:hidden;padding:12px 14px 14px}
+.page{min-height:0;min-width:0}
+.panel{min-width:0}
+button,.btn,.bigBtn,select,input{font-size:11px}
+.btn{min-height:32px;padding:7px 10px}
+.wide{width:100%;margin-top:7px}
+.nav button{min-height:34px;padding:8px 14px;font-size:11px}
+.matchbar small,.brand small{font-size:10px}.matchbar strong,.teams{font-size:12px}.statusTop b{font-size:11px}
+.signup{grid-template-columns:minmax(340px,1fr) 250px minmax(340px,1fr);gap:12px;overflow:hidden}
+.teamCard{min-height:0;overflow:hidden;padding:13px}.players{overflow:auto;padding-right:3px;gap:9px}.teamHead h2{font-size:15px}.teamHead span{font-size:10px}
+.player{padding:12px}.playerTop b{font-size:12px}.status{font-size:10px}.meta span,.playerTime{font-size:9px}.meta strong{font-size:10px}.playerMeta{gap:7px;margin-top:9px}.meta{padding:7px}
+.actionBox{padding:18px}.actionBox h3{font-size:15px}.actionBox p{font-size:10px;margin:8px 0 14px}.bigBtn{min-height:40px;font-size:12px}.nextBtn{min-height:36px}
+.calibration{grid-template-columns:minmax(640px,1fr) 390px;gap:12px;overflow:hidden}.viewCard{grid-template-rows:42px minmax(340px,1fr) 42px;padding:11px}.viewHead h2{font-size:14px}.badge{font-size:9px;padding:5px 7px}
+.side{min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding-right:3px}.card{padding:10px;flex:0 0 auto}.card h3{font-size:12px;margin-bottom:8px}.formrow{grid-template-columns:92px minmax(0,1fr);gap:8px;margin:7px 0}.formrow label{font-size:10px}.formrow select,.formrow input[type=number]{height:32px;font-size:10px;padding:5px 7px}.formrow input[type=range]{min-width:0}.statusitem{padding:8px;font-size:10px}.lockBox{flex:0 0 auto;padding:11px;position:sticky;bottom:0;z-index:4}.lockBox h3{font-size:12px}.lockBox p{font-size:9px;line-height:1.45}.twoBtns{display:grid;grid-template-columns:1fr 1fr;gap:6px}.inlineStatus{display:flex;justify-content:space-between;align-items:center;padding:7px 8px;border-radius:6px;background:#081e34;font-size:10px}.inlineStatus span{color:#86aabe}.inlineStatus b{color:#9effcf}
+.match{grid-template-columns:minmax(640px,1fr) 390px;grid-template-rows:82px minmax(0,1fr) 66px;gap:10px;overflow:hidden}.scorebar{padding:9px 16px}.sideScore b{font-size:38px}.sideScore span{font-size:11px}.clock strong{font-size:30px}.clock small{font-size:10px}.arenaCard{grid-template-rows:34px minmax(320px,1fr) 30px;padding:10px}.arenaHead h2{font-size:13px}.arenaHead span,.arenaFoot{font-size:9px}.scoreSidePanel{min-height:0;overflow-y:auto;grid-template-rows:auto auto minmax(180px,1fr);gap:8px;padding-right:3px}.teamQuick{padding:10px}.teamQuick h3{font-size:12px}.teamQuick b{font-size:24px}.quickBtns{gap:6px}.quickBtns button{min-height:48px;font-size:10px;padding:8px 3px}.events{padding:10px}.events h3{font-size:12px;margin:0}.event{grid-template-columns:38% 1fr 12%;padding:7px;font-size:9px}.health,.controls{padding:9px}.h{padding:8px}.h span{font-size:9px}.h b{font-size:10px}.controls .btn{min-height:42px;font-size:11px}
+.records{grid-template-columns:350px minmax(0,1fr);gap:10px;overflow:hidden}.history{padding:11px;min-height:0}.historyHead h2{font-size:14px}.historyHead span{font-size:10px}.filters{grid-template-columns:minmax(0,1fr) 110px;gap:7px}.filters input,.filters select{height:34px;font-size:10px}.matchList{min-height:0;padding-right:3px}.matchItem{padding:10px}.matchTop b{font-size:11px}.matchTop span{font-size:9px}.matchTeams{font-size:10px;align-items:center}.matchTeams strong{font-size:15px}.detail{grid-template-rows:112px minmax(0,1fr);min-height:0}.hero{padding:12px 16px}.teamInfo h2{font-size:14px}.teamInfo p{font-size:10px}.score b{font-size:44px}.winner{font-size:10px}.detailBody{grid-template-columns:320px minmax(0,1fr);gap:10px;min-height:0;overflow:hidden}.summary{padding:10px;overflow-y:auto}.item{padding:9px}.item span{font-size:9px}.item b{font-size:11px}.teamBreak{padding:9px}.teamBreak h4{font-size:11px}.line{font-size:9px;padding:5px 0}.timeline{padding:10px;overflow:hidden}.table{min-height:0;overflow:auto}.tr{min-width:640px;grid-template-columns:100px 120px 100px minmax(220px,1fr) 70px;padding:8px;font-size:10px}.tr.head{font-size:9px;position:sticky;top:0;z-index:2}
+.modal{width:min(780px,calc(100vw - 40px));max-height:calc(100vh - 40px);overflow:auto}.selectPlayer{min-height:52px}.selectPlayer b{font-size:11px}.selectPlayer small{font-size:9px}.confirmMeta .meta span{font-size:9px}.confirmMeta .meta strong{font-size:11px}
+
+/* video replay */
+.recordMain{min-height:0;display:grid;grid-template-rows:42px minmax(0,1fr);gap:8px;overflow:hidden}
+.recordTabs{display:flex;gap:6px;padding:6px;background:linear-gradient(180deg,rgba(10,33,56,.95),rgba(6,24,42,.96));border:1px solid rgba(71,176,235,.17);border-radius:10px}
+.recordTabs button{min-width:108px;border:1px solid rgba(74,184,239,.18);background:#081e34;color:#8fb7ce;border-radius:6px;padding:7px 12px;font-size:10px}
+.recordTabs button.active{color:#fff;border-color:rgba(57,216,255,.38);background:rgba(27,96,145,.34)}
+.recordPane{min-height:0;overflow:hidden}
+.replayPanel{height:100%;padding:10px;display:grid;grid-template-rows:minmax(260px,1fr) auto auto;gap:8px;overflow:auto}
+.videoStage{position:relative;min-height:260px;border:1px solid rgba(65,193,245,.22);border-radius:8px;background:#020b13;overflow:hidden}
+.videoStage video{width:100%;height:100%;min-height:260px;display:block;object-fit:contain;background:#020b13}
+.videoPlaceholder{position:absolute;inset:0;display:grid;place-items:center;text-align:center;background:radial-gradient(circle at 50% 45%,rgba(34,126,168,.30),transparent 35%),linear-gradient(180deg,#0b3850,#061927)}
+.videoPlaceholder.hidden{display:none!important}
+.videoPlaceholder .playCircle{width:62px;height:62px;margin:0 auto 10px;border-radius:50%;border:1px solid rgba(57,216,255,.42);display:grid;place-items:center;background:rgba(11,78,116,.44);font-size:25px;color:#8cecff}
+.videoPlaceholder h3{margin:0;font-size:13px}.videoPlaceholder p{margin:5px 0 0;font-size:9px;color:#8aafc3}
+.replayTools{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center}
+.fileLabel{display:inline-flex;align-items:center;justify-content:center;min-height:34px;padding:7px 11px;border:1px solid rgba(57,216,255,.34);border-radius:6px;background:#0a2946;color:#dff7ff;font-size:10px;cursor:pointer}
+.fileLabel input{display:none}
+.videoStatus{min-width:0;padding:8px 10px;border-radius:6px;background:#081e34;color:#8eafc2;font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.replayClock{padding:8px 10px;border-radius:6px;background:#081e34;font-size:10px;font-variant-numeric:tabular-nums}
+.replayTimeline{padding:9px;border-radius:8px;background:#081e34;border:1px solid rgba(70,180,235,.12)}
+.timelineLabels{display:flex;justify-content:space-between;color:#759bb0;font-size:8px;margin-bottom:7px}
+.track{position:relative;height:8px;border-radius:999px;background:#06121f;border:1px solid rgba(72,174,226,.18);margin:0 5px 12px}
+.eventMark{position:absolute;top:50%;width:13px;height:13px;border-radius:50%;border:2px solid #081e34;background:#39d8ff;transform:translate(-50%,-50%);cursor:pointer;box-shadow:0 0 0 2px rgba(57,216,255,.20)}
+.eventMark.red{background:#ff6479;box-shadow:0 0 0 2px rgba(255,100,121,.18)}
+.eventMark:hover{scale:1.2}
+.replayEvents{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px}
+.replayEvent{flex:0 0 auto;min-width:160px;padding:7px 9px;border:1px solid rgba(70,180,235,.13);border-left:3px solid #39d8ff;border-radius:6px;background:#06192b;color:#e9f9ff;text-align:left;font-size:9px}
+.replayEvent.red{border-left-color:#ff6479}.replayEvent small{display:block;color:#789fb5;font-size:8px;margin-bottom:2px}
+.replayEvent:hover{border-color:rgba(57,216,255,.38)}
+.recordPane.timeline{height:100%;padding:10px}
+
+/* recording + paired files */
+.recordStrip{grid-column:1/-1;display:grid;grid-template-columns:auto minmax(220px,1fr) auto auto;gap:6px;align-items:center;padding:7px 9px}
+.recordStrip label{font-size:8px;color:#8fb1c4}
+.recordPath{height:30px;background:#06192b;color:#fff;border:1px solid rgba(73,176,229,.28);border-radius:6px;padding:5px 8px;font-size:9px}
+.recState{padding:6px 9px;border-radius:999px;background:#081e34;border:1px solid rgba(70,180,235,.15);font-size:8px;color:#8fb7cb;white-space:nowrap}
+.recState.on{color:#ff9eaa;border-color:rgba(255,100,121,.35);background:rgba(103,26,39,.28)}
+.recState.saved{color:#9effcf;border-color:rgba(65,230,162,.28);background:rgba(18,84,60,.25)}
+.filePair{display:grid;gap:5px;margin-top:2px}
+.fileRow{padding:7px;border-radius:6px;background:#081e34;border:1px solid rgba(70,180,235,.12)}
+.fileRow span{display:block;color:#83a9bf;font-size:7px}.fileRow b{display:block;margin-top:2px;font-size:8px;word-break:break-all}
+.pairedOk{color:#9effcf}
+
+@media (max-width:1280px){
+  .recordTabs button{min-width:96px}
+  .replayTools{grid-template-columns:auto minmax(0,1fr)}
+  .replayClock{grid-column:1/-1}
+}
+
+@media (max-width:1280px){.calibration,.match{grid-template-columns:minmax(0,1fr) 350px}.records{grid-template-columns:310px minmax(0,1fr)}.detailBody{grid-template-columns:285px minmax(0,1fr)}.signup{grid-template-columns:minmax(300px,1fr) 220px minmax(300px,1fr)}}
+
+/* ===== v6 UI refinement: balanced sizing + stable grids ===== */
+html,body{min-height:680px}
+.app{min-height:680px;grid-template-rows:56px 54px minmax(0,1fr) 26px}
+.main{padding:10px 12px 12px}
+
+.topbar{padding:0 18px}
+.brand b{font-size:14px}
+.brand small{font-size:9px}
+.nav{gap:8px}
+.nav button{min-height:34px;padding:7px 13px;font-size:10px;border-radius:7px}
+.matchbar{padding:0 18px}
+.matchbar small{font-size:9px}
+.matchbar strong,.teams{font-size:11px}
+.statusTop b{font-size:10px}
+
+/* consistent control sizing */
+button,.btn,.bigBtn,select,input{font-size:10px}
+.btn{min-height:34px;padding:7px 11px;border-radius:7px}
+.bigBtn{min-height:42px;font-size:11px;border-radius:8px}
+input,select{outline:none}
+select,.formrow input[type=number],.filters input,.filters select,.recordPath{height:34px}
+
+/* signup */
+.signup{
+  grid-template-columns:minmax(330px,1fr) 236px minmax(330px,1fr);
+  gap:10px;
+  overflow:hidden;
+}
+.teamCard{padding:12px}
+.teamHead{padding-bottom:9px}
+.teamHead h2{font-size:13px}
+.teamHead span{font-size:9px}
+.players{gap:8px;padding-top:9px}
+.player{padding:11px}
+.playerTop b{font-size:11px}
+.status{font-size:9px;padding:4px 7px}
+.playerMeta{gap:6px;margin-top:8px}
+.meta{padding:7px}
+.meta span,.playerTime{font-size:8px}
+.meta strong{font-size:9px}
+.actionBox{padding:16px}
+.actionIcon{width:48px;height:48px;font-size:21px}
+.actionBox h3{font-size:13px}
+.actionBox p{font-size:9px;margin:7px 0 12px}
+.nextBtn{min-height:36px}
+
+/* field setup */
+.calibration{
+  grid-template-columns:minmax(620px,1fr) 352px;
+  gap:10px;
+  overflow:hidden;
+}
+.viewCard{grid-template-rows:38px minmax(300px,1fr) 36px;padding:10px}
+.viewHead h2{font-size:13px}
+.badge{font-size:8px;padding:4px 7px}
+.side{gap:7px;padding-right:2px}
+.card{padding:9px}
+.card h3{font-size:11px;margin-bottom:6px}
+.formrow{grid-template-columns:82px minmax(0,1fr);gap:8px;margin:6px 0}
+.formrow label{font-size:9px}
+.formrow select,.formrow input[type=number]{height:32px;font-size:9px}
+.inlineStatus,.statusitem{font-size:9px;padding:7px}
+.twoBtns{gap:6px}
+.lockBox{padding:10px}
+.lockBox h3{font-size:11px}
+.lockBox p{font-size:8px;margin:5px 0 8px}
+
+/* MATCH: explicit 4-row layout — score / game / recording / controls */
+.match{
+  grid-template-columns:minmax(620px,1fr) 352px;
+  grid-template-rows:72px minmax(0,1fr) 44px 60px;
+  gap:8px;
+  overflow:hidden;
+}
+.scorebar{grid-column:1/-1;grid-row:1;padding:8px 14px}
+.sideScore b{font-size:34px}
+.sideScore span{font-size:10px}
+.clock strong{font-size:27px}
+.clock small{font-size:9px}
+.arenaCard{
+  grid-column:1;
+  grid-row:2;
+  min-height:0;
+  grid-template-rows:32px minmax(270px,1fr) 28px;
+  padding:9px;
+}
+.arenaHead h2{font-size:12px}
+.arenaHead span,.arenaFoot{font-size:8px}
+.scoreSidePanel{
+  grid-column:2;
+  grid-row:2;
+  min-height:0;
+  overflow-y:auto;
+  grid-template-rows:auto auto minmax(150px,1fr);
+  gap:7px;
+  padding-right:2px;
+}
+.teamQuick{padding:9px}
+.teamQuick h3{font-size:11px}
+.teamQuick b{font-size:22px}
+.quickBtns{gap:5px;margin-top:7px}
+.quickBtns button{
+  min-height:44px;
+  padding:6px 3px;
+  font-size:9px;
+  line-height:1.3;
+  border-radius:7px;
+}
+.events{padding:9px}
+.events h3{font-size:11px}
+.event{grid-template-columns:37% 1fr 12%;padding:6px;font-size:8px}
+.recordStrip{
+  grid-column:1/-1;
+  grid-row:3;
+  min-height:0;
+  grid-template-columns:82px minmax(220px,1fr) auto 92px;
+  gap:7px;
+  padding:5px 8px;
+}
+.recordStrip label{font-size:9px}
+.recordPath{height:32px;font-size:9px;padding:5px 8px}
+.recState{font-size:8px;padding:6px 8px}
+.recordStrip .btn{min-height:32px;padding:5px 9px}
+.bottom{
+  grid-column:1/-1;
+  grid-row:4;
+  grid-template-columns:minmax(0,1fr) 420px;
+  gap:8px;
+  min-height:0;
+}
+.health{padding:7px;gap:6px}
+.h{padding:7px}
+.h span{font-size:8px}
+.h b{font-size:9px}
+.controls{padding:7px;gap:6px}
+.controls .btn{min-height:40px;font-size:10px}
+
+/* records + replay */
+.records{
+  grid-template-columns:320px minmax(0,1fr);
+  gap:10px;
+  overflow:hidden;
+}
+.history{padding:10px}
+.historyHead h2{font-size:13px}
+.historyHead span{font-size:9px}
+.filters{grid-template-columns:minmax(0,1fr) 105px;gap:6px}
+.filters input,.filters select{height:32px;font-size:9px}
+.matchItem{padding:9px}
+.matchTop b{font-size:10px}
+.matchTop span{font-size:8px}
+.matchTeams{font-size:9px}
+.matchTeams strong{font-size:14px}
+.detail{grid-template-rows:96px minmax(0,1fr);gap:8px}
+.hero{padding:10px 14px}
+.teamInfo h2{font-size:13px}
+.teamInfo p{font-size:9px}
+.score b{font-size:38px}
+.winner{font-size:9px}
+.detailBody{
+  grid-template-columns:286px minmax(0,1fr);
+  gap:8px;
+  overflow:hidden;
+}
+.summary{padding:9px}
+.summaryGrid{gap:5px}
+.item{padding:8px}
+.item span{font-size:8px}
+.item b{font-size:10px}
+.teamBreak{padding:8px}
+.teamBreak h4{font-size:10px}
+.line{font-size:8px;padding:4px 0}
+.filePair{gap:4px}
+.fileRow{padding:6px}
+.fileRow span{font-size:7px}
+.fileRow b{font-size:8px}
+.recordMain{grid-template-rows:38px minmax(0,1fr);gap:7px}
+.recordTabs{padding:5px;gap:5px}
+.recordTabs button{min-width:100px;padding:6px 10px;font-size:9px}
+.replayPanel{padding:9px;grid-template-rows:minmax(220px,1fr) auto auto;gap:7px}
+.videoStage,.videoStage video{min-height:220px}
+.replayTools{gap:6px}
+.fileLabel{min-height:32px;padding:6px 10px;font-size:9px}
+.videoStatus,.replayClock{padding:7px 9px;font-size:9px}
+.replayTimeline{padding:8px}
+.timelineLabels{font-size:8px}
+.replayEvent{min-width:150px;padding:6px 8px;font-size:8px}
+.replayEvent small{font-size:7px}
+.timeline{padding:9px}
+.tr{
+  min-width:600px;
+  grid-template-columns:90px 110px 90px minmax(210px,1fr) 60px;
+  padding:7px;
+  font-size:9px;
+}
+.tr.head{font-size:8px}
+
+/* modal */
+.modal{width:min(720px,calc(100vw - 36px));padding:13px}
+.modalHead h2{font-size:13px}
+.selectGrid{gap:8px}
+.selectGroup{padding:9px}
+.selectGroup h3{font-size:10px}
+.selectPlayer{min-height:48px;padding:8px}
+.selectPlayer b{font-size:10px}
+.selectPlayer small{font-size:8px}
+.identity{grid-template-columns:62px 1fr}
+.avatar{width:54px;height:54px;font-size:19px}
+.identity h3{font-size:12px}
+.identity p{font-size:8px}
+.confirmMeta .meta span{font-size:8px}
+.confirmMeta .meta strong{font-size:10px}
+
+/* lower-resolution competition laptops */
+@media (max-width:1280px){
+  .signup{grid-template-columns:minmax(285px,1fr) 210px minmax(285px,1fr)}
+  .calibration,.match{grid-template-columns:minmax(0,1fr) 330px}
+  .records{grid-template-columns:290px minmax(0,1fr)}
+  .detailBody{grid-template-columns:260px minmax(0,1fr)}
+  .bottom{grid-template-columns:minmax(0,1fr) 380px}
+  .recordStrip{grid-template-columns:76px minmax(180px,1fr) auto 86px}
+}
+@media (max-height:760px){
+  .app{grid-template-rows:52px 50px minmax(0,1fr) 24px}
+  .main{padding:8px 10px 10px}
+  .match{grid-template-rows:64px minmax(0,1fr) 40px 54px}
+  .arenaCard{grid-template-rows:28px minmax(240px,1fr) 24px}
+  .quickBtns button{min-height:40px}
+  .controls .btn{min-height:36px}
+  .detail{grid-template-rows:86px minmax(0,1fr)}
+  .score b{font-size:34px}
+}
+
+
+/* ===== v7 motion + bottom breathing space ===== */
+.app{
+  grid-template-rows:56px 54px minmax(0,1fr) 38px 26px;
+  position:relative;
+}
+.main{
+  padding:10px 12px 14px;
+  position:relative;
+  z-index:2;
+}
+
+/* bottom reserved ambience strip */
+.ambientDock{
+  position:relative;
+  overflow:hidden;
+  border-top:1px solid rgba(70,187,248,.07);
+  border-bottom:1px solid rgba(70,187,248,.08);
+  background:
+    radial-gradient(circle at 18% 130%,rgba(57,216,255,.14),transparent 25%),
+    radial-gradient(circle at 82% 140%,rgba(65,230,162,.09),transparent 22%),
+    linear-gradient(180deg,rgba(5,21,37,.15),rgba(4,17,31,.88));
+}
+.ambientDock:before,
+.ambientDock:after{
+  content:"";
+  position:absolute;
+  left:-8%;
+  width:116%;
+  border-radius:50%;
+  pointer-events:none;
+}
+.ambientDock:before{
+  height:28px;
+  bottom:-19px;
+  border-top:1px solid rgba(57,216,255,.24);
+  animation:waveDrift 7s ease-in-out infinite alternate;
+}
+.ambientDock:after{
+  height:22px;
+  bottom:-15px;
+  border-top:1px solid rgba(65,230,162,.13);
+  animation:waveDrift2 9s ease-in-out infinite alternate;
+}
+.ambientLine{
+  position:absolute;
+  left:12%;
+  right:12%;
+  top:11px;
+  height:1px;
+  background:linear-gradient(90deg,transparent,rgba(57,216,255,.22),rgba(65,230,162,.18),transparent);
+  filter:blur(.1px);
+  animation:ambientGlow 4.5s ease-in-out infinite;
+}
+.bubble{
+  position:absolute;
+  bottom:-8px;
+  width:5px;height:5px;
+  border:1px solid rgba(121,231,255,.40);
+  border-radius:50%;
+  opacity:0;
+  animation:bubbleRise 7s linear infinite;
+}
+.b1{left:14%;animation-delay:0s}
+.b2{left:31%;width:4px;height:4px;animation-delay:1.8s}
+.b3{left:54%;width:6px;height:6px;animation-delay:3.1s}
+.b4{left:73%;animation-delay:4.6s}
+.b5{left:88%;width:3px;height:3px;animation-delay:5.7s}
+
+/* subtle screen depth */
+body:before{
+  content:"";
+  position:fixed;
+  inset:0;
+  pointer-events:none;
+  z-index:0;
+  background:
+    radial-gradient(circle at 50% 0%,rgba(57,216,255,.045),transparent 38%),
+    radial-gradient(circle at 8% 80%,rgba(58,146,255,.035),transparent 28%);
+  animation:bgBreathe 8s ease-in-out infinite alternate;
+}
+
+/* panel polish */
+.panel{
+  position:relative;
+  transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease;
+}
+.panel:after{
+  content:"";
+  position:absolute;
+  inset:0;
+  border-radius:inherit;
+  pointer-events:none;
+  background:linear-gradient(115deg,transparent 25%,rgba(255,255,255,.018) 48%,transparent 68%);
+  transform:translateX(-110%);
+  transition:transform .7s ease;
+}
+.panel:hover{
+  border-color:rgba(83,196,248,.24);
+}
+.panel:hover:after{
+  transform:translateX(110%);
+}
+
+/* nav + buttons */
+.nav button,
+.btn,
+.bigBtn,
+.quickBtns button,
+.matchItem,
+.selectPlayer,
+.recordTabs button,
+.replayEvent{
+  transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease,filter .16s ease;
+}
+.nav button:hover,
+.btn:hover:not(:disabled),
+.bigBtn:hover:not(:disabled),
+.quickBtns button:hover:not(:disabled),
+.matchItem:hover,
+.selectPlayer:hover:not(:disabled),
+.recordTabs button:hover,
+.replayEvent:hover{
+  transform:translateY(-1px);
+}
+.nav button.active{
+  box-shadow:0 0 18px rgba(57,216,255,.10),inset 0 0 16px rgba(57,216,255,.04);
+  animation:activeTabGlow 3.8s ease-in-out infinite;
+}
+.btn.good:hover:not(:disabled){
+  box-shadow:0 0 16px rgba(65,230,162,.15);
+}
+.goalBtn:hover{box-shadow:0 0 14px rgba(53,170,255,.16)}
+.assistBtn:hover{box-shadow:0 0 14px rgba(65,230,162,.14)}
+.outBtn:hover{box-shadow:0 0 14px rgba(255,100,121,.15)}
+
+/* arena scan light + water shimmer */
+.arena:after{
+  content:"";
+  position:absolute;
+  left:0;right:0;
+  top:-20%;
+  height:22%;
+  pointer-events:none;
+  z-index:2;
+  background:linear-gradient(180deg,transparent,rgba(165,240,255,.055),transparent);
+  animation:arenaScan 6.5s linear infinite;
+}
+.pool{
+  box-shadow:inset 0 0 28px rgba(112,224,255,.035);
+}
+.ball{
+  animation:ballGlow 2.8s ease-in-out infinite;
+}
+.fish{
+  filter:drop-shadow(0 0 5px rgba(100,220,255,.10));
+}
+
+/* state feedback */
+.recState.on{
+  position:relative;
+  padding-left:18px;
+}
+.recState.on:before{
+  content:"";
+  position:absolute;
+  left:8px;top:50%;
+  width:6px;height:6px;
+  margin-top:-3px;
+  border-radius:50%;
+  background:#ff6479;
+  box-shadow:0 0 0 0 rgba(255,100,121,.45);
+  animation:recordPulse 1.5s ease-out infinite;
+}
+.status,
+.statusitem b,
+.h b{
+  transition:color .2s ease,text-shadow .2s ease;
+}
+
+/* score/event animation classes */
+.scoreBump{
+  animation:scoreBump .36s ease;
+}
+.eventFlash{
+  animation:eventFlash .5s ease;
+}
+
+/* toast */
+.toast.show{
+  box-shadow:0 10px 30px rgba(0,0,0,.25),0 0 18px rgba(57,216,255,.08);
+}
+
+/* modal entrance */
+.modalWrap.show .modal{
+  animation:modalIn .2s ease-out;
+}
+
+/* keyframes */
+@keyframes waveDrift{
+  from{transform:translateX(-1.8%) scaleX(1)}
+  to{transform:translateX(1.8%) scaleX(1.035)}
+}
+@keyframes waveDrift2{
+  from{transform:translateX(1.2%) scaleX(1.02)}
+  to{transform:translateX(-1.2%) scaleX(.985)}
+}
+@keyframes ambientGlow{
+  0%,100%{opacity:.38;transform:scaleX(.92)}
+  50%{opacity:.85;transform:scaleX(1)}
+}
+@keyframes bubbleRise{
+  0%{transform:translateY(0) scale(.75);opacity:0}
+  14%{opacity:.5}
+  80%{opacity:.22}
+  100%{transform:translateY(-42px) scale(1.12);opacity:0}
+}
+@keyframes bgBreathe{
+  from{opacity:.55}
+  to{opacity:1}
+}
+@keyframes activeTabGlow{
+  0%,100%{border-color:rgba(57,216,255,.30)}
+  50%{border-color:rgba(57,216,255,.48)}
+}
+@keyframes arenaScan{
+  0%{transform:translateY(-10%)}
+  100%{transform:translateY(560%)}
+}
+@keyframes ballGlow{
+  0%,100%{filter:drop-shadow(0 0 2px rgba(255,255,255,.12))}
+  50%{filter:drop-shadow(0 0 7px rgba(255,255,255,.28))}
+}
+@keyframes recordPulse{
+  0%{box-shadow:0 0 0 0 rgba(255,100,121,.42)}
+  75%,100%{box-shadow:0 0 0 7px rgba(255,100,121,0)}
+}
+@keyframes scoreBump{
+  0%{transform:scale(1)}
+  45%{transform:scale(1.13);text-shadow:0 0 14px currentColor}
+  100%{transform:scale(1)}
+}
+@keyframes eventFlash{
+  0%{background:rgba(57,216,255,.16)}
+  100%{background:#081e34}
+}
+@keyframes modalIn{
+  from{opacity:0;transform:translateY(8px) scale(.985)}
+  to{opacity:1;transform:none}
+}
+
+@media (max-height:760px){
+  .app{grid-template-rows:52px 50px minmax(0,1fr) 30px 24px}
+  .ambientDock{min-height:30px}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*:before,*:after{
+    animation-duration:.001ms!important;
+    animation-iteration-count:1!important;
+    scroll-behavior:auto!important;
+    transition-duration:.001ms!important;
+  }
+}
+
+
+/* ===== v8 compact-safe layout: no edge clipping ===== */
+html,body{
+  min-width:0 !important;
+  width:100%;
+  overflow:hidden;
+}
+.app{
+  width:100%;
+  min-width:0;
+  grid-template-rows:54px 50px minmax(0,1fr) 34px 24px;
+}
+.main{
+  min-width:0;
+  min-height:0;
+  padding:10px 16px 14px;
+  overflow:hidden;
+}
+.page{
+  min-width:0;
+  min-height:0;
+}
+.panel{min-width:0}
+.topbar{padding:0 16px}
+.matchbar{padding:0 16px}
+
+/* slightly smaller, more consistent text/control scale */
+button,.btn,.bigBtn,select,input{font-size:9px}
+.btn{
+  min-height:31px;
+  padding:6px 9px;
+}
+.bigBtn{
+  min-height:38px;
+  font-size:10px;
+}
+.nav{gap:5px}
+.nav button{
+  min-height:31px;
+  padding:6px 10px;
+  font-size:9px;
+}
+.brand b{font-size:13px}
+.brand small{font-size:8px}
+.matchbar small{font-size:8px}
+.matchbar strong,.teams{font-size:10px}
+.statusTop b{font-size:9px}
+
+/* signup: safe margins, no clipped cards */
+.signup{
+  width:100%;
+  grid-template-columns:minmax(0,1fr) 210px minmax(0,1fr);
+  gap:9px;
+  overflow:auto;
+  padding:1px;
+}
+.teamCard{padding:10px;overflow:auto}
+.teamHead h2{font-size:12px}
+.teamHead span{font-size:8px}
+.players{gap:7px}
+.player{padding:9px}
+.playerTop b{font-size:10px}
+.status{font-size:8px}
+.meta{padding:6px}
+.meta span,.playerTime{font-size:7px}
+.meta strong{font-size:8px}
+.actionBox{padding:13px}
+.actionIcon{width:44px;height:44px;font-size:19px}
+.actionBox h3{font-size:12px}
+.actionBox p{font-size:8px}
+.centerAction{min-width:0}
+
+/* field setup */
+.calibration{
+  width:100%;
+  grid-template-columns:minmax(0,1fr) 324px;
+  gap:9px;
+  overflow:hidden;
+  padding:1px;
+}
+.viewCard{
+  min-width:0;
+  grid-template-rows:34px minmax(260px,1fr) 32px;
+  padding:9px;
+}
+.viewHead{min-width:0;gap:8px}
+.viewHead h2{font-size:12px;white-space:nowrap}
+.badges{min-width:0;flex-wrap:wrap;justify-content:flex-end}
+.badge{font-size:7px;padding:4px 6px}
+.side{
+  min-width:0;
+  overflow-y:auto;
+  overflow-x:hidden;
+  padding:1px 3px 1px 1px;
+}
+.card{padding:8px}
+.card h3{font-size:10px}
+.formrow{
+  grid-template-columns:72px minmax(0,1fr);
+  gap:7px;
+  margin:5px 0;
+}
+.formrow label{font-size:8px}
+.formrow select,.formrow input[type=number]{
+  width:100%;
+  min-width:0;
+  height:29px;
+  font-size:8px;
+}
+.formrow input[type=range]{min-width:0}
+.inlineStatus,.statusitem{font-size:8px;padding:6px}
+.twoBtns{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.lockBox{padding:9px}
+.lockBox h3{font-size:10px}
+.lockBox p{font-size:7px}
+.lockBox .btn{width:100%}
+
+/* match: keep every row inside viewport */
+.match{
+  width:100%;
+  grid-template-columns:minmax(0,1fr) 324px;
+  grid-template-rows:66px minmax(0,1fr) 40px 56px;
+  gap:7px;
+  overflow:hidden;
+  padding:1px;
+}
+.scorebar{padding:7px 12px}
+.sideScore b{font-size:30px}
+.sideScore span{font-size:9px}
+.clock strong{font-size:24px}
+.clock small{font-size:8px}
+.arenaCard{
+  min-width:0;
+  grid-template-rows:28px minmax(230px,1fr) 24px;
+  padding:8px;
+}
+.arenaHead{min-width:0;gap:8px}
+.arenaHead h2{font-size:11px}
+.arenaHead span,.arenaFoot{font-size:7px}
+.scoreSidePanel{
+  min-width:0;
+  overflow-y:auto;
+  overflow-x:hidden;
+  padding-right:3px;
+}
+.teamQuick{padding:8px}
+.teamQuick h3{font-size:10px}
+.teamQuick b{font-size:20px}
+.quickBtns{
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:4px;
+}
+.quickBtns button{
+  width:100%;
+  min-width:0;
+  min-height:39px;
+  padding:5px 2px;
+  font-size:8px;
+  line-height:1.2;
+}
+.events{padding:8px}
+.events h3{font-size:10px}
+.event{
+  grid-template-columns:38% minmax(0,1fr) 32px;
+  gap:3px;
+  padding:5px;
+  font-size:7px;
+}
+.event span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.recordStrip{
+  min-width:0;
+  grid-template-columns:74px minmax(0,1fr) 118px 78px;
+  gap:5px;
+  padding:4px 7px;
+}
+.recordStrip label{font-size:8px}
+.recordPath{
+  min-width:0;
+  width:100%;
+  height:29px;
+  font-size:8px;
+}
+.recState{
+  max-width:118px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  font-size:7px;
+}
+.recordStrip .btn{
+  min-width:0;
+  width:100%;
+  min-height:29px;
+  padding:4px 5px;
+  font-size:8px;
+}
+.bottom{
+  min-width:0;
+  grid-template-columns:minmax(0,1fr) minmax(330px,38%);
+  gap:7px;
+}
+.health{
+  min-width:0;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:4px;
+  padding:6px;
+}
+.h{padding:6px;min-width:0}
+.h span{font-size:7px}
+.h b{font-size:8px;white-space:nowrap}
+.controls{
+  min-width:0;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:5px;
+  padding:6px;
+}
+.controls .btn{
+  width:100%;
+  min-width:0;
+  min-height:36px;
+  padding:5px 4px;
+  font-size:9px;
+}
+
+/* records: prevent right edge clipping */
+.records{
+  width:100%;
+  grid-template-columns:286px minmax(0,1fr);
+  gap:9px;
+  overflow:hidden;
+  padding:1px;
+}
+.history{
+  min-width:0;
+  padding:9px;
+  overflow:hidden;
+}
+.historyHead h2{font-size:12px}
+.historyHead span{font-size:8px}
+.filters{
+  grid-template-columns:minmax(0,1fr) 92px;
+  gap:5px;
+}
+.filters input,.filters select{
+  min-width:0;
+  width:100%;
+  height:29px;
+  font-size:8px;
+}
+.matchList{padding-right:2px}
+.matchItem{width:100%;min-width:0;padding:8px}
+.matchTop b{font-size:9px}
+.matchTop span{font-size:7px}
+.matchTeams{
+  grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);
+  gap:4px;
+  font-size:8px;
+}
+.matchTeams .blue,.matchTeams .red{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.matchTeams strong{font-size:12px}
+.detail{
+  min-width:0;
+  grid-template-rows:88px minmax(0,1fr);
+}
+.hero{min-width:0;padding:9px 12px}
+.teamInfo{min-width:0}
+.teamInfo h2{
+  font-size:11px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.teamInfo p{
+  font-size:8px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.score{gap:7px}
+.score b{font-size:32px}
+.winner{font-size:8px}
+.detailBody{
+  min-width:0;
+  grid-template-columns:252px minmax(0,1fr);
+  gap:7px;
+  overflow:hidden;
+}
+.summary{
+  min-width:0;
+  overflow-y:auto;
+  overflow-x:hidden;
+  padding:8px;
+}
+.summaryGrid{grid-template-columns:repeat(2,minmax(0,1fr))}
+.item{min-width:0;padding:7px}
+.item span{font-size:7px}
+.item b{
+  display:block;
+  min-width:0;
+  font-size:9px;
+  overflow-wrap:anywhere;
+}
+.breakdown{grid-template-columns:repeat(2,minmax(0,1fr))}
+.teamBreak{min-width:0;padding:7px}
+.teamBreak h4{font-size:9px}
+.line{font-size:7px}
+.fileRow{min-width:0;padding:5px}
+.fileRow b{font-size:7px;overflow-wrap:anywhere}
+.recordMain{
+  min-width:0;
+  grid-template-rows:35px minmax(0,1fr);
+  overflow:hidden;
+}
+.recordTabs{min-width:0;padding:4px}
+.recordTabs button{
+  min-width:88px;
+  padding:5px 8px;
+  font-size:8px;
+}
+.recordPane{
+  min-width:0;
+  overflow:auto;
+}
+.replayPanel{
+  min-width:0;
+  padding:8px;
+  grid-template-rows:minmax(190px,1fr) auto auto;
+}
+.videoStage,.videoStage video{min-width:0;min-height:190px}
+.videoPlaceholder h3{font-size:11px}
+.videoPlaceholder p{font-size:8px}
+.videoPlaceholder .playCircle{width:52px;height:52px;font-size:21px}
+.replayTools{
+  grid-template-columns:86px minmax(0,1fr) 96px;
+  gap:5px;
+}
+.fileLabel{
+  min-width:0;
+  width:100%;
+  min-height:29px;
+  padding:5px 7px;
+  font-size:8px;
+}
+.videoStatus,.replayClock{
+  min-width:0;
+  padding:6px 7px;
+  font-size:8px;
+}
+.replayEvent{min-width:136px;padding:6px 7px;font-size:7px}
+.replayEvent small{font-size:7px}
+.timeline{min-width:0;padding:8px;overflow:auto}
+.table{min-width:560px}
+.tr{
+  min-width:560px;
+  grid-template-columns:78px 96px 72px minmax(185px,1fr) 48px;
+  padding:6px;
+  font-size:8px;
+}
+.tr.head{font-size:7px}
+
+/* modal safe area */
+.modalWrap{padding:18px}
+.modal{
+  width:min(680px,100%);
+  max-height:calc(100vh - 36px);
+  overflow:auto;
+}
+.confirmMeta{
+  grid-template-columns:repeat(4,minmax(0,1fr));
+}
+.confirmMeta .meta{min-width:0}
+.confirmMeta .meta strong{overflow-wrap:anywhere}
+
+/* bottom ambience never touches edge controls */
+.ambientDock{
+  margin:0 16px;
+  border-left:1px solid rgba(70,187,248,.06);
+  border-right:1px solid rgba(70,187,248,.06);
+  border-radius:8px 8px 0 0;
+}
+.footer{padding:0 16px}
+
+/* responsive fallback: preview panes and 1366x768 laptops */
+@media (max-width:1180px){
+  .main{padding-left:12px;padding-right:12px}
+  .topbar,.matchbar{padding-left:12px;padding-right:12px}
+  .nav button{padding-left:8px;padding-right:8px}
+  .signup{grid-template-columns:minmax(0,1fr) 190px minmax(0,1fr)}
+  .calibration,.match{grid-template-columns:minmax(0,1fr) 300px}
+  .records{grid-template-columns:260px minmax(0,1fr)}
+  .detailBody{grid-template-columns:230px minmax(0,1fr)}
+  .recordStrip{grid-template-columns:68px minmax(0,1fr) 105px 72px}
+  .bottom{grid-template-columns:minmax(0,1fr) 340px}
+  .ambientDock{margin-left:12px;margin-right:12px}
+  .footer{padding-left:12px;padding-right:12px}
+}
+@media (max-width:1020px){
+  .nav button{font-size:8px;padding:5px 6px}
+  .teams{font-size:9px}
+  .calibration,.match{grid-template-columns:minmax(0,1fr) 280px}
+  .records{grid-template-columns:240px minmax(0,1fr)}
+  .detailBody{grid-template-columns:215px minmax(0,1fr)}
+  .quickBtns button{font-size:7px}
+  .recordStrip{grid-template-columns:62px minmax(0,1fr) 98px 68px}
+}
+@media (max-height:760px){
+  .app{grid-template-rows:50px 46px minmax(0,1fr) 28px 22px}
+  .main{padding-top:7px;padding-bottom:9px}
+  .match{grid-template-rows:58px minmax(0,1fr) 36px 50px}
+  .scorebar{padding-top:5px;padding-bottom:5px}
+  .sideScore b{font-size:27px}
+  .clock strong{font-size:22px}
+  .quickBtns button{min-height:35px}
+  .controls .btn{min-height:32px}
+  .detail{grid-template-rows:78px minmax(0,1fr)}
+  .score b{font-size:29px}
+  .replayPanel{grid-template-rows:minmax(165px,1fr) auto auto}
+  .videoStage,.videoStage video{min-height:165px}
+}
+
+
+/* ===== v9 match bottom clipping fix ===== */
+html,body{
+  height:100%;
+  min-height:0 !important;
+  overflow:hidden;
+}
+.app{
+  height:100vh;
+  height:100dvh;
+  min-height:0 !important;
+}
+
+/* Main workspace must shrink with the real viewport */
+.main{
+  min-height:0;
+  overflow:hidden;
+}
+
+/* Match page gets explicit safe rows */
+.match{
+  height:100%;
+  min-height:0;
+  grid-template-rows:58px minmax(180px,1fr) 36px 52px !important;
+  row-gap:6px !important;
+  padding-bottom:2px !important;
+}
+
+/* Keep the final row fully inside the visible area */
+.bottom{
+  grid-row:4 !important;
+  min-height:0;
+  height:52px;
+  align-self:end;
+  overflow:visible !important;
+}
+.health,
+.controls{
+  height:100%;
+  min-height:0;
+  align-items:stretch;
+}
+.health{
+  padding:5px;
+}
+.controls{
+  padding:5px;
+}
+.controls .btn{
+  min-height:0 !important;
+  height:100%;
+  max-height:42px;
+  align-self:center;
+  padding:5px 4px;
+}
+
+/* Recording strip is compact and cannot steal space from the controls */
+.recordStrip{
+  grid-row:3 !important;
+  min-height:0;
+  height:36px;
+  padding:3px 6px;
+}
+.recordPath{
+  height:28px;
+}
+.recordStrip .btn{
+  min-height:0 !important;
+  height:28px;
+}
+
+/* Avoid the arena forcing the match grid taller than the viewport */
+.arenaCard{
+  min-height:0 !important;
+  grid-template-rows:26px minmax(150px,1fr) 22px !important;
+}
+.arenaCard .arena{
+  min-height:0;
+}
+
+/* Right column can scroll independently when vertical space is tight */
+.scoreSidePanel{
+  min-height:0;
+  overflow-y:auto !important;
+  overflow-x:hidden;
+  padding-bottom:2px;
+}
+
+/* Extra safety for common 1366x768 / browser-toolbar heights */
+@media (max-height:760px){
+  .app{
+    grid-template-rows:48px 44px minmax(0,1fr) 24px 20px !important;
+  }
+  .main{
+    padding-top:6px;
+    padding-bottom:7px;
+  }
+  .match{
+    grid-template-rows:52px minmax(150px,1fr) 32px 46px !important;
+    row-gap:5px !important;
+  }
+  .bottom{
+    height:46px;
+  }
+  .recordStrip{
+    height:32px;
+  }
+  .recordPath,
+  .recordStrip .btn{
+    height:25px;
+  }
+  .controls .btn{
+    max-height:36px;
+    font-size:8px;
+  }
+  .health{
+    padding:4px;
+  }
+  .h{
+    padding:4px 5px;
+  }
+}
+
+/* Very short windows: preserve controls first, allow content to compress */
+@media (max-height:650px){
+  .ambientDock{
+    display:none;
+  }
+  .app{
+    grid-template-rows:46px 42px minmax(0,1fr) 20px !important;
+  }
+  .match{
+    grid-template-rows:48px minmax(125px,1fr) 30px 44px !important;
+  }
+  .bottom{
+    height:44px;
+  }
+  .scorebar{
+    padding-top:3px;
+    padding-bottom:3px;
+  }
+  .sideScore b{
+    font-size:24px;
+  }
+  .clock strong{
+    font-size:20px;
+  }
+}
+
+
+/* ===== v10 match viewport aspect-ratio fix ===== */
+
+/* The match camera image must never be stretched by the grid. */
+.match .arenaCard{
+  overflow:hidden;
+  min-width:0;
+}
+
+/* Camera-stage row acts as a letterbox area. */
+.match .arenaCard > .arena{
+  justify-self:center;
+  align-self:center;
+  width:100%;
+  height:auto;
+  aspect-ratio:16 / 9;
+  max-width:100%;
+  max-height:100%;
+  flex:none;
+}
+
+/* Keep internal field geometry tied to the video frame. */
+.match .arena .pool{
+  left:8%;
+  right:8%;
+  top:9%;
+  bottom:9%;
+}
+
+/* On short windows the frame shrinks instead of being cropped. */
+@media (max-height:760px){
+  .match .arenaCard > .arena{
+    width:auto;
+    height:100%;
+    aspect-ratio:16 / 9;
+    max-width:100%;
+  }
+}
+
+/* On narrow windows width becomes the limiting dimension. */
+@media (max-width:1180px){
+  .match .arenaCard > .arena{
+    width:100%;
+    height:auto;
+    aspect-ratio:16 / 9;
+    max-height:100%;
+  }
+}
+
+
+/* ===== v11 records replay enlarged, no internal scrolling ===== */
+
+/* Give replay much more horizontal space */
+.records{
+  grid-template-columns:250px minmax(0,1fr) !important;
+  gap:8px !important;
+}
+.detailBody{
+  grid-template-columns:210px minmax(0,1fr) !important;
+  gap:7px !important;
+}
+
+/* Compress summary instead of sacrificing video */
+.summary{
+  padding:7px !important;
+  overflow:hidden !important;
+}
+.summaryGrid{
+  gap:4px !important;
+}
+.item{
+  padding:6px !important;
+}
+.item span{font-size:7px !important}
+.item b{font-size:8px !important}
+.breakdown{gap:4px !important}
+.teamBreak{
+  padding:6px !important;
+}
+.teamBreak h4{font-size:8px !important}
+.line{
+  padding:3px 0 !important;
+  font-size:7px !important;
+}
+.filePair{
+  gap:3px !important;
+}
+.fileRow{
+  padding:5px !important;
+}
+.fileRow span{font-size:7px !important}
+.fileRow b{font-size:7px !important}
+
+/* Replay area fills the available panel without its own scrollbar */
+.recordMain{
+  grid-template-rows:34px minmax(0,1fr) !important;
+  min-height:0;
+  overflow:hidden !important;
+}
+.recordPane{
+  min-height:0;
+  overflow:hidden !important;
+}
+.replayPanel{
+  height:100%;
+  min-height:0;
+  padding:7px !important;
+  grid-template-rows:minmax(0,1fr) 32px 86px !important;
+  gap:6px !important;
+  overflow:hidden !important;
+}
+
+/* Larger video viewport */
+.videoStage{
+  min-height:0 !important;
+  height:100%;
+  aspect-ratio:16 / 9;
+  width:auto;
+  max-width:100%;
+  justify-self:center;
+  align-self:center;
+}
+.videoStage video{
+  min-height:0 !important;
+  width:100%;
+  height:100%;
+  object-fit:contain;
+}
+
+/* Compact file/status row */
+.replayTools{
+  grid-template-columns:84px minmax(0,1fr) 90px !important;
+  gap:5px !important;
+}
+.fileLabel{
+  min-height:28px !important;
+  padding:5px 7px !important;
+  font-size:8px !important;
+}
+.videoStatus,
+.replayClock{
+  padding:5px 7px !important;
+  font-size:8px !important;
+}
+
+/* Timeline stays fully visible; event chips scroll horizontally only if there are many */
+.replayTimeline{
+  min-height:0;
+  padding:6px !important;
+  overflow:hidden !important;
+}
+.timelineLabels{
+  margin-bottom:5px !important;
+  font-size:7px !important;
+}
+.track{
+  margin-bottom:8px !important;
+}
+.replayEvents{
+  overflow-x:auto !important;
+  overflow-y:hidden !important;
+  padding-bottom:2px;
+}
+.replayEvent{
+  min-width:130px !important;
+  padding:5px 7px !important;
+  font-size:7px !important;
+}
+
+/* Score-log tab can still scroll, but replay should not */
+#scorelogPane{
+  overflow:auto !important;
+}
+
+/* Reduce hero height to give the replay more vertical room */
+.detail{
+  grid-template-rows:78px minmax(0,1fr) !important;
+}
+.hero{
+  padding:7px 10px !important;
+}
+.teamInfo h2{font-size:10px !important}
+.teamInfo p{font-size:7px !important}
+.score b{font-size:28px !important}
+.winner{font-size:7px !important}
+
+/* Make the history list slightly denser */
+.history{
+  padding:8px !important;
+}
+.matchItem{
+  padding:7px !important;
+}
+.matchTop b{font-size:8px !important}
+.matchTop span{font-size:7px !important}
+.matchTeams{font-size:7px !important}
+.matchTeams strong{font-size:11px !important}
+
+/* Common laptop heights: preserve replay first */
+@media (max-height:760px){
+  .detail{
+    grid-template-rows:70px minmax(0,1fr) !important;
+  }
+  .replayPanel{
+    grid-template-rows:minmax(0,1fr) 30px 76px !important;
+  }
+  .videoPlaceholder .playCircle{
+    width:46px !important;
+    height:46px !important;
+    font-size:18px !important;
+  }
+  .videoPlaceholder h3{font-size:10px !important}
+  .videoPlaceholder p{font-size:7px !important}
+}
+
+/* Wider screens: let the video dominate even more */
+@media (min-width:1440px){
+  .records{
+    grid-template-columns:270px minmax(0,1fr) !important;
+  }
+  .detailBody{
+    grid-template-columns:220px minmax(0,1fr) !important;
+  }
+}
+
+
+/* ===== player-terminal visual language sync ===== */
+:root{
+  --cyan:#22e7ff;
+  --blue:#1f8cff;
+  --green:#29f5a2;
+  --yellow:#ffbb3b;
+  --red:#ff4665;
+  --text:#dff9ff;
+  --muted:#83cff5;
+  --panel:rgba(5,35,68,.78);
+  --panelStrong:rgba(7,48,91,.92);
+  --glassLine:rgba(57,200,255,.45);
+  --glassSoft:rgba(92,210,255,.24);
+}
+html,body{
+  color:var(--text);
+  background:
+    radial-gradient(circle at 14% 20%,rgba(24,222,255,.15),transparent 26%),
+    radial-gradient(circle at 83% 12%,rgba(34,122,255,.18),transparent 30%),
+    linear-gradient(180deg,#020c1f 0%,#031a32 52%,#02101f 100%) !important;
+}
+body::before{
+  content:"";
+  position:fixed;
+  inset:-12%;
+  z-index:0;
+  pointer-events:none;
+  background:
+    linear-gradient(110deg,transparent 18%,rgba(43,225,255,.07) 22%,transparent 30%),
+    repeating-linear-gradient(90deg,rgba(45,194,255,.03) 0 1px,transparent 1px 82px),
+    repeating-linear-gradient(0deg,rgba(45,194,255,.025) 0 1px,transparent 1px 82px);
+  transform:rotate(-1deg);
+  animation:refAmbientDrift 18s linear infinite;
+}
+body::after{
+  content:"";
+  position:fixed;
+  inset:0;
+  z-index:0;
+  pointer-events:none;
+  background:
+    radial-gradient(ellipse at 50% 0%,rgba(84,218,255,.16),transparent 36%),
+    linear-gradient(180deg,rgba(0,0,0,0),rgba(0,10,26,.22));
+}
+.app{
+  position:relative;
+  z-index:1;
+  color:#dff9ff;
+  background:
+    linear-gradient(180deg,rgba(5,26,56,.76),rgba(1,13,30,.88)),
+    radial-gradient(circle at 50% 18%,rgba(40,205,255,.12),transparent 40%);
+  box-shadow:inset 0 0 58px rgba(0,166,255,.08);
+}
+.app::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  z-index:99;
+  pointer-events:none;
+  border:1px solid rgba(91,230,255,.20);
+  box-shadow:inset 0 0 0 1px rgba(24,151,255,.12),inset 0 0 60px rgba(10,128,219,.08);
+}
+.topbar{
+  border-bottom:1px solid rgba(32,171,247,.35) !important;
+  background:linear-gradient(180deg,rgba(3,23,51,.96),rgba(1,13,31,.82)) !important;
+  box-shadow:0 8px 26px rgba(0,0,0,.16);
+}
+.brand{gap:12px}
+.brand .logo{
+  width:43px;
+  height:29px;
+  border:3px solid #34d9ff;
+  border-right-width:0;
+  border-radius:72% 42% 54% 66%;
+  transform:skewX(-13deg);
+  box-shadow:0 0 14px rgba(47,218,255,.48);
+}
+.brand .logo::before{
+  left:auto;right:8px;top:9px;width:5px;height:5px;border-radius:50%;background:#fff;
+  box-shadow:0 0 7px #fff;
+}
+.brand .logo::after{
+  right:-9px;top:4px;width:13px;height:17px;border:3px solid #34d9ff;border-left:0;
+  border-radius:0 60% 60% 0;transform:rotate(45deg);
+}
+.brand b{
+  color:#f3fbff;
+  font-size:15px !important;
+  font-style:italic;
+  letter-spacing:.04em !important;
+  text-shadow:0 0 18px rgba(38,218,255,.28);
+}
+.brand b i{font-style:inherit}
+.brand b span{color:var(--cyan)}
+.brand small{color:#80cdec !important;font-size:8px !important;letter-spacing:.03em}
+.nav{
+  height:74%;
+  align-self:end;
+  gap:5px !important;
+}
+.nav button{
+  height:100%;
+  min-height:0 !important;
+  padding:0 13px !important;
+  border:1px solid rgba(70,178,255,.24) !important;
+  border-radius:0 0 8px 8px !important;
+  background:linear-gradient(180deg,rgba(12,58,108,.22),rgba(9,33,67,.72)) !important;
+  box-shadow:inset 0 -8px 20px rgba(0,136,255,.08);
+  color:#c6e9ff !important;
+  font-weight:800;
+  font-size:9px !important;
+}
+.nav button.active,
+.nav button:hover{
+  border-color:rgba(34,231,255,.88) !important;
+  background:linear-gradient(180deg,rgba(17,135,255,.70),rgba(5,42,88,.88)) !important;
+  box-shadow:0 0 24px rgba(21,191,255,.28),inset 0 -8px 20px rgba(42,234,255,.18) !important;
+  color:#f2fdff !important;
+}
+.nav button.active::after,
+.nav button:hover::after{
+  content:"";
+  position:absolute;
+  left:16%;right:16%;bottom:0;height:2px;border-radius:999px 999px 0 0;
+  background:#25efff;box-shadow:0 0 14px #25efff;
+}
+.nav button.done{color:#84ffd0 !important}
+.matchbar{
+  border-bottom:1px solid rgba(82,190,255,.18) !important;
+  background:linear-gradient(180deg,rgba(4,30,61,.76),rgba(3,18,40,.72)) !important;
+  box-shadow:inset 0 -12px 28px rgba(10,121,219,.04);
+}
+.matchbar small{color:#78bfe6 !important}
+.matchbar strong{color:#effcff}
+.teams b:first-child{color:#2de5ff !important;text-shadow:0 0 10px rgba(45,229,255,.16)}
+.teams b:last-child{color:#ff6b82 !important;text-shadow:0 0 10px rgba(255,70,101,.14)}
+.statusTop b{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:4px 8px;
+  border:1px solid rgba(43,241,174,.28);
+  border-radius:999px;
+  color:#75f3c2 !important;
+  background:rgba(12,92,70,.22);
+}
+.statusTop b::before{
+  content:"";width:6px;height:6px;border-radius:50%;background:#2bf0a6;box-shadow:0 0 8px #2bf0a6;
+}
+.panel,
+.lockBox,
+.actionBox,
+.modal,
+.recordTabs{
+  border-color:var(--glassLine) !important;
+  background:linear-gradient(180deg,rgba(8,43,84,.82),rgba(2,22,45,.92)) !important;
+  box-shadow:inset 0 0 26px rgba(36,183,255,.09),0 10px 28px rgba(0,0,0,.20) !important;
+}
+.panel::before,
+.lockBox::before,
+.actionBox::before,
+.recordTabs::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  border-radius:inherit;
+  background:
+    linear-gradient(110deg,transparent 0 35%,rgba(81,224,255,.07) 44%,transparent 55%),
+    radial-gradient(circle at 16% 0%,rgba(61,224,255,.13),transparent 34%);
+}
+.panel::after{
+  background:linear-gradient(180deg,rgba(255,255,255,.055),transparent 26%) !important;
+  opacity:.5;
+}
+.panel:hover{
+  border-color:rgba(39,238,255,.62) !important;
+  box-shadow:0 0 24px rgba(26,208,255,.13),inset 0 0 28px rgba(31,202,255,.12) !important;
+}
+.teamHead,
+.viewHead,
+.arenaHead,
+.historyHead,
+.events h3,
+.card h3,
+.lockBox h3,
+.summary h3,
+.timeline h3{
+  color:#f2fcff !important;
+  text-shadow:0 0 12px rgba(73,225,255,.10);
+}
+.teamCard.blue .teamHead h2,
+.blueTxt{color:#32e8ff !important}
+.teamCard.red .teamHead h2,
+.redTxt{color:#ff6680 !important}
+.player,
+.meta,
+.statusitem,
+.h,
+.item,
+.teamBreak,
+.fileRow,
+.event,
+.videoStatus,
+.replayClock,
+.replayTimeline,
+.selectGroup,
+.identity{
+  border-color:rgba(92,210,255,.17) !important;
+  background:linear-gradient(180deg,rgba(7,42,80,.62),rgba(4,28,56,.72)) !important;
+  box-shadow:inset 0 0 16px rgba(27,153,230,.04);
+}
+.player.done{
+  border-color:rgba(41,245,162,.30) !important;
+  background:linear-gradient(180deg,rgba(8,68,61,.52),rgba(4,36,45,.74)) !important;
+}
+.status{
+  border:1px solid rgba(92,210,255,.16);
+  background:rgba(8,47,88,.65) !important;
+  color:#9ddcff !important;
+}
+.done .status{
+  border-color:rgba(41,245,162,.28);
+  background:rgba(12,92,70,.23) !important;
+  color:#75f3c2 !important;
+}
+.badge{
+  border:1px solid rgba(57,213,255,.28) !important;
+  background:rgba(8,48,91,.58) !important;
+  color:#c8f3ff !important;
+  box-shadow:inset 0 0 12px rgba(39,197,255,.05);
+}
+.btn,
+.bigBtn,
+.quickBtns button,
+.fileLabel,
+.recordTabs button,
+.matchItem,
+.selectPlayer{
+  position:relative;
+  isolation:isolate;
+  overflow:hidden;
+  border-color:rgba(57,213,255,.42) !important;
+  transition:transform 160ms ease,box-shadow 160ms ease,border-color 160ms ease,filter 160ms ease;
+}
+.btn::before,
+.bigBtn::before,
+.quickBtns button::before,
+.fileLabel::before,
+.recordTabs button::before,
+.matchItem::before,
+.selectPlayer::before{
+  content:"";
+  position:absolute;
+  inset:-40% 110% -40% -70%;
+  z-index:-1;
+  pointer-events:none;
+  background:linear-gradient(105deg,transparent 35%,rgba(255,255,255,.30),transparent 64%);
+  transform:translateX(-40%);
+  transition:transform 420ms ease;
+}
+.btn:hover::before,
+.bigBtn:hover::before,
+.quickBtns button:hover::before,
+.fileLabel:hover::before,
+.recordTabs button:hover::before,
+.matchItem:hover::before,
+.selectPlayer:hover::before{transform:translateX(118%)}
+.btn:hover:not(:disabled),
+.bigBtn:hover:not(:disabled),
+.quickBtns button:hover:not(:disabled),
+.fileLabel:hover,
+.recordTabs button:hover,
+.matchItem:hover,
+.selectPlayer:hover:not(:disabled){filter:brightness(1.08) saturate(1.10);transform:translateY(-1px)}
+.bigBtn,
+.btn.good,
+.goalBtn{
+  background:linear-gradient(180deg,#25e8ff,#168bff) !important;
+  border-color:rgba(57,213,255,.62) !important;
+  box-shadow:0 0 18px rgba(22,171,255,.20) !important;
+  color:#02213e !important;
+  font-weight:900;
+}
+.btn.good{
+  background:linear-gradient(180deg,#49f0bd,#1fc58c) !important;
+  border-color:rgba(56,244,175,.56) !important;
+  color:#062b21 !important;
+  box-shadow:0 0 16px rgba(41,245,162,.14) !important;
+}
+.btn.warn,.outBtn{
+  background:linear-gradient(180deg,rgba(139,43,68,.95),rgba(91,27,48,.98)) !important;
+  border-color:rgba(255,70,101,.52) !important;
+  color:#ffe5ea !important;
+  box-shadow:0 0 14px rgba(255,70,101,.12) !important;
+}
+.assistBtn{
+  background:linear-gradient(180deg,rgba(32,173,127,.96),rgba(15,104,77,.98)) !important;
+  border-color:rgba(41,245,162,.45) !important;
+  color:#edfff8 !important;
+}
+.recordTabs button{
+  background:linear-gradient(180deg,rgba(12,58,108,.32),rgba(9,33,67,.78)) !important;
+  color:#bfe8ff !important;
+}
+.recordTabs button.active{
+  border-color:rgba(34,231,255,.82) !important;
+  background:linear-gradient(180deg,rgba(17,135,255,.64),rgba(5,42,88,.88)) !important;
+  color:#f2fdff !important;
+  box-shadow:0 0 18px rgba(21,191,255,.20),inset 0 -8px 20px rgba(42,234,255,.14) !important;
+}
+.matchItem.active{
+  border-color:rgba(34,231,255,.74) !important;
+  background:linear-gradient(180deg,rgba(14,88,143,.72),rgba(6,42,78,.86)) !important;
+  box-shadow:inset 3px 0 0 #22e7ff,0 0 16px rgba(34,231,255,.10) !important;
+}
+input,select{
+  border-color:rgba(92,210,255,.25) !important;
+  background:linear-gradient(180deg,rgba(6,37,72,.88),rgba(3,24,49,.96)) !important;
+  color:#e4faff !important;
+  box-shadow:inset 0 0 14px rgba(17,132,215,.05);
+}
+input:focus,select:focus{
+  border-color:rgba(34,231,255,.72) !important;
+  box-shadow:0 0 0 2px rgba(34,231,255,.08),inset 0 0 14px rgba(17,132,215,.07);
+}
+.arena{
+  border-color:rgba(57,213,255,.34) !important;
+  box-shadow:inset 0 0 34px rgba(45,222,255,.08),0 0 18px rgba(19,138,212,.10);
+  background:
+    radial-gradient(circle at 50% 43%,rgba(50,212,238,.28),transparent 31%),
+    linear-gradient(180deg,#197da6,#0a4568) !important;
+}
+.arena::after{
+  content:"";
+  position:absolute;
+  left:0;right:0;top:-20%;height:24%;z-index:2;pointer-events:none;
+  background:linear-gradient(180deg,transparent,rgba(165,240,255,.05),transparent);
+  animation:refArenaScan 6.5s linear infinite;
+}
+.pool{box-shadow:inset 0 0 26px rgba(112,224,255,.035)}
+.recState{
+  border-color:rgba(92,210,255,.20) !important;
+  background:rgba(8,47,88,.60) !important;
+  color:#a8ddf5 !important;
+}
+.recState.on{
+  border-color:rgba(255,70,101,.40) !important;
+  background:rgba(101,25,45,.34) !important;
+  color:#ff9caf !important;
+}
+.recState.saved{
+  border-color:rgba(41,245,162,.34) !important;
+  background:rgba(12,92,70,.25) !important;
+  color:#75f3c2 !important;
+}
+.videoStage{
+  border-color:rgba(57,213,255,.30) !important;
+  background:#020b18 !important;
+  box-shadow:inset 0 0 34px rgba(26,167,229,.05);
+}
+.videoPlaceholder{
+  background:
+    radial-gradient(circle at 50% 42%,rgba(35,146,189,.28),transparent 34%),
+    linear-gradient(180deg,#083554,#03182d) !important;
+}
+.playCircle{
+  border-color:rgba(34,231,255,.62) !important;
+  background:rgba(13,101,148,.36) !important;
+  color:#9bf4ff !important;
+  box-shadow:0 0 22px rgba(34,231,255,.14);
+}
+.event{border-left-color:#22e7ff !important}
+.event.red{border-left-color:#ff4665 !important}
+.eventMark{background:#22e7ff !important;box-shadow:0 0 0 2px rgba(34,231,255,.20) !important}
+.eventMark.red{background:#ff4665 !important;box-shadow:0 0 0 2px rgba(255,70,101,.18) !important}
+.replayEvent{border-left-color:#22e7ff !important}
+.replayEvent.red{border-left-color:#ff4665 !important}
+.modalWrap{
+  background:rgba(1,8,18,.76) !important;
+  backdrop-filter:blur(8px) saturate(1.1);
+}
+.modal{
+  border:1px solid rgba(75,211,255,.42) !important;
+  border-radius:16px !important;
+  background:linear-gradient(180deg,rgba(5,29,59,.97),rgba(3,16,33,.98)) !important;
+  box-shadow:0 28px 80px rgba(0,0,0,.46),inset 0 0 50px rgba(22,171,255,.09) !important;
+}
+.avatar{
+  border-color:rgba(44,224,255,.72) !important;
+  background:linear-gradient(145deg,#26dfff,#156eff) !important;
+  color:#03152b !important;
+  box-shadow:0 0 18px rgba(45,223,255,.24);
+}
+.toast{
+  border-color:rgba(57,213,255,.38) !important;
+  background:linear-gradient(180deg,rgba(8,48,91,.95),rgba(4,27,55,.98)) !important;
+  color:#e4fbff !important;
+  box-shadow:0 12px 34px rgba(0,0,0,.30),0 0 20px rgba(22,171,255,.10) !important;
+}
+.footer{
+  border-top:1px solid rgba(31,171,255,.25) !important;
+  background:rgba(1,12,27,.72) !important;
+  color:#83cff5 !important;
+}
+@keyframes refAmbientDrift{
+  from{transform:translate3d(-1.5%,0,0) rotate(-1deg)}
+  to{transform:translate3d(1.5%,0,0) rotate(-1deg)}
+}
+@keyframes refArenaScan{
+  0%{transform:translateY(-10%)}
+  100%{transform:translateY(560%)}
+}
+@media(prefers-reduced-motion:reduce){
+  body::before,.arena::after{animation:none!important}
+}
+
+
+/* ===== referee v13: player-owned device confirmation ===== */
+.deviceConfirmCard{
+  padding:9px;
+  display:grid;
+  gap:7px;
+  border-color:rgba(53,199,255,.24);
+}
+.deviceConfirmHead{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:8px;
+}
+.deviceConfirmHead h3{
+  margin:0;
+  font-size:10px;
+}
+.deviceConfirmHead p{
+  margin:2px 0 0;
+  color:#73a7c2;
+  font-size:7px;
+}
+.deviceConfirmHead>b{
+  padding:4px 7px;
+  border:1px solid rgba(57,216,255,.22);
+  border-radius:999px;
+  background:rgba(6,51,82,.65);
+  color:#bdeeff;
+  font-size:8px;
+}
+.deviceConfirmList{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:5px;
+}
+.deviceConfirmRow{
+  min-width:0;
+  display:grid;
+  grid-template-columns:31px minmax(0,1fr) auto;
+  align-items:center;
+  gap:5px;
+  padding:6px;
+  border:1px solid rgba(72,178,228,.12);
+  border-radius:7px;
+  background:rgba(5,28,52,.68);
+}
+.deviceConfirmRow.blue{border-left:3px solid #39cfff}
+.deviceConfirmRow.red{border-left:3px solid #ff6179}
+.deviceSlot{
+  display:grid;
+  place-items:center;
+  width:29px;
+  height:29px;
+  border-radius:6px;
+  background:#0a3456;
+  color:#8cecff;
+  font-size:8px;
+  font-weight:900;
+}
+.deviceConfirmRow.red .deviceSlot{
+  background:#4a2130;
+  color:#ffb1bd;
+}
+.devicePerson{
+  min-width:0;
+}
+.devicePerson b,
+.devicePerson small{
+  display:block;
+  overflow:hidden;
+  white-space:nowrap;
+  text-overflow:ellipsis;
+}
+.devicePerson b{font-size:8px}
+.devicePerson small{margin-top:1px;color:#739fb7;font-size:7px}
+.deviceResult{
+  padding:3px 5px;
+  border-radius:999px;
+  background:#0a2d49;
+  color:#87abc0;
+  font-size:7px;
+  white-space:nowrap;
+}
+.deviceConfirmRow.testing .deviceResult{
+  color:#ffe19a;
+  background:rgba(105,76,25,.34);
+}
+.deviceConfirmRow.ok{
+  border-color:rgba(65,230,162,.22);
+}
+.deviceConfirmRow.ok .deviceResult{
+  color:#9effcb;
+  background:rgba(20,104,72,.32);
+}
+.deviceConfirmRow.fault{
+  border-color:rgba(255,100,121,.32);
+}
+.deviceConfirmRow.fault .deviceResult{
+  color:#ffb4bf;
+  background:rgba(111,28,45,.38);
+}
+#openDeviceTestBtn{
+  width:100%;
+}
+.side{
+  grid-template-rows:auto auto auto auto auto auto auto !important;
+}
+
+</style>
+</head>
+<body>
+<div class="app">
+<header class="topbar">
+ <div class="brand"><span class="logo"></span><div><b><i>FISH</i> <span>CONTROL</span></b><small>赛事裁判工作台 · REFEREE TERMINAL</small></div></div>
+ <nav class="nav">
+  <button class="active" data-page="signup">1 签到</button>
+  <button data-page="calibration">2 场地调整</button>
+  <button data-page="match">3 比赛</button>
+  <button data-page="records">4 比赛记录</button>
+ </nav>
+</header>
+<section class="matchbar">
+ <div><small>当前比赛</small><strong>第 08 场 · 学生组 · A 赛场</strong></div>
+ <div class="teams"><b>海洋先锋队</b><span>VS</span><b>深海动力队</b></div>
+ <div class="statusTop"><small>当前状态</small><b id="globalState">签到中</b></div>
+</section>
+
+<main class="main">
+ <section id="signup" class="page signup">
+  <section class="teamCard blue panel"><div class="teamHead"><h2>蓝队 · 海洋先锋队</h2><span>B1 / B2</span></div><div class="players" id="bluePlayers"></div></section>
+  <section class="centerAction"><div class="actionBox"><div class="actionIcon">＋</div><h3>选手签到</h3><p>由裁判指定本次签到人员</p><button class="bigBtn" id="openSignup">+ 选手签到</button><button class="btn good nextBtn" id="signupNext" disabled>签到未完成</button></div></section>
+  <section class="teamCard red panel"><div class="teamHead"><h2>红队 · 深海动力队</h2><span>R1 / R2</span></div><div class="players" id="redPlayers"></div></section>
+ </section>
+
+ <section id="calibration" class="page calibration hidden">
+  <section class="viewCard panel"><div class="viewHead"><h2>实时场地画面</h2><div class="badges"><span class="badge">LIVE</span><span class="badge" id="resBadge">1920 × 1080</span><span class="badge" id="fpsBadge">30 FPS</span></div></div>
+   <div class="arena"><div class="pool"></div><span class="mark m1">1</span><span class="mark m2">2</span><span class="mark m4">4</span><span class="mark m3">3</span><span class="axisX"></span><span class="axisY"></span><div class="crop" id="crop"></div><span class="fish blue f1"></span><span class="fish blue f2"></span><span class="fish red f3"></span><span class="fish red f4"></span><span class="ball"></span></div>
+   <div class="viewFoot"><span class="badge">Mark #1 原点 · #1→#2 +X · #1→#3 +Y</span><button class="btn" id="snapshotBtn">保存截图</button></div>
+  </section>
+  <aside class="side">
+   <section class="card panel"><h3>摄像头</h3><div class="formrow"><label>分辨率</label><select id="resolution"><option>1280 × 720</option><option selected>1920 × 1080</option><option>2600 × 2160</option></select></div><div class="formrow"><label>帧率</label><select id="fpsSelect"><option>30 FPS</option><option>25 FPS</option><option>20 FPS</option><option>15 FPS</option></select></div><button class="btn wide" id="applyCameraBtn">应用采集参数</button></section>
+   <section class="card panel"><h3>画面</h3><div class="formrow"><label>曝光</label><input id="exposureRange" type="range" min="0" max="100" value="42"></div><div class="inlineStatus"><span>当前曝光</span><b id="exposureValue">42%</b></div></section>
+   <section class="card panel"><h3>裁剪</h3><div class="formrow"><label>边距</label><input id="cropRange" type="range" min="0" max="15" value="6"></div><div class="twoBtns"><button class="btn" id="applyCropBtn">应用裁剪</button><button class="btn" id="resetCropBtn">恢复全画面</button></div></section>
+   <section class="card panel"><h3>场地尺寸</h3><div class="formrow"><label>宽度 X</label><input type="number" value="3.14" step=".01"></div><div class="formrow"><label>高度 Y</label><input type="number" value="1.60" step=".01"></div></section>
+   <section class="card panel"><h3>场地状态</h3><div class="statuslist"><div class="statusitem"><span>Mark</span><b>4 / 4</b></div><div class="statusitem"><span>坐标</span><b>FIELD</b></div><div class="statusitem"><span>目标</span><b>5 / 5</b></div></div></section>
+   <section class="deviceConfirmCard panel">
+    <div class="deviceConfirmHead"><div><h3>设备确认</h3><p>由选手自己测试并回传结果</p></div><b id="deviceConfirmCount">0 / 4</b></div>
+    <div class="deviceConfirmList" id="deviceConfirmList"></div>
+    <button class="btn" id="openDeviceTestBtn" disabled>先锁定场地</button>
+   </section>
+   <section class="lockBox"><h3>赛前准备</h3><p id="preMatchHint">先锁定场地，再开放选手设备测试。</p><button class="btn good" id="lockCal">✓ 锁定场地调整</button><button class="btn nextBtn" id="calNext" disabled>等待设备确认 0 / 4</button></section>
+  </aside>
+ </section>
+
+ <section id="match" class="page match hidden">
+  <section class="scorebar panel"><div class="sideScore"><span>蓝队</span><b class="blueTxt" id="blueScore">36</b></div><div class="clock"><strong id="clock">01:28</strong><small id="clockState">剩余时间</small></div><div class="sideScore red"><b class="redTxt" id="redScore">24</b><span>红队</span></div></section>
+  <section class="arenaCard panel"><div class="arenaHead"><h2>比赛画面</h2><span>Mark 4/4 · FIELD · 视觉已锁定</span></div><div class="arena"><div class="pool"><span class="goal l"></span><span class="goal r"></span></div><span class="mark m1">1</span><span class="mark m2">2</span><span class="mark m4">4</span><span class="mark m3">3</span><span class="fish blue f1"><span>B1</span></span><span class="fish blue f2"><span>B2</span></span><span class="fish red f3"><span>R1</span></span><span class="fish red f4"><span>R2</span></span><span class="ball"></span></div><div class="arenaFoot"><span>B1 / B2 / R1 / R2 在线</span><span>目标 5 / 5</span></div></section>
+  <aside class="scoreSidePanel">
+   <section class="teamQuick panel"><div class="teamQuickHead"><h3 class="blueTxt">蓝队</h3><b id="blueQuick">36</b></div><div class="quickBtns"><button class="goalBtn" data-team="blue" data-score="10">⚽ 进球<br>+10</button><button class="assistBtn" data-team="blue" data-score="2">⇄ 配合<br>+2</button><button class="outBtn" data-team="blue" data-score="-2">⚠ 越界<br>-2</button></div></section>
+   <section class="teamQuick panel"><div class="teamQuickHead"><h3 class="redTxt">红队</h3><b id="redQuick">24</b></div><div class="quickBtns"><button class="goalBtn" data-team="red" data-score="10">⚽ 进球<br>+10</button><button class="assistBtn" data-team="red" data-score="2">⇄ 配合<br>+2</button><button class="outBtn" data-team="red" data-score="-2">⚠ 越界<br>-2</button></div></section>
+   <section class="events panel"><h3>计分记录</h3><div class="eventList" id="eventList"></div></section>
+  </aside>
+  <section class="recordStrip panel">
+   <label>录像保存路径</label>
+   <input class="recordPath" id="recordPath" value="/data/fish/matches" spellcheck="false">
+   <span class="recState" id="recState">● 未录制</span>
+   <button class="btn" id="savePathBtn">保存路径</button>
+  </section>
+  <section class="bottom"><section class="health panel"><div class="h"><span>签到</span><b>4 / 4</b></div><div class="h"><span>设备</span><b>4 / 4</b></div><div class="h"><span>场地</span><b>已锁定</b></div><div class="h"><span>同步</span><b>正常</b></div></section><section class="controls panel"><button class="btn good" id="startBtn">开始比赛</button><button class="btn" id="pauseBtn">暂停比赛</button><button class="btn warn" id="endBtn">结束比赛</button></section></section>
+ </section>
+
+ <section id="records" class="page records hidden">
+  <aside class="history panel"><div class="historyHead"><h2>历史比赛</h2><span id="historyCount"></span></div><div class="filters"><input id="search" placeholder="搜索队伍 / 场次"><select id="groupFilter"><option value="all">全部组别</option><option>学生组</option><option>公开组</option></select></div><div class="matchList" id="matchList"></div></aside>
+  <section class="detail"><section class="hero panel"><div class="teamInfo"><h2 class="blueTxt" id="histBlueTeam"></h2><p id="histBluePlayers"></p></div><div><div class="score"><b class="blueTxt" id="histBlueScore"></b><em>:</em><b class="redTxt" id="histRedScore"></b></div><span class="winner" id="histWinner"></span></div><div class="teamInfo red"><h2 class="redTxt" id="histRedTeam"></h2><p id="histRedPlayers"></p></div></section>
+   <section class="detailBody">
+    <aside class="summary panel">
+     <div class="summaryGrid"><div class="item"><span>场次</span><b id="histNo"></b></div><div class="item"><span>组别</span><b id="histGroup"></b></div><div class="item"><span>赛场</span><b id="histArena"></b></div><div class="item"><span>结束时间</span><b id="histEnd"></b></div></div>
+     <div class="breakdown"><div class="teamBreak"><h4 class="blueTxt">蓝队</h4><div class="line"><span>进球</span><b id="hbg"></b></div><div class="line"><span>配合</span><b id="hba"></b></div><div class="line"><span>越界</span><b id="hbo"></b></div></div><div class="teamBreak"><h4 class="redTxt">红队</h4><div class="line"><span>进球</span><b id="hrg"></b></div><div class="line"><span>配合</span><b id="hra"></b></div><div class="line"><span>越界</span><b id="hro"></b></div></div></div>
+     <div class="item"><span>文件状态</span><b id="histVideoStatus">等待读取</b></div>
+     <div class="filePair">
+      <div class="fileRow"><span>视频文件</span><b id="histVideoFile">-</b></div>
+      <div class="fileRow"><span>计分 JSON</span><b id="histJsonFile">-</b></div>
+      <div class="fileRow"><span>保存目录</span><b id="histSavePath">-</b></div>
+     </div>
+    </aside>
+    <section class="recordMain">
+     <div class="recordTabs">
+      <button class="active" data-record-tab="replay">视频回放</button>
+      <button data-record-tab="scorelog">计分记录</button>
+     </div>
+     <section id="replayPane" class="recordPane replayPanel panel">
+      <div class="videoStage">
+       <video id="replayVideo" controls preload="metadata"></video>
+       <div class="videoPlaceholder" id="videoPlaceholder"><div><div class="playCircle">▶</div><h3>本场视频回放</h3><p>载入本场录像后，可通过计分事件快速跳转。</p></div></div>
+      </div>
+      <div class="replayTools">
+       <label class="fileLabel">载入录像<input id="videoFile" type="file" accept="video/*"></label>
+       <div class="videoStatus" id="videoFileName">尚未载入录像文件</div>
+       <div class="replayClock"><span id="videoElapsed">00:00</span> / <span id="videoDuration">--:--</span></div>
+      </div>
+      <div class="replayTimeline">
+       <div class="timelineLabels"><span>比赛开始 03:00</span><span>比赛结束 00:00</span></div>
+       <div class="track" id="replayTrack"></div>
+       <div class="replayEvents" id="replayEvents"></div>
+      </div>
+     </section>
+     <section id="scorelogPane" class="recordPane timeline panel hidden"><div class="table" id="recordTable"></div></section>
+    </section>
+   </section>
+  </section>
+ </section>
+</main>
+
+<div class="ambientDock" aria-hidden="true">
+  <div class="ambientLine"></div>
+  <i class="bubble b1"></i><i class="bubble b2"></i><i class="bubble b3"></i><i class="bubble b4"></i><i class="bubble b5"></i>
+</div>
+<footer class="footer"><span>网络正常 · 视觉正常 · 延迟 8ms</span><span>FISH CONTROL · REFEREE</span></footer>
+</div>
+
+<div class="modalWrap" id="modal">
+ <div class="modal">
+  <div class="modalHead"><h2 id="modalTitle">选择签到选手</h2><button class="close" id="close">×</button></div>
+  <div id="selectStep"><div class="selectGrid"><section class="selectGroup blue"><h3>蓝队 · 海洋先锋队</h3><div id="blueSelect"></div></section><section class="selectGroup red"><h3>红队 · 深海动力队</h3><div id="redSelect"></div></section></div></div>
+  <div class="confirmCard" id="confirmStep"><div class="identity"><div class="avatar" id="avatar"></div><div><h3 id="confirmName"></h3><p id="confirmTeam"></p></div></div><div class="confirmMeta"><div class="meta"><span>选手编号</span><strong id="confirmId"></strong></div><div class="meta"><span>席位</span><strong id="confirmSlot"></strong></div><div class="meta"><span>机器鱼</span><strong id="confirmFish"></strong></div><div class="meta"><span>状态</span><strong>待确认</strong></div></div><div class="confirmActions"><button class="btn" id="back">返回</button><button class="btn good" id="confirmBtn">确认签到</button></div></div>
+ </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const state={
+ page:'signup',calLocked:false,deviceTestOpen:false,deviceConfirmed:{B1:'waiting',B2:'waiting',R1:'waiting',R2:'waiting'},match:'waiting',seconds:88,blue:36,red:24,endTime:null,recording:false,savePath:'/data/fish/matches',currentBase:null,
+ players:[
+  {slot:'B1',name:'陈同学',id:'STU-24018',team:'蓝队 · 海洋先锋队',fish:'B1-03',side:'blue',done:false,time:null},
+  {slot:'B2',name:'李同学',id:'STU-24027',team:'蓝队 · 海洋先锋队',fish:'B2-07',side:'blue',done:false,time:null},
+  {slot:'R1',name:'王同学',id:'STU-24031',team:'红队 · 深海动力队',fish:'R1-05',side:'red',done:false,time:null},
+  {slot:'R2',name:'赵同学',id:'STU-24039',team:'红队 · 深海动力队',fish:'R2-02',side:'red',done:false,time:null}
+ ],
+ stats:{blue:{g:3,a:4,o:1},red:{g:2,a:3,o:1}},
+ events:[
+  {matchTime:'01:36',time:'14:32:43',team:'蓝队',text:'B2 完成配合',score:'+2',type:'a'},
+  {matchTime:'01:58',time:'14:31:18',team:'红队',text:'R1 进球',score:'+10',type:'g'}
+ ]
+};
+let selectedPlayer=null,timer=null,historySelected=8,replayObjectUrl=null;
+const MATCH_DURATION=180;
+const $=id=>document.getElementById(id);
+const bluePlayers=$('bluePlayers'), redPlayers=$('redPlayers'), openSignup=$('openSignup'), signupNext=$('signupNext');
+const modal=$('modal'), modalTitle=$('modalTitle'), closeBtn=$('close'), selectStep=$('selectStep'), confirmStep=$('confirmStep');
+const avatar=$('avatar'), confirmName=$('confirmName'), confirmTeam=$('confirmTeam'), confirmId=$('confirmId'), confirmSlot=$('confirmSlot'), confirmFish=$('confirmFish'), back=$('back'), confirmBtn=$('confirmBtn');
+const cropRange=$('cropRange'), crop=$('crop'), lockCal=$('lockCal'), calNext=$('calNext'), openDeviceTestBtn=$('openDeviceTestBtn'), deviceConfirmList=$('deviceConfirmList'), deviceConfirmCount=$('deviceConfirmCount'), preMatchHint=$('preMatchHint');
+const blueScore=$('blueScore'), blueQuick=$('blueQuick'), redScore=$('redScore'), redQuick=$('redQuick'), clock=$('clock'), clockState=$('clockState'), eventList=$('eventList');
+const recordPath=$('recordPath'), recState=$('recState'), savePathBtn=$('savePathBtn'), startBtn=$('startBtn'), pauseBtn=$('pauseBtn'), endBtn=$('endBtn');
+const historyCount=$('historyCount'), search=$('search'), groupFilter=$('groupFilter'), matchList=$('matchList');
+const histBlueTeam=$('histBlueTeam'), histBluePlayers=$('histBluePlayers'), histBlueScore=$('histBlueScore'), histRedScore=$('histRedScore'), histWinner=$('histWinner'), histRedTeam=$('histRedTeam'), histRedPlayers=$('histRedPlayers');
+const histNo=$('histNo'), histGroup=$('histGroup'), histArena=$('histArena'), histEnd=$('histEnd'), hbg=$('hbg'), hba=$('hba'), hbo=$('hbo'), hrg=$('hrg'), hra=$('hra'), hro=$('hro');
+const histVideoStatus=$('histVideoStatus'), histVideoFile=$('histVideoFile'), histJsonFile=$('histJsonFile'), histSavePath=$('histSavePath');
+const replayPane=$('replayPane'), replayVideo=$('replayVideo'), videoPlaceholder=$('videoPlaceholder'), videoFile=$('videoFile'), videoFileName=$('videoFileName'), videoElapsed=$('videoElapsed'), videoDuration=$('videoDuration'), replayTrack=$('replayTrack'), replayEvents=$('replayEvents'), scorelogPane=$('scorelogPane'), recordTable=$('recordTable');
+const resBadge=$('resBadge'), fpsBadge=$('fpsBadge'), snapshotBtn=$('snapshotBtn'), resolution=$('resolution'), fpsSelect=$('fpsSelect'), applyCameraBtn=$('applyCameraBtn'), exposureRange=$('exposureRange'), exposureValue=$('exposureValue'), applyCropBtn=$('applyCropBtn'), resetCropBtn=$('resetCropBtn');
+const history=[
+ {id:8,no:'第 08 场',group:'学生组',arena:'A 赛场',date:'2026-09-14',end:'14:34:12',savePath:'/data/fish/matches',videoFile:'match_008_20260914_143012.mp4',jsonFile:'match_008_20260914_143012.json',blue:{team:'海洋先锋队',players:'B1 陈同学 · B2 李同学',score:36,g:3,a:4,o:1},red:{team:'深海动力队',players:'R1 王同学 · R2 赵同学',score:24,g:2,a:3,o:1},events:[['01:36','14:32:43','蓝队','B2 完成配合','+2'],['01:58','14:31:18','红队','R1 进球','+10']]},
+ {id:7,no:'第 07 场',group:'学生组',arena:'A 赛场',date:'2026-09-14',end:'13:58:47',savePath:'/data/fish/matches',videoFile:'match_007_20260914_135547.mp4',jsonFile:'match_007_20260914_135547.json',blue:{team:'未来水手队',players:'B1 周同学 · B2 林同学',score:18,g:1,a:5,o:1},red:{team:'深蓝实验室',players:'R1 孙同学 · R2 郑同学',score:28,g:2,a:5,o:1},events:[['00:42','13:58:05','红队','R2 进球','+10'],['01:09','13:57:38','蓝队','B1 配合','+2']]},
+ {id:6,no:'第 06 场',group:'学生组',arena:'B 赛场',date:'2026-09-14',end:'13:22:15',savePath:'/data/fish/matches',videoFile:'match_006_20260914_132215.mp4',jsonFile:'match_006_20260914_132215.json',blue:{team:'海洋先锋队',players:'B1 陈同学 · B2 李同学',score:30,g:3,a:1,o:1},red:{team:'蓝鲸少年队',players:'R1 吴同学 · R2 徐同学',score:30,g:3,a:1,o:1},events:[['00:18','13:21:57','蓝队','B1 进球','+10'],['00:55','13:21:20','红队','R2 进球','+10']]},
+ {id:5,no:'第 05 场',group:'公开组',arena:'A 赛场',date:'2026-09-14',end:'12:46:31',savePath:'/data/fish/matches',videoFile:'match_005_20260914_124631.mp4',jsonFile:'match_005_20260914_124631.json',blue:{team:'水动力实验室',players:'B1 A选手 · B2 B选手',score:42,g:4,a:2,o:1},red:{team:'仿生机动队',players:'R1 C选手 · R2 D选手',score:32,g:3,a:2,o:1},events:[['00:26','12:46:05','蓝队','B2 进球','+10'],['01:13','12:45:18','红队','R1 进球','+10']]}
+];
+function now(){return new Date().toLocaleTimeString('zh-CN',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})}
+function fmt(s){return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`}
+function toast(t){const el=document.getElementById('toast');el.textContent=t;el.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>el.classList.remove('show'),1300)}
+function show(page){state.page=page;document.querySelectorAll('.page').forEach(x=>x.classList.toggle('hidden',x.id!==page));document.querySelectorAll('.nav button').forEach(x=>x.classList.toggle('active',x.dataset.page===page));document.getElementById('globalState').textContent=page==='signup'?'签到中':page==='calibration'?(state.calLocked?'场地已锁定':'场地调整'):page==='match'?(state.match==='running'?'比赛进行中':state.match==='paused'?'比赛暂停':state.match==='ended'?'比赛已结束':'等待比赛'):'比赛记录'}
+document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>show(b.dataset.page));
+function renderSignup(){
+ const card=p=>`<article class="player ${p.done?'done':''}"><div class="playerTop"><b>${p.slot} · ${p.name}</b><span class="status">${p.done?'✓ 已签到':'○ 未签到'}</span></div><div class="playerMeta"><div class="meta"><span>编号</span><strong>${p.id}</strong></div><div class="meta"><span>机器鱼</span><strong>${p.fish}</strong></div><div class="meta"><span>席位</span><strong>${p.slot}</strong></div></div><div class="playerTime">${p.done?'签到时间 '+p.time:'等待裁判签到'}</div></article>`;
+ bluePlayers.innerHTML=state.players.filter(p=>p.side==='blue').map(card).join('');redPlayers.innerHTML=state.players.filter(p=>p.side==='red').map(card).join('');
+ const n=state.players.filter(p=>p.done).length;signupNext.disabled=n!==4;signupNext.textContent=n===4?'签到完成 · 进入场地调整':'签到未完成';renderSelect();
+}
+function renderSelect(){['blue','red'].forEach(side=>document.getElementById(side+'Select').innerHTML=state.players.filter(p=>p.side===side).map(p=>`<button class="selectPlayer" data-slot="${p.slot}" ${p.done?'disabled':''}><div><b>${p.slot} · ${p.name}</b><small>${p.id} · ${p.fish}</small></div><span>${p.done?'已签到':'选择 →'}</span></button>`).join(''));document.querySelectorAll('.selectPlayer').forEach(b=>b.onclick=()=>openConfirm(b.dataset.slot))}
+function openConfirm(slot){selectedPlayer=state.players.find(p=>p.slot===slot);selectStep.style.display='none';confirmStep.classList.add('show');modalTitle.textContent='核对签到信息';avatar.textContent=selectedPlayer.slot;confirmName.textContent=selectedPlayer.name;confirmTeam.textContent=selectedPlayer.team;confirmId.textContent=selectedPlayer.id;confirmSlot.textContent=selectedPlayer.slot;confirmFish.textContent=selectedPlayer.fish}
+openSignup.onclick=()=>{selectStep.style.display='block';confirmStep.classList.remove('show');modal.classList.add('show');renderSelect()};closeBtn.onclick=()=>modal.classList.remove('show');back.onclick=()=>{selectStep.style.display='block';confirmStep.classList.remove('show')};confirmBtn.onclick=()=>{selectedPlayer.done=true;selectedPlayer.time=now();modal.classList.remove('show');renderSignup();toast('签到成功')};signupNext.onclick=()=>show('calibration');
+cropRange.oninput=e=>{const v=Number(e.target.value);crop.style.left=v+'%';crop.style.right=v+'%';crop.style.top=Math.max(0,v-1)+'%';crop.style.bottom=Math.max(0,v-1)+'%'};lockCal.onclick=()=>{
+ state.calLocked=!state.calLocked;
+ if(!state.calLocked){
+   state.deviceTestOpen=false;
+   state.deviceConfirmed={B1:'waiting',B2:'waiting',R1:'waiting',R2:'waiting'};
+ }
+ lockCal.textContent=state.calLocked?'🔒 场地调整已锁定':'✓ 锁定场地调整';
+ renderDeviceConfirm();
+ renderMatch();
+ toast(state.calLocked?'场地调整已锁定，可开放设备测试':'场地调整已解锁');
+};
+openDeviceTestBtn.onclick=()=>{
+ if(!state.calLocked||state.deviceTestOpen)return;
+ state.deviceTestOpen=true;
+ state.deviceConfirmed={B1:'testing',B2:'testing',R1:'testing',R2:'testing'};
+ renderDeviceConfirm();
+ toast('设备测试已开放 · 等待选手自行确认');
+ const sequence=['B1','B2','R1','R2'];
+ sequence.forEach((slot,index)=>{
+   setTimeout(()=>{
+     if(!state.deviceTestOpen)return;
+     state.deviceConfirmed[slot]='ok';
+     renderDeviceConfirm();
+     if(index===sequence.length-1)toast('4 / 4 设备已由选手确认正常');
+   },900+index*650);
+ });
+};
+calNext.onclick=()=>{
+ const ok=Object.values(state.deviceConfirmed).filter(v=>v==='ok').length;
+ if(!(state.calLocked&&state.deviceTestOpen&&ok===4)){toast('需等待 4 / 4 选手设备确认');return}
+ show('match');
+};
+
+
+function renderDeviceConfirm(){
+ const meta={
+  B1:{name:'陈同学',fish:'B1-03',side:'blue'},
+  B2:{name:'李同学',fish:'B2-07',side:'blue'},
+  R1:{name:'王同学',fish:'R1-05',side:'red'},
+  R2:{name:'赵同学',fish:'R2-02',side:'red'}
+ };
+ const labels={waiting:'未测试',testing:'测试中',ok:'✓ 已确认正常',fault:'⚠ 设备异常'};
+ deviceConfirmList.innerHTML=Object.entries(state.deviceConfirmed).map(([slot,status])=>{
+   const m=meta[slot];
+   return `<div class="deviceConfirmRow ${m.side} ${status}">
+     <span class="deviceSlot">${slot}</span>
+     <span class="devicePerson"><b>${m.name}</b><small>${m.fish}</small></span>
+     <span class="deviceResult">${labels[status]}</span>
+   </div>`;
+ }).join('');
+ const ok=Object.values(state.deviceConfirmed).filter(v=>v==='ok').length;
+ deviceConfirmCount.textContent=`${ok} / 4`;
+ if(!state.calLocked){
+   openDeviceTestBtn.disabled=true;
+   openDeviceTestBtn.textContent='先锁定场地';
+   calNext.disabled=true;
+   calNext.textContent='等待场地锁定';
+   preMatchHint.textContent='先锁定场地，再开放选手设备测试。';
+ }else if(!state.deviceTestOpen){
+   openDeviceTestBtn.disabled=false;
+   openDeviceTestBtn.textContent='开放设备测试';
+   calNext.disabled=true;
+   calNext.textContent='等待开放设备测试';
+   preMatchHint.textContent='场地已锁定。开放测试后，选手可受限试动并自行确认设备状态。';
+ }else if(ok<4){
+   openDeviceTestBtn.disabled=true;
+   openDeviceTestBtn.textContent='设备测试已开放';
+   calNext.disabled=true;
+   calNext.textContent=`等待设备确认 ${ok} / 4`;
+   preMatchHint.textContent='等待 B1 / B2 / R1 / R2 从选手端回传确认结果。';
+ }else{
+   openDeviceTestBtn.disabled=true;
+   openDeviceTestBtn.textContent='✓ 设备确认完成';
+   calNext.disabled=false;
+   calNext.textContent='进入比赛';
+   preMatchHint.textContent='4 / 4 设备均由选手确认正常，可以进入比赛。';
+ }
+}
+
+function bumpEl(el){
+ if(!el)return;
+ el.classList.remove('scoreBump');
+ void el.offsetWidth;
+ el.classList.add('scoreBump');
+}
+
+function renderMatch(){blueScore.textContent=blueQuick.textContent=state.blue;redScore.textContent=redQuick.textContent=state.red;clock.textContent=fmt(state.seconds);clockState.textContent=state.match==='paused'?'比赛暂停':state.match==='ended'?'比赛结束':'剩余时间';eventList.innerHTML=state.events.map(e=>`<div class="event ${e.team==='红队'?'red':''}"><small>${e.matchTime} · ${e.time}</small><span>${e.team} · ${e.text}</span><b>${e.score}</b></div>`).join('')}
+
+function pad3(n){return String(n).padStart(3,'0')}
+function compactStamp(d=new Date()){
+ const p=n=>String(n).padStart(2,'0');
+ return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+}
+function updateRecState(kind,textValue){
+ recState.className='recState'+(kind?' '+kind:'');
+ recState.textContent=textValue;
+}
+function buildJsonRecord(){
+ return {
+  schemaVersion:1,
+  match:{id:8,no:'第 08 场',group:'学生组',arena:'A 赛场'},
+  files:{video:state.currentBase+'.mp4',json:state.currentBase+'.json',directory:state.savePath},
+  blue:{team:'海洋先锋队',players:['B1 陈同学','B2 李同学'],score:state.blue,stats:{...state.stats.blue}},
+  red:{team:'深海动力队',players:['R1 王同学','R2 赵同学'],score:state.red,stats:{...state.stats.red}},
+  timing:{durationSeconds:MATCH_DURATION,endTime:state.endTime},
+  events:state.events.map(e=>({
+    matchTime:e.matchTime,
+    localTime:e.time,
+    team:e.team,
+    event:e.text,
+    score:e.score,
+    videoTimestampSeconds:replayElapsedForEvent(e.matchTime)
+  }))
+ };
+}
+
+function startTimer(){clearInterval(timer);timer=setInterval(()=>{if(state.match!=='running')return;if(state.seconds>0){state.seconds--;renderMatch()}else finishMatch()},1000)}
+function finishMatch(){
+ clearInterval(timer);
+ if(state.match==='ended')return;
+ state.match='ended';state.endTime=now();state.recording=false;
+ if(!state.currentBase)state.currentBase='match_008_'+compactStamp();
+ const videoFile=state.currentBase+'.mp4';
+ const jsonFile=state.currentBase+'.json';
+ updateRecState('saved','✓ 视频 + JSON 已保存');
+ const newRecord={
+  id:8,no:'第 08 场',group:'学生组',arena:'A 赛场',
+  date:new Date().toISOString().slice(0,10),end:state.endTime,
+  savePath:state.savePath,videoFile,jsonFile,
+  blue:{team:'海洋先锋队',players:'B1 陈同学 · B2 李同学',score:state.blue,g:state.stats.blue.g,a:state.stats.blue.a,o:state.stats.blue.o},
+  red:{team:'深海动力队',players:'R1 王同学 · R2 赵同学',score:state.red,g:state.stats.red.g,a:state.stats.red.a,o:state.stats.red.o},
+  events:state.events.map(e=>[e.matchTime,e.time,e.team,e.text,e.score]),
+  jsonData:buildJsonRecord()
+ };
+ const idx=history.findIndex(x=>x.id===8);
+ if(idx>=0)history[idx]=newRecord;else history.unshift(newRecord);
+ historySelected=8;
+ renderMatch();renderHistory();renderHistoryDetail();show('records');
+ toast('比赛结束 · 视频与 JSON 已自动归档');
+}
+startBtn.onclick=()=>{
+ if(!state.calLocked){toast('请先锁定场地调整');return}
+ if(state.match==='ended'){toast('本场比赛已结束');return}
+ state.savePath=recordPath.value.trim()||'/data/fish/matches';
+ state.currentBase='match_008_'+compactStamp();
+ state.recording=true;state.match='running';
+ updateRecState('on','● 录像中');
+ startTimer();renderMatch();toast('比赛开始 · 录像已启动')
+};
+savePathBtn.onclick=()=>{
+ state.savePath=recordPath.value.trim()||'/data/fish/matches';
+ recordPath.value=state.savePath;
+ toast('录像保存路径已设置');
+};
+pauseBtn.onclick=()=>{if(state.match==='waiting'){toast('比赛尚未开始');return}if(state.match==='ended'){toast('比赛已经结束');return}state.match=state.match==='paused'?'running':'paused';renderMatch();toast(state.match==='paused'?'比赛已暂停':'比赛已继续')};endBtn.onclick=()=>{if(state.match==='waiting'){toast('比赛尚未开始');return}finishMatch()};
+document.querySelectorAll('[data-score]').forEach(b=>b.onclick=()=>{if(state.match==='paused'){toast('比赛暂停中，不能计分');return}if(state.match!=='running'){toast('比赛尚未开始');return}const n=Number(b.dataset.score),side=b.dataset.team,type=n===10?'g':n===2?'a':'o';state[side]+=n;state.stats[side][type]++;state.events.unshift({matchTime:fmt(state.seconds),time:now(),team:side==='blue'?'蓝队':'红队',text:n===10?'进球':n===2?'配合':'越界',score:(n>0?'+':'')+n,type});
+renderMatch();
+bumpEl(side==='blue'?blueScore:redScore);
+bumpEl(side==='blue'?blueQuick:redQuick);
+const firstEvent=eventList.querySelector('.event');
+if(firstEvent){firstEvent.classList.add('eventFlash')}
+});
+function hw(m){return m.blue.score>m.red.score?'蓝队获胜':m.red.score>m.blue.score?'红队获胜':'平局'}
+function renderHistory(){const q=search.value.toLowerCase(),g=groupFilter.value;const list=history.filter(m=>(g==='all'||m.group===g)&&(!q||(m.no+m.blue.team+m.red.team).toLowerCase().includes(q)));historyCount.textContent=list.length+' 场';matchList.innerHTML=list.map(m=>`<button class="matchItem ${m.id===historySelected?'active':''}" data-id="${m.id}"><div class="matchTop"><b>${m.no} · ${m.group}</b><span>${m.date}</span></div><div class="matchTeams"><span class="blue">${m.blue.team}</span><strong>${m.blue.score}:${m.red.score}</strong><span class="red">${m.red.team}</span></div></button>`).join('');document.querySelectorAll('.matchItem').forEach(b=>b.onclick=()=>{
+ historySelected=Number(b.dataset.id);
+ if(replayObjectUrl){URL.revokeObjectURL(replayObjectUrl);replayObjectUrl=null}
+ replayVideo.removeAttribute('src');replayVideo.load();videoPlaceholder.classList.remove('hidden');
+ videoFile.value='';videoFileName.textContent='尚未载入录像文件';videoElapsed.textContent='00:00';videoDuration.textContent='--:--';
+ renderHistory();renderHistoryDetail()
+})}
+function remainingToSeconds(t){
+ const [mm,ss]=t.split(':').map(Number);return (mm||0)*60+(ss||0)
+}
+function replayElapsedForEvent(matchTime){
+ return Math.max(0,MATCH_DURATION-remainingToSeconds(matchTime))
+}
+function seekReplay(matchTime){
+ const elapsed=replayElapsedForEvent(matchTime);
+ if(replayVideo.src){
+   const max=Number.isFinite(replayVideo.duration)?replayVideo.duration:elapsed;
+   replayVideo.currentTime=Math.min(elapsed,max||elapsed);
+   replayVideo.play().catch(()=>{});
+   toast('已跳转到 '+matchTime+' 的计分片段');
+ }else{
+   toast('请先载入本场录像');
+ }
+}
+function renderReplay(m){
+ if(!(m.videoFile&&m.jsonFile)) histVideoStatus.textContent=replayVideo.src?'已载入':'缺少配对文件';
+ replayTrack.innerHTML=m.events.map(e=>{
+   const elapsed=replayElapsedForEvent(e[0]);
+   const left=Math.min(100,Math.max(0,elapsed/MATCH_DURATION*100));
+   return `<button class="eventMark ${e[2]==='红队'?'red':''}" style="left:${left}%" data-replay-time="${e[0]}" title="${e[0]} ${e[2]} ${e[3]}"></button>`;
+ }).join('');
+ replayEvents.innerHTML=m.events.map(e=>`<button class="replayEvent ${e[2]==='红队'?'red':''}" data-replay-time="${e[0]}"><small>${e[0]} · ${e[1]}</small>${e[2]} · ${e[3]} · ${e[4]}</button>`).join('');
+ document.querySelectorAll('[data-replay-time]').forEach(b=>b.onclick=()=>seekReplay(b.dataset.replayTime));
+}
+function renderHistoryDetail(){
+ const m=history.find(x=>x.id===historySelected)||history[0];
+ histBlueTeam.textContent='蓝队 · '+m.blue.team;histRedTeam.textContent='红队 · '+m.red.team;
+ histBluePlayers.textContent=m.blue.players;histRedPlayers.textContent=m.red.players;
+ histBlueScore.textContent=m.blue.score;histRedScore.textContent=m.red.score;histWinner.textContent=hw(m);
+ histNo.textContent=m.no;histGroup.textContent=m.group;histArena.textContent=m.arena;histEnd.textContent=m.end;
+ histVideoFile.textContent=m.videoFile||'-';
+ histJsonFile.textContent=m.jsonFile||'-';
+ histSavePath.textContent=m.savePath||'-';
+ histVideoStatus.textContent=(m.videoFile&&m.jsonFile)?'✓ 视频 / JSON 已配对':'缺少配对文件';
+ hbg.textContent=m.blue.g;hba.textContent=m.blue.a;hbo.textContent=m.blue.o;hrg.textContent=m.red.g;hra.textContent=m.red.a;hro.textContent=m.red.o;
+ recordTable.innerHTML=`<div class="tr head"><span>比赛时间</span><span>现场时间</span><span>队伍</span><span>事件</span><span>分值</span></div>`+
+ m.events.map(e=>`<div class="tr"><span>${e[0]}</span><span>${e[1]}</span><span class="${e[2]==='蓝队'?'blueTxt':'redTxt'}">${e[2]}</span><button class="btn" data-replay-time="${e[0]}" style="text-align:left;padding:4px 6px">${e[3]}</button><b>${e[4]}</b></div>`).join('');
+ renderReplay(m);
+ document.querySelectorAll('#recordTable [data-replay-time]').forEach(b=>b.onclick=()=>seekReplay(b.dataset.replayTime));
+}
+search.oninput=renderHistory;groupFilter.onchange=renderHistory;
+
+document.querySelectorAll('[data-record-tab]').forEach(btn=>btn.onclick=()=>{
+ document.querySelectorAll('[data-record-tab]').forEach(x=>x.classList.toggle('active',x===btn));
+ const replay=btn.dataset.recordTab==='replay';
+ replayPane.classList.toggle('hidden',!replay);
+ scorelogPane.classList.toggle('hidden',replay);
+});
+videoFile.onchange=e=>{
+ const file=e.target.files&&e.target.files[0];
+ if(!file)return;
+ if(replayObjectUrl)URL.revokeObjectURL(replayObjectUrl);
+ replayObjectUrl=URL.createObjectURL(file);
+ replayVideo.src=replayObjectUrl;
+ videoPlaceholder.classList.add('hidden');
+ videoFileName.textContent=file.name;
+ histVideoStatus.textContent='已载入';
+ replayVideo.load();
+ toast('本场录像已载入');
+};
+replayVideo.onloadedmetadata=()=>{
+ videoDuration.textContent=fmt(Math.floor(replayVideo.duration||0));
+};
+replayVideo.ontimeupdate=()=>{
+ videoElapsed.textContent=fmt(Math.floor(replayVideo.currentTime||0));
+};
+
+// combined calibration controls
+exposureRange.oninput=e=>exposureValue.textContent=e.target.value+'%';
+applyCameraBtn.onclick=()=>{resBadge.textContent=resolution.value;fpsBadge.textContent=fpsSelect.value;toast('采集参数已应用')};
+applyCropBtn.onclick=()=>toast('裁剪区域已应用');
+resetCropBtn.onclick=()=>{cropRange.value=0;crop.style.left='0%';crop.style.right='0%';crop.style.top='0%';crop.style.bottom='0%';toast('已恢复全画面')};
+snapshotBtn.onclick=()=>toast('已保存当前场地图像');
+
+recordPath.value=state.savePath;updateRecState('','● 未录制');
+renderSignup();renderDeviceConfirm();renderMatch();renderHistory();renderHistoryDetail();show('signup');
+</script>
+</body>
+</html>
