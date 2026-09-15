@@ -48,6 +48,13 @@ function cameraLabel(camera) {
   return [`#${camera.index}`, model, capability].filter(Boolean).join(" · ");
 }
 
+function browserCameraLabel(camera, index) {
+  const label = camera.label || `本机摄像头 ${index + 1}`;
+  return /integrated|built[- ]?in|内置|facetime/i.test(label)
+    ? `${label} · 电脑自带`
+    : label;
+}
+
 export default function VisionPanel({
   isAdmin = false,
   user = null,
@@ -75,6 +82,11 @@ export default function VisionPanel({
   const sharedVisionRequest = (path, options = {}) => rootVisionRequest(path, options);
   const [cameras, setCameras] = useState([]);
   const [cameraIndex, setCameraIndex] = useState("");
+  const [cameraSource, setCameraSource] = useState("server");
+  const [browserCameras, setBrowserCameras] = useState([]);
+  const [browserDeviceId, setBrowserDeviceId] = useState("");
+  const [browserStream, setBrowserStream] = useState(null);
+  const [browserCameraBusy, setBrowserCameraBusy] = useState(false);
   const [status, setStatus] = useState({ state: "stopped", error: "" });
   const [feedback, setFeedback] = useState("");
   const [tool, setTool] = useState("");
@@ -98,6 +110,8 @@ export default function VisionPanel({
   const [cropDraft, setCropDraft] = useState(null);
   const [cropSelecting, setCropSelecting] = useState(false);
   const cropStart = useRef(null);
+  const browserVideoRef = useRef(null);
+  const localPreview = cameraSource === "browser";
   useEffect(() => { fetch("/api/vision/crop").then(r => r.ok ? r.json() : null).then(value => { if (value) setCropRegion(value); }).catch(() => {}); }, []);
   async function applyCrop(value) {
     try {
@@ -302,6 +316,93 @@ export default function VisionPanel({
   );
 
   useEffect(() => { if (status.metrics?.crop) setCropRegion(status.metrics.crop); }, [status.metrics?.crop]);
+
+  useEffect(() => {
+    if (browserVideoRef.current) browserVideoRef.current.srcObject = browserStream;
+    if (browserStream) browserVideoRef.current?.play().catch(() => {});
+  }, [browserStream]);
+
+  useEffect(() => () => {
+    browserStream?.getTracks().forEach((track) => track.stop());
+  }, [browserStream]);
+
+  async function refreshBrowserCameras(requestPermission = false) {
+    if (!navigator.mediaDevices?.enumerateDevices) {
+      throw new Error("当前浏览器不支持本机摄像头选择");
+    }
+    if (requestPermission && !browserStream) {
+      const permissionStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      permissionStream.getTracks().forEach((track) => track.stop());
+    }
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const next = devices.filter((device) => device.kind === "videoinput");
+    setBrowserCameras(next);
+    setBrowserDeviceId((current) => current && next.some((device) => device.deviceId === current)
+      ? current : next[0]?.deviceId || "");
+    return next;
+  }
+
+  useEffect(() => {
+    if (!navigator.mediaDevices?.addEventListener) return undefined;
+    const refresh = () => refreshBrowserCameras(false).catch(() => {});
+    refresh();
+    navigator.mediaDevices.addEventListener("devicechange", refresh);
+    return () => navigator.mediaDevices.removeEventListener("devicechange", refresh);
+  }, []);
+
+  async function startBrowserCamera(deviceId = browserDeviceId) {
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error("当前浏览器不支持本机摄像头");
+    setBrowserCameraBusy(true);
+    try {
+      browserStream?.getTracks().forEach((track) => track.stop());
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: deviceId ? { deviceId: { exact: deviceId } } : true,
+        audio: false,
+      });
+      setBrowserStream(stream);
+      const track = stream.getVideoTracks()[0];
+      const actualDeviceId = track?.getSettings?.().deviceId || deviceId;
+      setBrowserDeviceId(actualDeviceId || "");
+      await refreshBrowserCameras(false);
+      setFeedback("电脑摄像头预览已开启；识别和循迹仍使用服务器摄像头。");
+    } finally {
+      setBrowserCameraBusy(false);
+    }
+  }
+
+  function stopBrowserCamera() {
+    browserStream?.getTracks().forEach((track) => track.stop());
+    setBrowserStream(null);
+    setFeedback("电脑摄像头预览已关闭。");
+  }
+
+  async function selectCameraSource(event) {
+    const nextSource = event.target.value;
+    setCameraSource(nextSource);
+    if (nextSource !== "browser") {
+      stopBrowserCamera();
+      setFeedback("已切换到服务器摄像头；识别和循迹使用服务器采集画面。");
+      return;
+    }
+    try {
+      const available = await refreshBrowserCameras(true);
+      if (!available.length) throw new Error("未找到电脑摄像头");
+      await startBrowserCamera(browserDeviceId || available[0].deviceId);
+    } catch (error) {
+      setCameraSource("server");
+      setFeedback(error.message || "电脑摄像头无法开启");
+    }
+  }
+
+  async function changeBrowserCamera(event) {
+    const nextDeviceId = event.target.value;
+    setBrowserDeviceId(nextDeviceId);
+    try {
+      await startBrowserCamera(nextDeviceId);
+    } catch (error) {
+      setFeedback(error.message || "电脑摄像头切换失败");
+    }
+  }
 
   function captureServerTime(payload) {
     const value = Number(payload?.serverTime ?? payload?.data?.serverTime);
@@ -721,7 +822,8 @@ export default function VisionPanel({
   }
 
   function pointFrom(event) {
-    const image = imageRef.current;
+    const image = localPreview ? browserVideoRef.current : imageRef.current;
+    if (!image) return { x: 0, y: 0 };
     const mediaWidth = image.videoWidth || image.naturalWidth || videoWidth;
     const mediaHeight = image.videoHeight || image.naturalHeight || videoHeight;
     return toVideoPoint(event, image.getBoundingClientRect(), videoWidth, videoHeight, mediaWidth, mediaHeight);
@@ -777,6 +879,8 @@ export default function VisionPanel({
         </div>
       </header>
       <details className="video-common-settings"><summary>视频设置</summary>
+        <label className="range-row"><span>画面来源</span><select aria-label="画面来源" value={cameraSource} disabled={browserCameraBusy} onChange={selectCameraSource}><option value="server">服务器摄像头 · 识别/循迹</option><option value="browser">电脑摄像头 · 本机预览</option></select></label>
+        {localPreview && <label className="range-row"><span>电脑摄像头</span><select aria-label="电脑摄像头" value={browserDeviceId} disabled={browserCameraBusy || !browserCameras.length} onChange={changeBrowserCamera}><option value="">请选择电脑摄像头</option>{browserCameras.map((camera, index) => <option key={camera.deviceId || `browser-${index}`} value={camera.deviceId}>{browserCameraLabel(camera, index)}</option>)}</select></label>}
         <label className="range-row"><span>本机清晰度</span><select aria-label="本机观看清晰度" value={viewQuality} onChange={event => setViewQuality(event.target.value)}><option value="smooth">流畅 · 640</option><option value="hd">高清 · 1280</option><option value="full">超清 · 1920</option></select></label>
       {isAdmin && <details><summary>识别区域裁剪</summary>
         <small>共享设置。先关闭识别；裁剪后重新标定场地。</small>
@@ -787,13 +891,14 @@ export default function VisionPanel({
       </details>}
       <div className="vision-setup-bar">
 
-        <label className="camera-select">摄像头<select value={cameraIndex} disabled={switchingCamera} onChange={changeCamera}><option value="">请选择摄像头</option>{cameras.map((camera) => <option key={camera.index} value={camera.index}>{cameraLabel(camera)}</option>)}</select></label>
+        <label className="camera-select">服务器摄像头<select value={cameraIndex} disabled={localPreview || switchingCamera} onChange={changeCamera}><option value="">请选择服务器摄像头</option>{cameras.map((camera) => <option key={camera.index} value={camera.index}>{cameraLabel(camera)}</option>)}</select><small className="camera-hint">用于共享视频、识别和循迹；电脑摄像头请在“视频设置”中选择。</small></label>
         {<label className="camera-select">YOLO 模型<select value={selectedYoloModel} disabled={running || switchingCamera || !yoloModels.length} onChange={(event) => setSelectedYoloModel(event.target.value)}><option value="">{yoloModels.length ? "请选择 .pt 模型" : "未找到 .pt 模型"}</option>{yoloModels.map((model) => <option key={model} value={model}>{model}</option>)}</select><small className="camera-hint">{running ? `当前会话：${status.yoloModel || selectedYoloModel || "默认模型"}` : "选择本地 vision/assets 下的 .pt 模型"}</small></label>}
         <div className="video-switches">
-          <label className="video-switch-row"><span>本机预览<small>{running && previewEnabled ? "已开启" : "已关闭"}</small></span>
-            <input type="checkbox" role="switch" aria-label="本机预览开关" checked={running && previewEnabled}
-              disabled={switchingCamera || videoToggleBusy || (!running && cameraIndex === "")}
-              onChange={async () => { setVideoToggleBusy(true); try { await (running && previewEnabled ? stop() : start()); } finally { setVideoToggleBusy(false); } }} />
+          <label className="video-switch-row"><span>{localPreview ? "电脑摄像头预览" : "服务器画面预览"}<small>{localPreview ? (browserStream ? "已开启" : "已关闭") : (running && previewEnabled ? "已开启" : "已关闭")}</small></span>
+            <input type="checkbox" role="switch" aria-label="本机预览开关"
+              disabled={browserCameraBusy || switchingCamera || videoToggleBusy || (localPreview ? !browserDeviceId : (!running && cameraIndex === ""))}
+              checked={localPreview ? Boolean(browserStream) : Boolean(running && previewEnabled)}
+              onChange={async () => { setVideoToggleBusy(true); try { if (localPreview) { browserStream ? stopBrowserCamera() : await startBrowserCamera(browserDeviceId); } else { await (running && previewEnabled ? stop() : start()); } } finally { setVideoToggleBusy(false); } }} />
           </label>
           <label className="video-switch-row"><span>{workspacePrefix ? "识别（服务器统一）" : "识别（共享）"}<small>{processing ? "运行中" : "未开启"}</small></span>
             <input type="checkbox" role="switch" aria-label="识别开关" checked={processing}
@@ -857,7 +962,7 @@ export default function VisionPanel({
           onPointerDown={beginCanvasInput} onPointerMove={moveCanvasInput} onPointerUp={finishCanvasInput}
           onMouseDown={beginCanvasInput} onMouseMove={moveCanvasInput} onMouseUp={finishCanvasInput}>
           {cropSelecting && cropDraft && <div style={{ position:"absolute", zIndex:5, pointerEvents:"none", border:"2px solid #38bdf8", background:"#38bdf822", left:`${(cropDraft.x-cropRegion.x)/cropRegion.width*100}%`, top:`${(cropDraft.y-cropRegion.y)/cropRegion.height*100}%`, width:`${cropDraft.width/cropRegion.width*100}%`, height:`${cropDraft.height/cropRegion.height*100}%` }} />}
-          {!previewEnabled ? <div className="video-placeholder"><strong>本机预览已关闭</strong><button type="button" disabled={videoToggleBusy} onClick={start}>打开预览</button></div> : running ? <>
+          {localPreview ? (browserStream ? <video ref={browserVideoRef} className="video-stream" autoPlay muted playsInline aria-label="电脑摄像头预览" /> : <div className="video-placeholder"><strong>电脑摄像头预览已关闭</strong><button type="button" disabled={videoToggleBusy || !browserDeviceId} onClick={() => startBrowserCamera(browserDeviceId)}>打开预览</button></div>) : !previewEnabled ? <div className="video-placeholder"><strong>本机预览已关闭</strong><button type="button" disabled={videoToggleBusy} onClick={start}>打开预览</button></div> : running ? <>
             <VideoStream
               ref={imageRef}
               sessionId={status.sessionId}
@@ -875,7 +980,7 @@ export default function VisionPanel({
               <span>{streamState === "error" ? (sessionErrorMessage(status) || "视频连接暂时中断，正在自动重试") : "请稍候，摄像头画面即将出现"}</span>
             </div>}
           </> : <div className={`video-placeholder ${status.state === "error" ? "has-error" : ""}`}><strong>{status.state === "error" ? "摄像头启动失败" : "视觉画面未启动"}</strong><span>{sessionErrorMessage(status) || "选择摄像头后开始预览"}</span></div>}
-          {running && previewEnabled && <div className="video-badge">服务器 {serverClock}<br />本机 {clock}{latencyLabel}<br />{videoWidth} × {videoHeight}</div>}
+          {localPreview && browserStream ? <div className="video-badge">电脑摄像头<br />本机 {clock}<br />预览独立于服务器识别</div> : running && previewEnabled && <div className="video-badge">服务器 {serverClock}<br />本机 {clock}{latencyLabel}<br />{videoWidth} × {videoHeight}</div>}
         </div>
         {!showControls ? null : manual ? <aside className="vision-controls manual-video-controls-panel">
           <div className="vision-control-head"><h2>视频设置</h2></div>

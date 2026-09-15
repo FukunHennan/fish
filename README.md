@@ -51,6 +51,7 @@ bash scripts/stop.sh
 ## 文档入口
 
 - [技术文档索引](docs/README.md)
+- [指导性文件总览](docs/指导性文件总览.md)
 - [系统架构](docs/项目架构与开发方案.md)
 - [部署与公网访问](docs/部署与公网访问.md)
 - [通信协议](protocol/websocket-protocol.md)
