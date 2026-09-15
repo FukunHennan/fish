@@ -177,6 +177,10 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 			}
 			writeJSONValue(w, map[string]any{"records": records})
 			return
+		case "devices":
+			// 可分配机器鱼列表：在线设备 + 当前归属席位
+			writeJSONValue(w, s.competitionDevicesLocked(store))
+			return
 		}
 		http.NotFound(w, r)
 		return
@@ -282,6 +286,71 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 		// 双方全部签到后进入就绪
 		if match.Blue.allSignedIn() && match.Red.allSignedIn() {
 			match.State = matchStateReady
+		}
+		match.Operator = user.Email
+		match.UpdatedAt = time.Now().Format(time.RFC3339)
+		store.saveLocked()
+		writeJSONValue(w, s.matchSnapshotLocked(store))
+
+	case "assign":
+		match := store.Match
+		if match == nil {
+			http.Error(w, "尚未创建比赛", http.StatusConflict)
+			return
+		}
+		team := match.teamForSide(input.Side)
+		if team == nil || strings.TrimSpace(input.Slot) == "" {
+			http.Error(w, "队伍或席位参数无效", http.StatusBadRequest)
+			return
+		}
+		deviceID := strings.TrimSpace(input.DeviceID)
+		if deviceID == "" {
+			http.Error(w, "缺少机器鱼参数", http.StatusBadRequest)
+			return
+		}
+		if !s.deviceOnline(deviceID) {
+			http.Error(w, "该机器鱼当前不在线", http.StatusConflict)
+			return
+		}
+		// 一条鱼同时只能归属一个席位
+		if side, slot, taken := match.assignmentOwner(deviceID); taken {
+			sameSlot := strings.EqualFold(side, team.Side) && strings.EqualFold(slot, input.Slot)
+			if !sameSlot {
+				http.Error(w, fmt.Sprintf("该机器鱼已归属 %s 的 %s", side, slot), http.StatusConflict)
+				return
+			}
+		}
+		assigned := false
+		for i := range team.Players {
+			if strings.EqualFold(team.Players[i].Slot, input.Slot) {
+				team.Players[i].DeviceID = deviceID
+				assigned = true
+			}
+		}
+		if !assigned {
+			http.Error(w, "未找到该席位", http.StatusBadRequest)
+			return
+		}
+		match.Operator = user.Email
+		match.UpdatedAt = time.Now().Format(time.RFC3339)
+		store.saveLocked()
+		writeJSONValue(w, s.matchSnapshotLocked(store))
+
+	case "unassign":
+		match := store.Match
+		if match == nil {
+			http.Error(w, "尚未创建比赛", http.StatusConflict)
+			return
+		}
+		team := match.teamForSide(input.Side)
+		if team == nil || strings.TrimSpace(input.Slot) == "" {
+			http.Error(w, "队伍或席位参数无效", http.StatusBadRequest)
+			return
+		}
+		for i := range team.Players {
+			if strings.EqualFold(team.Players[i].Slot, input.Slot) {
+				team.Players[i].DeviceID = ""
+			}
 		}
 		match.Operator = user.Email
 		match.UpdatedAt = time.Now().Format(time.RFC3339)
@@ -424,4 +493,47 @@ func mergeTeam(target *competitionTeam, incoming *competitionTeam, side string) 
 	if incoming.Score != 0 {
 		target.Score = incoming.Score
 	}
+}
+
+// assignmentOwner 返回该机器鱼当前归属的席位。
+func (m *competitionMatch) assignmentOwner(deviceID string) (string, string, bool) {
+	for _, team := range []competitionTeam{m.Blue, m.Red} {
+		for _, player := range team.Players {
+			if player.DeviceID != "" && strings.EqualFold(player.DeviceID, deviceID) {
+				return team.Side, player.Slot, true
+			}
+		}
+	}
+	return "", "", false
+}
+
+// deviceOnline 判断机器鱼是否在线。
+func (s *server) deviceOnline(deviceID string) bool {
+	for _, device := range s.hub.List() {
+		if device.ID == deviceID && device.Online {
+			return true
+		}
+	}
+	return false
+}
+
+// competitionDevicesLocked 汇总可分配机器鱼及其归属。
+func (s *server) competitionDevicesLocked(store *competitionStore) map[string]any {
+	devices := []map[string]any{}
+	for _, device := range s.hub.List() {
+		item := map[string]any{
+			"deviceId": device.ID,
+			"name":     device.Name,
+			"online":   device.Online,
+		}
+		if store.Match != nil {
+			if side, slot, ok := store.Match.assignmentOwner(device.ID); ok {
+				item["side"] = side
+				item["slot"] = slot
+				item["assignedTo"] = side + "/" + slot
+			}
+		}
+		devices = append(devices, item)
+	}
+	return map[string]any{"devices": devices}
 }

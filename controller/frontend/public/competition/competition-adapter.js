@@ -181,11 +181,42 @@
       setBadge("未发现在线机器鱼，请检查设备电源与网络", "warn");
       return Promise.resolve();
     }
-    // B1 -> 第一台在线设备，B2 -> 第二台；不足时退化为同一台
-    var targets = {
-      b1: state.devices[0].deviceId,
-      b2: (state.devices[1] || state.devices[0]).deviceId,
-    };
+    // 优先使用裁判在签到环节分配的机器鱼归属
+    return api("/api/competition/match")
+      .then(function (payload) { return (payload && payload.match) || null; })
+      .catch(function () { return null; })
+      .then(function (match) {
+        var assigned = {};
+        if (match) {
+          ["blue", "red"].forEach(function (side) {
+            var team = match[side];
+            if (!team || !team.players) return;
+            team.players.forEach(function (player) {
+              if (player.deviceId) assigned[String(player.slot).toUpperCase()] = player.deviceId;
+            });
+          });
+        }
+        var byOrder = {
+          b1: state.devices[0].deviceId,
+          b2: (state.devices[1] || state.devices[0]).deviceId,
+        };
+        var targets = {
+          b1: assigned.B1 || byOrder.b1,
+          b2: assigned.B2 || byOrder.b2,
+        };
+        if (!assigned.B1 && !assigned.B2) {
+          setBadge("裁判尚未分配机器鱼，暂按在线顺序绑定", "warn");
+        } else {
+          var missing = [];
+          if (assigned.B1 && !state.devices.some(function (d) { return d.deviceId === assigned.B1; })) missing.push("B1");
+          if (assigned.B2 && !state.devices.some(function (d) { return d.deviceId === assigned.B2; })) missing.push("B2");
+          if (missing.length) setBadge(missing.join("/") + " 分配的机器鱼当前不在线", "warn");
+        }
+        return applyBindings(targets);
+      });
+  }
+
+  function applyBindings(targets) {
     return Promise.all(PLAYERS.map(function (player) {
       var deviceId = targets[player];
       if (!deviceId) return null;
@@ -511,6 +542,48 @@
     "color:#dff2ff", "border-radius:8px", "padding:5px 9px", "font-size:12px", "cursor:pointer",
   ].join(";");
 
+  // ---------------------------------------------------------------- 签到鱼绑定
+  // 裁判签到时为每个席位分配机器鱼，形成比赛期间的归属关系。
+  function injectFishSelect(slot) {
+    var step = document.getElementById("confirmStep");
+    if (!step || !slot) return;
+    var row = step.querySelector("#fishAssignRow");
+    if (!row) {
+      row = document.createElement("div");
+      row.id = "fishAssignRow";
+      row.style.cssText = "margin-top:10px;display:flex;align-items:center;gap:8px";
+      row.innerHTML =
+        '<label style="font-size:12px;opacity:.85;white-space:nowrap">机器鱼</label>' +
+        '<select id="fishAssignSelect" style="flex:1;min-width:0;padding:6px 8px;border-radius:6px;' +
+        'background:#0b1b2e;color:#dff2ff;border:1px solid rgba(120,200,255,.35);font-size:12px"></select>' +
+        '<span id="fishAssignHint" style="font-size:11px;opacity:.7;white-space:nowrap"></span>';
+      step.appendChild(row);
+    }
+    var select = row.querySelector("#fishAssignSelect");
+    var hint = row.querySelector("#fishAssignHint");
+    select.setAttribute("data-slot", slot);
+    return api("/api/competition/devices").then(function (payload) {
+      var list = (payload && payload.devices) || [];
+      var options = ['<option value="">（暂不分配）</option>'];
+      var current = "";
+      list.forEach(function (device) {
+        if (!device.online) return;
+        var mine = device.slot && String(device.slot).toUpperCase() === String(slot).toUpperCase();
+        if (device.assignedTo && !mine) return;   // 已归属其他席位的鱼不在此列出
+        if (mine) current = device.deviceId;
+        var label = (device.name || device.deviceId) + (mine ? "（本席位）" : "");
+        options.push('<option value="' + device.deviceId + '"' + (mine ? " selected" : "") + ">" + label + "</option>");
+      });
+      select.innerHTML = options.join("");
+      if (hint) {
+        hint.textContent = list.filter(function (d) { return d.online; }).length ? "" : "无在线机器鱼";
+      }
+      return current;
+    }).catch(function () {
+      if (hint) hint.textContent = "读取机器鱼失败";
+    });
+  }
+
   // 把裁判端设计稿自带的按钮接到后端（原逻辑保留，仅追加真实请求）
   function handleRefereePrototypeClick(event) {
     var target = event.target;
@@ -536,14 +609,33 @@
       refereeAction("finish");
       return true;
     }
+    var selectPlayer = target.closest(".selectPlayer");
+    if (selectPlayer && selectPlayer.getAttribute("data-slot")) {
+      var pickedSlot = selectPlayer.getAttribute("data-slot");
+      setTimeout(function () { injectFishSelect(pickedSlot); }, 60);
+      return false;   // 保留原型自身的签到弹窗流程
+    }
     if (target.closest("#confirmBtn")) {
       var slotNode = document.getElementById("confirmSlot");
       var slot = slotNode ? String(slotNode.textContent).trim() : "";
       if (slot) {
-        refereeAction("signin", {
-          side: /^B/i.test(slot) ? "blue" : "red",
-          slot: slot,
-          signedIn: true,
+        var side = /^B/i.test(slot) ? "blue" : "red";
+        var select = document.getElementById("fishAssignSelect");
+        var deviceId = select ? select.value : "";
+        var chain = Promise.resolve();
+        if (deviceId) {
+          // 先建立归属，再记录签到
+          chain = chain.then(function () {
+            return refereeAction("assign", { side: side, slot: slot, deviceId: deviceId });
+          });
+        } else {
+          // 选择“暂不分配”即解除该席位的机器鱼归属
+          chain = chain.then(function () {
+            return refereeAction("unassign", { side: side, slot: slot });
+          });
+        }
+        chain.then(function () {
+          return refereeAction("signin", { side: side, slot: slot, signedIn: true });
         });
       }
       return true;

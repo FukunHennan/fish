@@ -115,3 +115,106 @@ func TestCompetitionRequiresUser(t *testing.T) {
 		t.Fatalf("未登录应返回 401，实际 %d", recorder.Code)
 	}
 }
+
+type assignmentTestConn struct{}
+
+func (assignmentTestConn) WriteJSON(any) error { return nil }
+func (assignmentTestConn) Close() error        { return nil }
+
+// 覆盖签到环节的机器鱼绑定与归属：列表、分配、冲突、离线、解除。
+func TestCompetitionDeviceAssignment(t *testing.T) {
+	t.Setenv("FISH_COMPETITION_STATE", filepath.Join(t.TempDir(), "competition.json"))
+	h := hub.New()
+	handler := NewHandler(h, testKey())
+	h.Register(hub.Device{ID: "fish-a", Name: "机器鱼A", Online: true}, assignmentTestConn{})
+	h.Register(hub.Device{ID: "fish-b", Name: "机器鱼B", Online: true}, assignmentTestConn{})
+
+	call := func(method, path, body string) (int, map[string]any) {
+		t.Helper()
+		request := httptest.NewRequest(method, path, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		var payload map[string]any
+		_ = json.Unmarshal(recorder.Body.Bytes(), &payload)
+		return recorder.Code, payload
+	}
+	playerDevice := func(payload map[string]any, side, slot string) string {
+		t.Helper()
+		match := payload["match"].(map[string]any)
+		team := match[side].(map[string]any)
+		for _, raw := range team["players"].([]any) {
+			player := raw.(map[string]any)
+			if player["slot"] == slot {
+				if value, ok := player["deviceId"].(string); ok {
+					return value
+				}
+				return ""
+			}
+		}
+		return ""
+	}
+
+	// 建赛
+	if code, _ := call(http.MethodPut, "/api/competition/match", `{"matchNo":"第 01 场"}`); code != http.StatusOK {
+		t.Fatalf("建赛失败: %d", code)
+	}
+
+	// 设备列表：两台均未分配
+	code, listed := call(http.MethodGet, "/api/competition/devices", "")
+	if code != http.StatusOK {
+		t.Fatalf("设备列表失败: %d", code)
+	}
+	devices := listed["devices"].([]any)
+	if len(devices) != 2 {
+		t.Fatalf("应返回 2 台设备: %+v", devices)
+	}
+	for _, raw := range devices {
+		if _, taken := raw.(map[string]any)["assignedTo"]; taken {
+			t.Fatalf("初始不应有归属: %+v", raw)
+		}
+	}
+
+	// 分配 fish-a 给蓝队 B1
+	code, assigned := call(http.MethodPost, "/api/competition/match/assign",
+		`{"side":"blue","slot":"B1","deviceId":"fish-a"}`)
+	if code != http.StatusOK {
+		t.Fatalf("分配失败: %d %+v", code, assigned)
+	}
+	if got := playerDevice(assigned, "blue", "B1"); got != "fish-a" {
+		t.Fatalf("B1 应绑定 fish-a，实际 %q", got)
+	}
+
+	// 同一台鱼不能归属第二个席位
+	if code, _ := call(http.MethodPost, "/api/competition/match/assign",
+		`{"side":"red","slot":"R1","deviceId":"fish-a"}`); code != http.StatusConflict {
+		t.Fatalf("重复分配应返回 409，实际 %d", code)
+	}
+
+	// 离线设备不能被分配
+	if code, _ := call(http.MethodPost, "/api/competition/match/assign",
+		`{"side":"red","slot":"R1","deviceId":"fish-ghost"}`); code != http.StatusConflict {
+		t.Fatalf("离线设备应返回 409，实际 %d", code)
+	}
+
+	// 分配后设备列表反映归属
+	_, listed = call(http.MethodGet, "/api/competition/devices", "")
+	for _, raw := range listed["devices"].([]any) {
+		item := raw.(map[string]any)
+		if item["deviceId"] == "fish-a" && item["assignedTo"] != "blue/B1" {
+			t.Fatalf("fish-a 归属应为 blue/B1: %+v", item)
+		}
+	}
+
+	// 解除归属后可重新分配
+	if code, released := call(http.MethodPost, "/api/competition/match/unassign",
+		`{"side":"blue","slot":"B1"}`); code != http.StatusOK {
+		t.Fatalf("解除失败: %d", code)
+	} else if got := playerDevice(released, "blue", "B1"); got != "" {
+		t.Fatalf("解除后应为空，实际 %q", got)
+	}
+	if code, _ := call(http.MethodPost, "/api/competition/match/assign",
+		`{"side":"red","slot":"R1","deviceId":"fish-a"}`); code != http.StatusOK {
+		t.Fatalf("重新分配失败: %d", code)
+	}
+}
