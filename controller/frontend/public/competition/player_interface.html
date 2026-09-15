@@ -5133,7 +5133,7 @@ p {
             <article class="playerConfirm playerB"><span class="playerAvatar">B</span><div><b>李同学 · 二号位</b><small>B2 · 生态修复协作 · 方向键 + Enter</small></div><span class="playerReady">● 已就绪</span></article>
           </div>
           <div class="teamConfirmActions"><button class="teamAuthSecondary" type="button" id="teamConfirmBack">返回</button><button class="teamAuthPrimary" type="button" id="teamEnterTerminal">进入比赛终端</button></div>
-          <div class="teamAuthHint">2 名队员已确认 · 2 台机器鱼在线</div>
+          <div class="teamAuthHint">等待读取裁判分配的真实机器鱼状态</div>
         </div>
       </section>
     </main>
@@ -5355,7 +5355,7 @@ p {
         '<div class="teamBadge">' + fishLogo() + '</div>' +
         '<h3>海洋先锋队</h3>' +
         '<p>探索 · 协作 · 创新<br>用科技让海洋更美好</p>' +
-        '<div class="deviceStatus"><i></i>已连接设备 2 台 · 视觉系统正常</div>' +
+        '<div class="deviceStatus"><i></i>设备在线状态独立读取 · 视觉独立接入</div>' +
         '<button class="outlineButton" type="button">管理我的设备</button>' +
         '<small>更聪明的鱼<br>守护更美的海</small>' +
       '</aside>' +
@@ -5488,17 +5488,17 @@ p {
     const b1Metrics =
       deviceMetric('battery', '电量', '78%', 'good') +
       deviceMetric('wifi', '延迟', '12 ms', 'good') +
-      deviceMetric('eye', '定位', '正常', 'good');
+      deviceMetric('eye', '视觉', '独立接入', 'good');
     const b2Metrics =
       deviceMetric('battery', '电量', '82%', 'good') +
       deviceMetric('wifi', '延迟', '16 ms', 'good') +
-      deviceMetric('eye', '定位', '正常', 'good');
+      deviceMetric('eye', '视觉', '独立接入', 'good');
 
     return '<section class="screen controlScreen v3ControlScreen">' +
       matchHud() +
       matchPlayerCard('b1', 'B1', '陈同学', 'Fish-B1-03', b1Metrics, 'playerA') +
       '<main class="fieldPanel v3FieldPanel glassCard">' +
-        '<header><div><h2>实时赛场</h2><p>顶部视角 · 本队机器鱼高亮</p></div><span class="liveBadge"><i></i>LIVE · 30 FPS</span></header>' +
+        '<header><div><h2>实时赛场</h2><p>顶部视角 · 本队机器鱼高亮</p></div><span class="liveBadge"><i></i>视觉独立接入</span></header>' +
         matchPool() +
         '<footer><span>蓝队：B1 / B2</span><b>比赛球已识别</b><span>红队：R1 / R2</span></footer>' +
       '</main>' +
@@ -5506,7 +5506,7 @@ p {
       '<section class="matchStatusBar glassCard">' +
         '<div><span>比赛状态</span><b class="greenState">进行中</b></div>' +
         '<div><span>队伍设备</span><b>2 / 2 在线</b></div>' +
-        '<div><span>比赛网络</span><b>12 ms · 0% 丢包</b></div>' +
+        '<div><span>视觉状态</span><b>独立于手动操控</b></div>' +
         '<div><span>边界保护</span><b class="greenState">正常</b></div>' +
         '<div><span>控制模式</span><b>双人独立控制</b></div>' +
       '</section>' +
@@ -6426,6 +6426,6 @@ p {
 })();
 </script>
 
-<script src="competition-adapter.js?v=20260915-signup-fish"></script>
+<script src="competition-adapter.js?v=20260915-decouple-vision"></script>
 </body>
 </html>

@@ -29,6 +29,9 @@
     ready: false,
   };
 
+  var lastDeviceBadge = "后端连接中…";
+  var lastDeviceTone = "info";
+
   // ---------------------------------------------------------------- 工具
   function api(path, options) {
     options = options || {};
@@ -138,6 +141,8 @@
   var badge = null;
   function setBadge(text, tone) {
     if (!badge || !document.body) return;
+    lastDeviceBadge = text;
+    lastDeviceTone = tone || "info";
     badge.textContent = text;
     badge.dataset.tone = tone || "info";
   }
@@ -157,6 +162,28 @@
     ].join(";");
     document.body.appendChild(badge);
     setBadge("后端连接中…", "info");
+  }
+
+  var visionBadge = null;
+  function setVisionStatus(text, tone) {
+    if (!document.body) return;
+    if (!visionBadge) {
+      visionBadge = document.createElement("div");
+      visionBadge.id = "fishVisionBadge";
+      visionBadge.style.cssText = [
+        "position:fixed", "left:14px", "bottom:48px", "z-index:2147483000",
+        "padding:6px 10px", "border-radius:999px", "font-size:11px", "line-height:1.3",
+        "font-family:system-ui,'Microsoft YaHei',sans-serif",
+        "background:rgba(3,18,41,.78)", "color:#bfe9ff",
+        "border:1px solid rgba(120,200,255,.26)", "backdrop-filter:blur(6px)",
+        "pointer-events:none", "max-width:70vw", "white-space:nowrap",
+        "overflow:hidden", "text-overflow:ellipsis",
+      ].join(";");
+      document.body.appendChild(visionBadge);
+    }
+    visionBadge.textContent = text;
+    visionBadge.dataset.tone = tone || "info";
+    paintVisionStatusText(text);
   }
 
   // ---------------------------------------------------------------- 认证
@@ -233,7 +260,7 @@
   function refreshDevices() {
     return api("/api/devices")
       .then(function (payload) {
-        state.devices = deviceList(payload).filter(function (device) { return device.online; });
+        state.devices = deviceList(payload);
         state.ready = true;
         return bindPlayers();
       })
@@ -257,9 +284,10 @@
   }
 
   function bindPlayers() {
-    if (!state.devices.length) {
-      setBadge("未发现在线机器鱼，请检查设备电源与网络", "warn");
-      return Promise.resolve();
+    var onlineDevices = state.devices.filter(function (device) { return device.online; });
+    if (!onlineDevices.length) {
+      setBadge("当前没有在线机器鱼", "warn");
+      return applyBindings({});
     }
     // 优先使用裁判在签到环节分配的机器鱼归属
     return api("/api/competition/match")
@@ -281,13 +309,19 @@
           b1: assigned[slotForPlayer("b1")],
           b2: assigned[slotForPlayer("b2")],
         };
+        PLAYERS.forEach(function (player) {
+          var deviceId = targets[player];
+          if (!deviceId) return;
+          var device = state.devices.filter(function (item) { return item.deviceId === deviceId; })[0];
+          if (!device || !device.online) targets[player] = "";
+        });
         if (!targets.b1 && !targets.b2) {
-          setBadge("裁判尚未给本队分配机器鱼", "warn");
+          setBadge("本队暂无可手动操控的在线机器鱼", "warn");
         } else {
           var missing = [];
-          if (targets.b1 && !state.devices.some(function (d) { return d.deviceId === targets.b1; })) missing.push(slotForPlayer("b1"));
-          if (targets.b2 && !state.devices.some(function (d) { return d.deviceId === targets.b2; })) missing.push(slotForPlayer("b2"));
-          if (missing.length) setBadge(missing.join("/") + " 分配的机器鱼当前不在线", "warn");
+          if (assigned[slotForPlayer("b1")] && !targets.b1) missing.push(slotForPlayer("b1"));
+          if (assigned[slotForPlayer("b2")] && !targets.b2) missing.push(slotForPlayer("b2"));
+          if (missing.length) setBadge(missing.join("/") + " 已分配但当前离线", "warn");
         }
         return applyBindings(targets);
       });
@@ -321,7 +355,9 @@
       var pairs = PLAYERS
         .filter(function (player) { return state.bound[player]; })
         .map(function (player) { return slotForPlayer(player) + " → " + state.bound[player]; });
-      setBadge(pairs.length ? "已绑定 " + pairs.join("　") : "未绑定设备", pairs.length ? "ok" : "warn");
+      var onlineCount = state.devices.filter(function (device) { return device.online; }).length;
+      var emptyText = onlineCount ? "未绑定设备" : "当前没有在线机器鱼";
+      setBadge(pairs.length ? "已绑定 " + pairs.join("　") : emptyText, pairs.length ? "ok" : "warn");
       paintDeviceInfo();
       paintAccountInfo();
     });
@@ -383,6 +419,11 @@
     return device.lastControlMs + " ms";
   }
 
+  function assignedDeviceIdForSlot(slot) {
+    var player = playerForSlot(state.match, slot);
+    return player && player.deviceId ? player.deviceId : "";
+  }
+
   function setTextIfFound(root, selector, value) {
     var node = root.querySelector(selector);
     if (node && value != null) node.textContent = String(value);
@@ -390,22 +431,26 @@
 
   function paintPlayerCard(card, localPlayer) {
     var slot = slotForPlayer(localPlayer);
-    var deviceId = state.bound[localPlayer];
+    var assignedDeviceId = assignedDeviceIdForSlot(slot);
+    var deviceId = assignedDeviceId || state.bound[localPlayer];
     var device = state.devices.filter(function (item) { return item.deviceId === deviceId; })[0] || null;
-    var deviceText = device ? deviceName(device) : "裁判未分配机器鱼";
+    var hasAssignment = !!assignedDeviceId;
+    var statusText = hasAssignment ? (device && device.online ? "在线" : "离线") : "未分配";
+    var deviceText = hasAssignment ? (device ? deviceName(device) : assignedDeviceId) : "裁判未分配机器鱼";
     setTextIfFound(card, ".playerSeat", slot);
     setTextIfFound(card, ".preflightSeat", slot);
     setTextIfFound(card, ".matchPlayerHead h2", playerDisplayName(slot));
-    setTextIfFound(card, ".preflightDeviceCard h3", playerDisplayName(slot));
+    if (card.classList.contains("preflightDeviceCard")) setTextIfFound(card, "h3", playerDisplayName(slot));
     setTextIfFound(card, "header p", deviceText);
-    setTextIfFound(card, ".playerOnline", deviceStatusLabel(device));
-    setTextIfFound(card, ".preflightState", device ? "已读取真实状态" : "等待裁判分配");
+    setTextIfFound(card, ".playerOnline", statusText);
+    setTextIfFound(card, ".preflightState", hasAssignment ? statusText : "等待裁判分配");
     card.querySelectorAll(".deviceMetric, .preflightMetrics span").forEach(function (metric) {
       var label = metric.querySelector("small");
       var value = metric.querySelector("b");
       if (!label || !value) return;
       var text = label.textContent.trim();
-      if (text === "连接" || text === "定位") value.textContent = deviceStatusLabel(device);
+      if (text === "连接") value.textContent = statusText;
+      if (text === "定位" || text === "视觉") value.textContent = video.statusText || "未启用";
       if (text === "电量") value.textContent = deviceBatteryLabel(device);
       if (text === "延迟") value.textContent = deviceLatencyLabel(device);
     });
@@ -437,11 +482,24 @@
     });
   }
 
+  function paintVisionStatusText(text) {
+    if (!document.body) return;
+    document.querySelectorAll(".liveBadge").forEach(function (node) {
+      node.textContent = text;
+    });
+    document.querySelectorAll(".arenaHead span").forEach(function (node) {
+      if (/视觉|FIELD|Mark/i.test(node.textContent)) node.textContent = text;
+    });
+    document.querySelectorAll(".footer span:first-child").forEach(function (node) {
+      if (/视觉|网络|延迟/i.test(node.textContent)) node.textContent = "设备在线状态与视觉状态独立";
+    });
+  }
+
   // ---------------------------------------------------------------- 视频
   // 把后端 WebRTC 画面接到界面的“实时赛场”区域。共享视觉会话提供赛场
   // 画面，因此使用 root 会话；连接建立后只重新挂载 video 元素，
   // 页面切换不会重建媒体连接。
-  var video = { peer: null, stream: null, sessionId: null, timer: null, connecting: false };
+  var video = { peer: null, stream: null, sessionId: null, timer: null, connecting: false, statusText: "视觉未启用" };
 
   function videoSurface() {
     // 选手端是 poolStage，裁判端的 .videoStage 自带 video 样式
@@ -471,7 +529,10 @@
       video.stream = null;
       connectVideo();
     }, delay || 3000);
-    if (reason) setBadge("视频重连中：" + reason, "warn");
+    if (reason) {
+      video.statusText = "视觉重连中：" + reason;
+      setVisionStatus(video.statusText, "warn");
+    }
   }
 
   function connectVideo() {
@@ -502,7 +563,9 @@
               if (peer.connectionState === "disconnected") scheduleVideoReconnect("连接中断");
             }, 4000);
           } else if (peer.connectionState === "connected") {
-            setBadge("赛场画面已接入", "ok");
+            video.statusText = "视觉画面已接入";
+            setVisionStatus(video.statusText, "ok");
+            if (lastDeviceBadge) setBadge(lastDeviceBadge, lastDeviceTone);
           }
         };
         return peer.createOffer()
@@ -527,8 +590,9 @@
       .catch(function (error) {
         // 没有摄像头/未启动视觉时属于正常等待状态，放慢重试避免刷屏
         var waiting = /会话尚未建立/.test(error.message);
-        setBadge(waiting ? "等待视觉会话（请先在控制台启动摄像头）" : "视频接入失败：" + error.message,
-                 waiting ? "info" : "error");
+        video.statusText = waiting ? "视觉未启动（手动操控可用）" : "视觉接入失败：" + error.message;
+        setVisionStatus(video.statusText, waiting ? "info" : "error");
+        if (lastDeviceBadge) setBadge(lastDeviceBadge, lastDeviceTone);
         scheduleVideoReconnect(waiting ? null : error.message, waiting ? 10000 : 3000);
       })
       .then(function () { video.connecting = false; });
@@ -564,6 +628,7 @@
 
   function ensureVideoSurface() {
     if (!state.user) return;       // 未登录不请求视觉接口
+    setVisionStatus(video.statusText || "视觉未启用", "info");
     mountVideoSurface();
     if (!video.peer) connectVideo();
   }
@@ -1002,16 +1067,17 @@
     source.addEventListener("devices", function (event) {
       var payload = null;
       try { payload = JSON.parse(event.data); } catch (e) { return; }
-      state.devices = deviceList(payload).filter(function (device) { return device.online; });
+      state.devices = deviceList(payload);
       paintDeviceInfo();
+      paintAccountInfo();
       // 设备掉线立即停止对应玩家
       PLAYERS.forEach(function (player) {
         var deviceId = state.bound[player];
         if (!deviceId) return;
-        var online = state.devices.some(function (device) { return device.deviceId === deviceId; });
+        var online = state.devices.some(function (device) { return device.deviceId === deviceId && device.online; });
         if (!online) {
           delete state.bound[player];
-          setBadge(player.toUpperCase() + " 设备已离线，控制已停止", "warn");
+          setBadge(slotForPlayer(player) + " 设备已离线，手动控制已停止", "warn");
         }
       });
     });

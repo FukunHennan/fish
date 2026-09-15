@@ -2005,7 +2005,7 @@ input:focus,select:focus{
 
  <section id="match" class="page match hidden">
   <section class="scorebar panel"><div class="sideScore"><span>蓝队</span><b class="blueTxt" id="blueScore">36</b></div><div class="clock"><strong id="clock">01:28</strong><small id="clockState">剩余时间</small></div><div class="sideScore red"><b class="redTxt" id="redScore">24</b><span>红队</span></div></section>
-  <section class="arenaCard panel"><div class="arenaHead"><h2>比赛画面</h2><span>Mark 4/4 · FIELD · 视觉已锁定</span></div><div class="arena"><div class="pool"><span class="goal l"></span><span class="goal r"></span></div><span class="mark m1">1</span><span class="mark m2">2</span><span class="mark m4">4</span><span class="mark m3">3</span><span class="fish blue f1"><span>B1</span></span><span class="fish blue f2"><span>B2</span></span><span class="fish red f3"><span>R1</span></span><span class="fish red f4"><span>R2</span></span><span class="ball"></span></div><div class="arenaFoot"><span>B1 / B2 / R1 / R2 在线</span><span>目标 5 / 5</span></div></section>
+  <section class="arenaCard panel"><div class="arenaHead"><h2>比赛画面</h2><span>视觉独立接入</span></div><div class="arena"><div class="pool"><span class="goal l"></span><span class="goal r"></span></div><span class="mark m1">1</span><span class="mark m2">2</span><span class="mark m4">4</span><span class="mark m3">3</span><span class="fish blue f1"><span>B1</span></span><span class="fish blue f2"><span>B2</span></span><span class="fish red f3"><span>R1</span></span><span class="fish red f4"><span>R2</span></span><span class="ball"></span></div><div class="arenaFoot"><span>机器鱼在线状态按真实设备心跳显示</span><span>视觉目标独立统计</span></div></section>
   <aside class="scoreSidePanel">
    <section class="teamQuick panel"><div class="teamQuickHead"><h3 class="blueTxt">蓝队</h3><b id="blueQuick">36</b></div><div class="quickBtns"><button class="goalBtn" data-team="blue" data-score="10">⚽ 进球<br>+10</button><button class="assistBtn" data-team="blue" data-score="2">⇄ 配合<br>+2</button><button class="outBtn" data-team="blue" data-score="-2">⚠ 越界<br>-2</button></div></section>
    <section class="teamQuick panel"><div class="teamQuickHead"><h3 class="redTxt">红队</h3><b id="redQuick">24</b></div><div class="quickBtns"><button class="goalBtn" data-team="red" data-score="10">⚽ 进球<br>+10</button><button class="assistBtn" data-team="red" data-score="2">⇄ 配合<br>+2</button><button class="outBtn" data-team="red" data-score="-2">⚠ 越界<br>-2</button></div></section>
@@ -2066,7 +2066,7 @@ input:focus,select:focus{
   <div class="ambientLine"></div>
   <i class="bubble b1"></i><i class="bubble b2"></i><i class="bubble b3"></i><i class="bubble b4"></i><i class="bubble b5"></i>
 </div>
-<footer class="footer"><span>网络正常 · 视觉正常 · 延迟 8ms</span><span>FISH CONTROL · REFEREE</span></footer>
+<footer class="footer"><span>设备在线状态与视觉状态独立</span><span>FISH CONTROL · REFEREE</span></footer>
 </div>
 
 <div class="modalWrap" id="modal">
@@ -2377,6 +2377,6 @@ snapshotBtn.onclick=()=>toast('已保存当前场地图像');
 recordPath.value=state.savePath;updateRecState('','● 未录制');
 renderSignup();renderDeviceConfirm();renderMatch();renderHistory();renderHistoryDetail();show('signup');
 </script>
-<script src="competition-adapter.js?v=20260915-signup-fish"></script>
+<script src="competition-adapter.js?v=20260915-decouple-vision"></script>
 </body>
 </html>
