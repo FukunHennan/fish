@@ -466,6 +466,18 @@
         + " · " + (match.blue.name || "蓝队") + " vs " + (match.red.name || "红队");
     }
     if (toggle) toggle.textContent = referee.running ? "暂停" : "开始";
+    // 同步设计稿界面上的比分与计时，避免与真实状态不一致
+    syncText("blueScore", match.blue.score);
+    syncText("redScore", match.red.score);
+    syncText("blueQuick", match.blue.score);
+    syncText("redQuick", match.red.score);
+    syncText("clock", fmtClock(referee.elapsedMs));
+    syncText("clockState", referee.running ? "进行中" : stateText(match.state));
+  }
+
+  function syncText(id, value) {
+    var node = document.getElementById(id);
+    if (node && node.textContent !== String(value)) node.textContent = String(value);
   }
 
   function ensureRefereeBar() {
@@ -499,9 +511,50 @@
     "color:#dff2ff", "border-radius:8px", "padding:5px 9px", "font-size:12px", "cursor:pointer",
   ].join(";");
 
+  // 把裁判端设计稿自带的按钮接到后端（原逻辑保留，仅追加真实请求）
+  function handleRefereePrototypeClick(event) {
+    var target = event.target;
+    if (!target || !target.closest) return false;
+
+    var scoreButton = target.closest("[data-score]");
+    if (scoreButton) {
+      var delta = Number(scoreButton.getAttribute("data-score"));
+      var side = scoreButton.getAttribute("data-team");
+      if (side && delta) refereeAction("score", { side: side, delta: delta });
+      return true;
+    }
+    if (target.closest("#startBtn")) {
+      refereeAction("clock", { action: "start" });
+      return true;
+    }
+    if (target.closest("#pauseBtn")) {
+      // 设计稿的按钮是“暂停/继续”切换
+      refereeAction("clock", { action: referee.running ? "pause" : "start" });
+      return true;
+    }
+    if (target.closest("#endBtn")) {
+      refereeAction("finish");
+      return true;
+    }
+    if (target.closest("#confirmBtn")) {
+      var slotNode = document.getElementById("confirmSlot");
+      var slot = slotNode ? String(slotNode.textContent).trim() : "";
+      if (slot) {
+        refereeAction("signin", {
+          side: /^B/i.test(slot) ? "blue" : "red",
+          slot: slot,
+          signedIn: true,
+        });
+      }
+      return true;
+    }
+    return false;
+  }
+
   function handleRefereeClick(event) {
     var target = event.target;
     if (!target || !target.closest) return;
+    if (handleRefereePrototypeClick(event)) return;
     var button = target.closest("[data-ref]");
     if (!button) return;
     var action = button.getAttribute("data-ref");
