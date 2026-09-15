@@ -2,12 +2,12 @@ import { useState } from "react";
 
 export default function AuthScreen({ onAuthenticated, bootstrap }) {
   const [mode, setMode] = useState(bootstrap ? "bootstrap" : "login");
-  const [name, setName] = useState("陈富坤");
-  const [email, setEmail] = useState("chenfukun@example.com");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [remember, setRemember] = useState(true);
-  const [feedback, setFeedback] = useState("电脑端控制台，请使用本地账号登录。");
+  const [feedback, setFeedback] = useState("请使用已创建的裁判账号或战队账号登录。");
   const [busy, setBusy] = useState(false);
 
   async function submitAuth(event) {
@@ -72,9 +72,9 @@ export default function AuthScreen({ onAuthenticated, bootstrap }) {
             </div>
             <form className="auth-form" onSubmit={submitAuth}>
               {mode === "bootstrap" ? <div className="auth-two-col">
-                <label className="auth-field"><span>姓名</span><input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" /></label>
-                <label className="auth-field"><span>邮箱</span><input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" /></label>
-              </div> : <label className="auth-field"><span>邮箱</span><input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" /></label>}
+                <label className="auth-field"><span>姓名</span><input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" placeholder="请输入姓名" /></label>
+                <label className="auth-field"><span>邮箱</span><input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" placeholder="请输入账号邮箱" /></label>
+              </div> : <label className="auth-field"><span>邮箱</span><input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" placeholder="例如 zhouzimo@example.com" /></label>}
               {mode === "bootstrap" ? <div className="auth-two-col">
                 <label className="auth-field"><span>设置密码</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" /></label>
                 <label className="auth-field"><span>确认密码</span><input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" /></label>

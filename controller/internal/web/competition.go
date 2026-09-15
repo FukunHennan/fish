@@ -26,6 +26,7 @@ const (
 type competitionPlayer struct {
 	Slot     string `json:"slot"`
 	Name     string `json:"name"`
+	Email    string `json:"email,omitempty"`
 	SignedIn bool   `json:"signedIn"`
 	DeviceID string `json:"deviceId,omitempty"`
 	SignedAt string `json:"signedAt,omitempty"`
@@ -197,6 +198,7 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 		Side     string              `json:"side"`
 		Slot     string              `json:"slot"`
 		Name     string              `json:"name"`
+		Email    string              `json:"email"`
 		DeviceID string              `json:"deviceId"`
 		SignedIn *bool               `json:"signedIn"`
 		Score    *int                `json:"score"`
@@ -262,6 +264,9 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 				if strings.EqualFold(team.Players[i].Slot, input.Slot) {
 					if input.Name != "" {
 						team.Players[i].Name = input.Name
+					}
+					if input.Email != "" {
+						team.Players[i].Email = input.Email
 					}
 					if input.DeviceID != "" {
 						team.Players[i].DeviceID = input.DeviceID
@@ -522,9 +527,24 @@ func (s *server) competitionDevicesLocked(store *competitionStore) map[string]an
 	devices := []map[string]any{}
 	for _, device := range s.hub.List() {
 		item := map[string]any{
-			"deviceId": device.ID,
-			"name":     device.Name,
-			"online":   device.Online,
+			"deviceId":           device.ID,
+			"name":               device.Name,
+			"online":             device.Online,
+			"ip":                 device.IP,
+			"firmwareVersion":    device.FirmwareVersion,
+			"rssi":               device.RSSI,
+			"batteryVoltage":     device.BatteryVoltage,
+			"batteryPercent":     device.BatteryPercent,
+			"batterySampleAgeMs": device.BatterySampleAgeMs,
+			"lastSeen":           device.LastSeen,
+			"mode":               device.Mode,
+			"frequency":          device.Frequency,
+			"amplitude":          device.Amplitude,
+			"bias":               device.Bias,
+			"lastControlMs":      device.LastControlMs,
+			"stopReason":         device.StopReason,
+			"controlSource":      device.ControlSource,
+			"visionActive":       device.VisionActive,
 		}
 		if store.Match != nil {
 			if side, slot, ok := store.Match.assignmentOwner(device.ID); ok {

@@ -59,12 +59,16 @@ func TestCompetitionFlow(t *testing.T) {
 		{"blue", "B1"}, {"blue", "B2"}, {"red", "R1"}, {"red", "R2"},
 	} {
 		call(http.MethodPost, "/api/competition/match/signin",
-			`{"side":"`+item.side+`","slot":"`+item.slot+`","signedIn":true,"deviceId":"dev-`+item.slot+`"}`)
+			`{"side":"`+item.side+`","slot":"`+item.slot+`","name":"account-`+item.slot+`","email":"account-`+item.slot+`@example.com","signedIn":true,"deviceId":"dev-`+item.slot+`"}`)
 	}
 	final := call(http.MethodGet, "/api/competition/match", "")
 	match = matchOf(final)
 	if match["state"] != matchStateReady {
 		t.Fatalf("全员签到后状态应为 ready，实际 %v", match["state"])
+	}
+	bluePlayers := match["blue"].(map[string]any)["players"].([]any)
+	if bluePlayers[0].(map[string]any)["email"] != "account-B1@example.com" {
+		t.Fatalf("比赛快照应保留真实账号邮箱: %+v", bluePlayers[0])
 	}
 
 	// 3. 计时
@@ -126,7 +130,7 @@ func TestCompetitionDeviceAssignment(t *testing.T) {
 	t.Setenv("FISH_COMPETITION_STATE", filepath.Join(t.TempDir(), "competition.json"))
 	h := hub.New()
 	handler := NewHandler(h, testKey())
-	h.Register(hub.Device{ID: "fish-a", Name: "机器鱼A", Online: true}, assignmentTestConn{})
+	h.Register(hub.Device{ID: "fish-a", Name: "机器鱼A", Online: true, IP: "192.168.1.10", RSSI: -42, BatteryPercent: 86}, assignmentTestConn{})
 	h.Register(hub.Device{ID: "fish-b", Name: "机器鱼B", Online: true}, assignmentTestConn{})
 
 	call := func(method, path, body string) (int, map[string]any) {
@@ -172,6 +176,12 @@ func TestCompetitionDeviceAssignment(t *testing.T) {
 	for _, raw := range devices {
 		if _, taken := raw.(map[string]any)["assignedTo"]; taken {
 			t.Fatalf("初始不应有归属: %+v", raw)
+		}
+	}
+	for _, raw := range devices {
+		item := raw.(map[string]any)
+		if item["deviceId"] == "fish-a" && (item["ip"] != "192.168.1.10" || item["batteryPercent"].(float64) != 86) {
+			t.Fatalf("设备列表应返回真实状态字段: %+v", item)
 		}
 	}
 

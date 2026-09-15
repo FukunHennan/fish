@@ -21,7 +21,9 @@
 
   var state = {
     user: null,
+    authenticated: false,
     devices: [],
+    match: null,
     bound: {},       // player -> deviceId
     sequence: {},    // deviceId -> sequence
     ready: false,
@@ -57,6 +59,73 @@
   function deviceName(device) {
     if (!device) return "";
     return device.name || device.deviceId || device.id || "";
+  }
+
+  function shortAccount(email) {
+    return String(email || "").split("@")[0] || "";
+  }
+
+  function currentTeamSide() {
+    var text = ((state.user && (state.user.name + " " + state.user.email)) || "").toLowerCase();
+    if (text.indexOf("红队") >= 0 || text.indexOf("red") >= 0 || text.indexOf("linzeyu") >= 0) return "red";
+    return "blue";
+  }
+
+  function slotForPlayer(player) {
+    var red = currentTeamSide() === "red";
+    if (player === "b2") return red ? "R2" : "B2";
+    return red ? "R1" : "B1";
+  }
+
+  function playerForSlot(match, slot) {
+    if (!match || !slot) return null;
+    var side = /^R/i.test(slot) ? "red" : "blue";
+    var team = match[side];
+    var players = (team && team.players) || [];
+    for (var index = 0; index < players.length; index += 1) {
+      if (String(players[index].slot).toUpperCase() === String(slot).toUpperCase()) return players[index];
+    }
+    return null;
+  }
+
+  function playerDisplayName(slot) {
+    var player = playerForSlot(state.match, slot);
+    if (player && player.name) return player.name;
+    if (state.user && state.user.name) return state.user.name;
+    return slot;
+  }
+
+  function currentTeamLabel() {
+    if (!state.user) return "未登录";
+    if (state.user.role === "Admin") return "裁判";
+    return currentTeamSide() === "red" ? "红队" : "蓝队";
+  }
+
+  function paintAccountInfo() {
+    if (!state.user || !document.body) return;
+    var account = shortAccount(state.user.email) || state.user.name || "当前账号";
+    var team = currentTeamLabel();
+    document.querySelectorAll(".teamSessionBadge").forEach(function (node) {
+      node.textContent = team + " · " + account + " 已认证";
+    });
+    var summary = document.querySelector(".teamConfirmSummary");
+    if (summary) {
+      setTextIfFound(summary, "strong", team + "账号");
+      setTextIfFound(summary, "span", account);
+    }
+    var confirms = document.querySelectorAll(".playerConfirm");
+    Array.prototype.forEach.call(confirms, function (card, index) {
+      var local = index === 1 ? "b2" : "b1";
+      var slot = slotForPlayer(local);
+      setTextIfFound(card, "b", playerDisplayName(slot));
+      setTextIfFound(card, "small", slot + " · " + (state.bound[local] || "等待裁判分配机器鱼"));
+      setTextIfFound(card, ".playerReady", state.bound[local] ? "● 已绑定真实机器鱼" : "● 等待分配");
+    });
+    var hint = document.querySelector(".teamConfirmCard .teamAuthHint");
+    if (hint) {
+      var count = PLAYERS.filter(function (player) { return state.bound[player]; }).length;
+      hint.textContent = count + " / 2 台机器鱼已由裁判分配";
+    }
   }
 
   function escapeHtml(value) {
@@ -123,11 +192,13 @@
       .then(function (data) {
         if (data && data.authenticated) {
           state.user = data.user;
+          state.authenticated = true;
           return true;
         }
+        state.authenticated = false;
         return false;
       })
-      .catch(function () { return false; });
+      .catch(function () { state.authenticated = false; return false; });
   }
 
   function doLogin(event) {
@@ -142,9 +213,11 @@
     api("/api/auth/login", { method: "POST", body: credentials })
       .then(function (result) {
         state.user = result.user;
+        state.authenticated = true;
         setBadge("已登录：" + (state.user.email || "") + "（等待绑定设备）", "ok");
         if (loginCard()) loginCard().hidden = true;
         if (confirmCard()) confirmCard().hidden = false;
+        paintAccountInfo();
         ensureVideoSurface();
         observeRenders();
         ensureRefereeIntegration();
@@ -193,6 +266,7 @@
       .then(function (payload) { return (payload && payload.match) || null; })
       .catch(function () { return null; })
       .then(function (match) {
+        state.match = match;
         var assigned = {};
         if (match) {
           ["blue", "red"].forEach(function (side) {
@@ -203,20 +277,16 @@
             });
           });
         }
-        var byOrder = {
-          b1: state.devices[0].deviceId,
-          b2: (state.devices[1] || state.devices[0]).deviceId,
-        };
         var targets = {
-          b1: assigned.B1 || byOrder.b1,
-          b2: assigned.B2 || byOrder.b2,
+          b1: assigned[slotForPlayer("b1")],
+          b2: assigned[slotForPlayer("b2")],
         };
-        if (!assigned.B1 && !assigned.B2) {
-          setBadge("裁判尚未分配机器鱼，暂按在线顺序绑定", "warn");
+        if (!targets.b1 && !targets.b2) {
+          setBadge("裁判尚未给本队分配机器鱼", "warn");
         } else {
           var missing = [];
-          if (assigned.B1 && !state.devices.some(function (d) { return d.deviceId === assigned.B1; })) missing.push("B1");
-          if (assigned.B2 && !state.devices.some(function (d) { return d.deviceId === assigned.B2; })) missing.push("B2");
+          if (targets.b1 && !state.devices.some(function (d) { return d.deviceId === targets.b1; })) missing.push(slotForPlayer("b1"));
+          if (targets.b2 && !state.devices.some(function (d) { return d.deviceId === targets.b2; })) missing.push(slotForPlayer("b2"));
           if (missing.length) setBadge(missing.join("/") + " 分配的机器鱼当前不在线", "warn");
         }
         return applyBindings(targets);
@@ -226,22 +296,34 @@
   function applyBindings(targets) {
     return Promise.all(PLAYERS.map(function (player) {
       var deviceId = targets[player];
-      if (!deviceId) return null;
-      if (state.bound[player] === deviceId) return null;
-      return acquire(deviceId)
+      var previous = state.bound[player];
+      if (!deviceId) {
+        if (previous) {
+          delete state.bound[player];
+          return release(previous);
+        }
+        return null;
+      }
+      if (previous === deviceId) return null;
+      if (previous) delete state.bound[player];
+      var ready = previous ? release(previous) : Promise.resolve();
+      return ready.then(function () {
+        return acquire(deviceId);
+      })
         .then(function () {
           state.bound[player] = deviceId;
           state.sequence[deviceId] = 0;
         })
         .catch(function (error) {
-          setBadge(player.toUpperCase() + " 绑定失败：" + error.message, "error");
+          setBadge(slotForPlayer(player) + " 绑定失败：" + error.message, "error");
         });
     })).then(function () {
       var pairs = PLAYERS
         .filter(function (player) { return state.bound[player]; })
-        .map(function (player) { return player.toUpperCase() + " → " + state.bound[player]; });
+        .map(function (player) { return slotForPlayer(player) + " → " + state.bound[player]; });
       setBadge(pairs.length ? "已绑定 " + pairs.join("　") : "未绑定设备", pairs.length ? "ok" : "warn");
       paintDeviceInfo();
+      paintAccountInfo();
     });
   }
 
@@ -253,7 +335,7 @@
   function sendMotion(player, action) {
     var deviceId = currentDevice(player);
     if (!deviceId) {
-      setBadge(player.toUpperCase() + " 尚未绑定设备", "warn");
+      setBadge(slotForPlayer(player) + " 尚未绑定设备", "warn");
       return;
     }
     if (!MOTION_ACTIONS[action]) return;
@@ -274,8 +356,8 @@
       body.amplitude = DEFAULT_PARAMS.amplitude;
     }
     api("/api/command/realtime", { method: "POST", body: body })
-      .then(function () { setBadge(player.toUpperCase() + " " + action + " → " + deviceId, "ok"); })
-      .catch(function (error) { setBadge(player.toUpperCase() + " 命令被拒绝：" + error.message, "error"); });
+      .then(function () { setBadge(slotForPlayer(player) + " " + action + " → " + deviceId, "ok"); })
+      .catch(function (error) { setBadge(slotForPlayer(player) + " 命令被拒绝：" + error.message, "error"); });
   }
 
   function stopAll(reason) {
@@ -286,8 +368,58 @@
   }
 
   // ---------------------------------------------------------------- 界面回填
+  function deviceStatusLabel(device) {
+    if (!device) return "未分配";
+    return device.online ? "在线" : "离线";
+  }
+
+  function deviceBatteryLabel(device) {
+    if (!device || !device.batteryPercent) return "未上报";
+    return device.batteryPercent + "%";
+  }
+
+  function deviceLatencyLabel(device) {
+    if (!device || !device.lastControlMs) return "未上报";
+    return device.lastControlMs + " ms";
+  }
+
+  function setTextIfFound(root, selector, value) {
+    var node = root.querySelector(selector);
+    if (node && value != null) node.textContent = String(value);
+  }
+
+  function paintPlayerCard(card, localPlayer) {
+    var slot = slotForPlayer(localPlayer);
+    var deviceId = state.bound[localPlayer];
+    var device = state.devices.filter(function (item) { return item.deviceId === deviceId; })[0] || null;
+    var deviceText = device ? deviceName(device) : "裁判未分配机器鱼";
+    setTextIfFound(card, ".playerSeat", slot);
+    setTextIfFound(card, ".preflightSeat", slot);
+    setTextIfFound(card, ".matchPlayerHead h2", playerDisplayName(slot));
+    setTextIfFound(card, ".preflightDeviceCard h3", playerDisplayName(slot));
+    setTextIfFound(card, "header p", deviceText);
+    setTextIfFound(card, ".playerOnline", deviceStatusLabel(device));
+    setTextIfFound(card, ".preflightState", device ? "已读取真实状态" : "等待裁判分配");
+    card.querySelectorAll(".deviceMetric, .preflightMetrics span").forEach(function (metric) {
+      var label = metric.querySelector("small");
+      var value = metric.querySelector("b");
+      if (!label || !value) return;
+      var text = label.textContent.trim();
+      if (text === "连接" || text === "定位") value.textContent = deviceStatusLabel(device);
+      if (text === "电量") value.textContent = deviceBatteryLabel(device);
+      if (text === "延迟") value.textContent = deviceLatencyLabel(device);
+    });
+    card.querySelectorAll(".playerControl header b").forEach(function (node) { node.textContent = slot; });
+  }
+
   function paintDeviceInfo() {
     if (!document.body) return;
+    document.querySelectorAll(".matchPlayerCard.playerA, .preflightDeviceCard.playerA").forEach(function (card) {
+      paintPlayerCard(card, "b1");
+    });
+    document.querySelectorAll(".matchPlayerCard.playerB, .preflightDeviceCard.playerB").forEach(function (card) {
+      paintPlayerCard(card, "b2");
+    });
     var labels = { b1: state.bound.b1, b2: state.bound.b2 };
     PLAYERS.forEach(function (player) {
       var deviceId = labels[player];
@@ -445,6 +577,7 @@
         pending = null;
         ensureVideoSurface();
         paintDeviceInfo();
+        paintAccountInfo();
         ensureRefereeIntegration();
         refreshFishAssignments();
       }, 200);
@@ -485,11 +618,12 @@
     return api("/api/competition/match")
       .then(function (payload) {
         referee.match = payload.match;
+        state.match = payload.match;
         referee.elapsedMs = payload.elapsedMs || 0;
         referee.running = !!payload.running;
         paintReferee();
       })
-      .catch(function () { /* 未登录等场景静默 */ });
+      .catch(function () { clearRefereePrototypeData("请登录裁判账号"); });
   }
 
   function paintReferee() {
@@ -513,6 +647,7 @@
     syncText("redQuick", match.red.score);
     syncText("clock", fmtClock(referee.elapsedMs));
     syncText("clockState", referee.running ? "进行中" : stateText(match.state));
+    paintRefereeRoster(match);
   }
 
   function syncText(id, value) {
@@ -601,7 +736,90 @@
     });
   }
 
+  function fmtSignedAt(value) {
+    if (!value) return "";
+    var date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toLocaleTimeString("zh-CN", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  }
+
+  function paintRefereeRoster(match) {
+    if (!match) return;
+    var blueTitle = document.querySelector(".teamCard.blue .teamHead h2");
+    var redTitle = document.querySelector(".teamCard.red .teamHead h2");
+    if (blueTitle) blueTitle.textContent = "蓝队 · " + (match.blue && match.blue.name ? match.blue.name : "蓝队");
+    if (redTitle) redTitle.textContent = "红队 · " + (match.red && match.red.name ? match.red.name : "红队");
+    document.querySelectorAll(".player").forEach(function (card) {
+      var title = card.querySelector(".playerTop b");
+      var slot = title ? normalizeSlot(String(title.textContent).split("·")[0]) : "";
+      var player = playerForSlot(match, slot);
+      if (!slot || !player) return;
+      title.textContent = slot + " · " + (player.name || slot);
+      setTextIfFound(card, ".status", player.signedIn ? "✓ 已签到" : "○ 未签到");
+      card.classList.toggle("done", !!player.signedIn);
+      card.querySelectorAll(".meta").forEach(function (meta) {
+        var label = meta.querySelector("span");
+        var value = meta.querySelector("strong");
+        if (!label || !value) return;
+        if (label.textContent.trim() === "编号") value.textContent = shortAccount(player.email) || player.name || slot;
+        if (label.textContent.trim() === "席位") value.textContent = slot;
+      });
+      setTextIfFound(card, ".playerTime", player.signedIn ? ("签到时间 " + (fmtSignedAt(player.signedAt) || "已记录")) : "等待裁判签到");
+    });
+    document.querySelectorAll(".selectPlayer[data-slot]").forEach(function (button) {
+      var slot = button.getAttribute("data-slot");
+      var player = playerForSlot(match, slot);
+      if (!player) return;
+      setTextIfFound(button, "b", slot + " · " + (player.name || slot));
+      var small = button.querySelector("small");
+      if (small) small.textContent = (shortAccount(player.email) || player.name || slot) + " · " + (player.deviceId || "未分配机器鱼");
+      var action = button.querySelector("span");
+      if (action) action.textContent = player.signedIn ? "已签到" : "选择 →";
+      button.disabled = !!player.signedIn;
+    });
+    var slotNode = document.getElementById("confirmSlot");
+    if (slotNode) {
+      var current = playerForSlot(match, slotNode.textContent);
+      if (current) {
+        syncText("confirmName", current.name || current.slot);
+        syncText("confirmTeam", (/^R/i.test(current.slot) ? (match.red && match.red.name) : (match.blue && match.blue.name)) || "");
+        syncText("confirmId", shortAccount(current.email) || current.name || current.slot);
+      }
+    }
+  }
+
+  function clearRefereePrototypeData(reason) {
+    if (!isRefereePage()) return;
+    var blueTitle = document.querySelector(".teamCard.blue .teamHead h2");
+    var redTitle = document.querySelector(".teamCard.red .teamHead h2");
+    if (blueTitle) blueTitle.textContent = "蓝队 · 未读取真实账号";
+    if (redTitle) redTitle.textContent = "红队 · 未读取真实账号";
+    document.querySelectorAll(".player").forEach(function (card) {
+      var title = card.querySelector(".playerTop b");
+      var slot = title ? normalizeSlot(String(title.textContent).split("·")[0]) : "";
+      if (!slot) return;
+      title.textContent = slot + " · 未读取账号";
+      setTextIfFound(card, ".status", "○ 未确认");
+      card.classList.remove("done");
+      card.querySelectorAll(".meta").forEach(function (meta) {
+        var label = meta.querySelector("span");
+        var value = meta.querySelector("strong");
+        if (!label || !value) return;
+        if (label.textContent.trim() === "编号") value.textContent = "未登录";
+        if (label.textContent.trim() === "机器鱼") value.textContent = "未读取";
+        if (label.textContent.trim() === "席位") value.textContent = slot;
+      });
+      setTextIfFound(card, ".playerTime", reason || "等待真实数据");
+    });
+    document.querySelectorAll(".selectPlayer[data-slot]").forEach(function (button) {
+      var slot = button.getAttribute("data-slot");
+      setTextIfFound(button, "b", slot + " · 未读取账号");
+      setTextIfFound(button, "small", "请先登录裁判账号");
+    });
+  }
+
   function paintSignupFish(devices) {
+    paintRefereeRoster(referee.match || state.match);
     document.querySelectorAll(".player").forEach(function (card) {
       var title = card.querySelector(".playerTop b");
       var slot = title ? normalizeSlot(String(title.textContent).split("·")[0]) : "";
@@ -611,7 +829,7 @@
         var label = meta.querySelector("span");
         var value = meta.querySelector("strong");
         if (label && value && label.textContent.trim() === "机器鱼") {
-          value.textContent = current ? deviceLabel(current) : "未分配";
+          value.textContent = current ? (deviceLabel(current) + " · " + deviceStatusLabel(current)) : "未分配";
         }
       });
     });
@@ -622,7 +840,7 @@
       var slot = button.getAttribute("data-slot");
       var current = currentDeviceForSlot(devices, slot);
       var available = devicesForSlot(devices, slot);
-      var summary = current ? ("已分配：" + deviceLabel(current))
+      var summary = current ? ("已分配：" + deviceLabel(current) + "（" + deviceStatusLabel(current) + "）")
         : (available.length ? ("可分配：" + available.length + " 条") : "暂无可分配机器鱼");
       var preview = button.querySelector(".fishAssignPreview");
       if (!preview) {
@@ -640,12 +858,16 @@
     var current = currentDeviceForSlot(devices, slot);
     var field = document.getElementById("confirmFish");
     if (field && normalizeSlot(document.getElementById("confirmSlot") ? document.getElementById("confirmSlot").textContent : "") === normalizeSlot(slot)) {
-      field.textContent = current ? deviceLabel(current) : "未分配";
+      field.textContent = current ? (deviceLabel(current) + " · " + deviceStatusLabel(current)) : "未分配";
     }
   }
 
   function refreshFishAssignments() {
     if (!isRefereePage()) return Promise.resolve();
+    if (!state.authenticated) {
+      clearRefereePrototypeData("请登录裁判账号");
+      return Promise.resolve();
+    }
     return loadCompetitionDevices()
       .then(function (devices) {
         paintSignupFish(devices);
@@ -653,7 +875,7 @@
         var slotNode = document.getElementById("confirmSlot");
         if (slotNode) paintConfirmFish(devices, slotNode.textContent);
       })
-      .catch(function () { /* 签到鱼列表失败不影响主界面 */ });
+      .catch(function () { clearRefereePrototypeData("真实机器鱼状态读取失败"); });
   }
 
   function injectFishSelect(slot) {
@@ -850,6 +1072,7 @@
         if (layer) layer.hidden = true;
         if (!isRefereePage() && location.hash !== "#control") location.hash = "control";
         setBadge("已登录：" + (state.user.email || "当前账号"), "ok");
+        paintAccountInfo();
         refreshDevices();
         ensureVideoSurface();
         ensureRefereeIntegration();
