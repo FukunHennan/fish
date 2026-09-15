@@ -104,8 +104,10 @@
   function readCredentials() {
     var account = document.getElementById("teamAccountInput");
     var password = document.querySelector("#teamLoginCard input[type=password]");
+    var email = account ? String(account.value).trim() : "";
+    if (email && email.indexOf("@") < 0) email += "@example.com";
     return {
-      email: account ? String(account.value).trim() : "",
+      email: email,
       password: password ? String(password.value) : "",
     };
   }

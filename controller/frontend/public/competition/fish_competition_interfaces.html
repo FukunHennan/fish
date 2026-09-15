@@ -42,7 +42,7 @@ function show(which){
 }
 playerBtn.onclick=()=>show('player');
 refBtn.onclick=()=>show('referee');
-show('player');
+show(location.hash==='#referee'?'referee':'player');
 </script>
 </body>
 </html>
