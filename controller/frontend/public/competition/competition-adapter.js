@@ -272,7 +272,10 @@
   var video = { peer: null, stream: null, sessionId: null, timer: null, connecting: false };
 
   function videoSurface() {
-    return document.querySelector(".poolStage.matchPool") || document.querySelector(".poolStage");
+    // 选手端是 poolStage，裁判端的 .videoStage 自带 video 样式
+    return document.querySelector(".poolStage.matchPool")
+      || document.querySelector(".poolStage")
+      || document.querySelector(".videoStage");
   }
 
   function waitForIce(peer) {
@@ -369,11 +372,15 @@
       element.autoplay = true;
       element.muted = true;
       element.setAttribute("playsinline", "");
-      element.style.cssText = [
-        "position:absolute", "inset:0", "width:100%", "height:100%",
-        "object-fit:contain", "z-index:0", "background:transparent",
-        "pointer-events:none",
-      ].join(";");
+      if (!stage.classList.contains("videoStage")) {
+        // 选手端的水池是装饰层，视频作为底层铺满
+        element.style.cssText = [
+          "position:absolute", "inset:0", "width:100%", "height:100%",
+          "object-fit:contain", "z-index:0", "background:transparent",
+          "pointer-events:none",
+        ].join(";");
+      }
+      // 裁判端 .videoStage video 已由页面样式定义，无需内联样式
       stage.insertBefore(element, stage.firstChild);
     }
     if (video.stream && element.srcObject !== video.stream) {
