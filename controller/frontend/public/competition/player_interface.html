@@ -5228,9 +5228,10 @@ p {
   }
 
   function normalizeKey(event) {
-    if (event.key === 'Spacebar') return ' ';
-    if (event.key.length === 1 && event.key !== ' ') return event.key.toLowerCase();
-    return event.key;
+    const key = typeof event === 'string' ? event : String(event && event.key || '');
+    if (key === 'Spacebar') return ' ';
+    if (key.length === 1 && key !== ' ') return key.toLowerCase();
+    return key;
   }
 
   function keyboardIcon() {
@@ -6419,13 +6420,13 @@ p {
   document.getElementById('teamConfirmBack').addEventListener('click',showLogin);
   document.getElementById('teamEnterTerminal').addEventListener('click',enterTerminal);
   window.addEventListener('hashchange',()=>setTimeout(addSessionBadge,0));
-  new MutationObserver(()=>{ if(layer.hidden) addSessionBadge(); }).observe(document.getElementById('competition-root'),{childList:true,subtree:true});
+  window.setInterval(()=>{ if(layer.hidden) addSessionBadge(); },500);
   if(stage==='confirm') showConfirm();
   else if(stage==='terminal'){ layer.hidden=true; if(location.hash!=='#control') location.hash='control'; setTimeout(addSessionBadge,0); }
   else showLogin();
 })();
 </script>
 
-<script src="competition-adapter.js?v=20260916-standard-accounts"></script>
+<script src="competition-adapter.js?v=20260916-camera-controls"></script>
 </body>
 </html>

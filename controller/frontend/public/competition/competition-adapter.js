@@ -883,19 +883,13 @@
 
   function observeRenders() {
     if (typeof window.MutationObserver !== "function" || !document.body) return;
-    var pending = null;
-    var observer = new window.MutationObserver(function () {
-      if (pending) return;
-      pending = setTimeout(function () {
-        pending = null;
-        ensureVideoSurface();
-        paintDeviceInfo();
-        paintAccountInfo();
-        ensureRefereeIntegration();
-        refreshFishAssignments();
-      }, 200);
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
+    window.setInterval(function () {
+      ensureVideoSurface();
+      paintDeviceInfo();
+      paintAccountInfo();
+      ensureRefereeIntegration();
+      refreshFishAssignments();
+    }, 500);
   }
 
   // ---------------------------------------------------------------- 裁判端
