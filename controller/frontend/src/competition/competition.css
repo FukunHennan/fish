@@ -59,6 +59,45 @@ button {
   overflow: hidden;
 }
 
+.competitionVideoPanel {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  background: rgba(2, 17, 34, 0.62);
+}
+
+.competitionVideoHeader,
+.competitionVideoToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1em;
+  padding: 1em 1.2em;
+  border-bottom: 1px solid rgba(57, 200, 255, 0.22);
+}
+
+.competitionVideoHeader h2 { margin: 0; font-size: 1.2em; }
+.competitionVideoHeader p { margin: .3em 0 0; color: #83cff5; font-size: .78em; }
+.competitionVideoStatus { display: inline-flex; align-items: center; gap: .45em; color: #92abc0; font-size: .78em; white-space: nowrap; }
+.competitionVideoStatus i { width: .65em; height: .65em; border-radius: 50%; background: #71879b; }
+.competitionVideoStatus.online { color: #9dffd0; }
+.competitionVideoStatus.online i { background: var(--green); box-shadow: 0 0 10px rgba(41, 245, 162, .65); }
+.competitionVideoToolbar { justify-content: flex-start; flex-wrap: wrap; padding-top: .75em; padding-bottom: .75em; }
+.competitionVideoToolbar label { display: grid; gap: .35em; min-width: 12em; color: #91b8cf; font-size: .76em; font-weight: 800; }
+.competitionVideoToolbar select { min-width: 15em; padding: .55em .7em; border: 1px solid rgba(57, 200, 255, .35); border-radius: 6px; color: #e5f8ff; background: rgba(3, 28, 55, .92); font-size: .95em; }
+.competitionVideoAction { align-self: end; min-height: 2.2em; padding: 0 1em; border: 1px solid rgba(57, 220, 255, .55); border-radius: 6px; color: #e9fdff; background: rgba(13, 105, 150, .7); font-size: .78em; font-weight: 800; }
+.competitionVideoAction:hover:not(:disabled) { background: rgba(20, 149, 196, .82); }
+.competitionVideoStage { position: relative; display: grid; min-width: 0; min-height: 0; place-items: center; overflow: hidden; margin: 1em; border: 1px solid rgba(57, 200, 255, .35); border-radius: 8px; background: #010811; aspect-ratio: var(--competition-video-aspect, 16 / 9); align-self: center; }
+.competitionLiveVideo { display: block; width: 100%; height: 100%; object-fit: contain; background: #010811; }
+.competitionVideoPlaceholder { display: grid; gap: .6em; padding: 2em; color: #8baec3; text-align: center; }
+.competitionVideoPlaceholder strong { color: #dff7ff; font-size: 1.05em; }
+.competitionVideoPlaceholder span { font-size: .78em; }
+.competitionVideoStage > .competitionVideoPlaceholder { position: absolute; inset: 0; place-content: center; background: rgba(1, 8, 17, .78); }
+.competitionVideoFeedback { position: absolute; right: .8em; bottom: .7em; left: .8em; z-index: 3; margin: 0; padding: .45em .65em; border: 1px solid rgba(57, 200, 255, .28); border-radius: 5px; color: #b9d9e8; background: rgba(2, 16, 29, .82); font-size: .72em; }
+
 .competitionApp::before {
   position: absolute;
   inset: -12%;

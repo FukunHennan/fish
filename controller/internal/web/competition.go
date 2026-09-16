@@ -317,12 +317,12 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "该机器鱼当前不在线", http.StatusConflict)
 			return
 		}
-		// 一条鱼同时只能归属一个席位
+		// 换绑是幂等操作：新席位接管机器鱼时，旧席位自动释放。
+		// 这样裁判不需要先手动解除，再重新分配，设备归属始终只有一个来源。
 		if side, slot, taken := match.assignmentOwner(deviceID); taken {
 			sameSlot := strings.EqualFold(side, team.Side) && strings.EqualFold(slot, input.Slot)
 			if !sameSlot {
-				http.Error(w, fmt.Sprintf("该机器鱼已归属 %s 的 %s", side, slot), http.StatusConflict)
-				return
+				match.clearDeviceAssignment(deviceID)
 			}
 		}
 		assigned := false
@@ -510,6 +510,17 @@ func (m *competitionMatch) assignmentOwner(deviceID string) (string, string, boo
 		}
 	}
 	return "", "", false
+}
+
+// clearDeviceAssignment removes a machine fish from every match seat.
+func (m *competitionMatch) clearDeviceAssignment(deviceID string) {
+	for _, team := range []*competitionTeam{&m.Blue, &m.Red} {
+		for i := range team.Players {
+			if strings.EqualFold(team.Players[i].DeviceID, deviceID) {
+				team.Players[i].DeviceID = ""
+			}
+		}
+	}
 }
 
 // deviceOnline 判断机器鱼是否在线。

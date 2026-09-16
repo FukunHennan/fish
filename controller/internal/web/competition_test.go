@@ -195,10 +195,17 @@ func TestCompetitionDeviceAssignment(t *testing.T) {
 		t.Fatalf("B1 应绑定 fish-a，实际 %q", got)
 	}
 
-	// 同一台鱼不能归属第二个席位
-	if code, _ := call(http.MethodPost, "/api/competition/match/assign",
-		`{"side":"red","slot":"R1","deviceId":"fish-a"}`); code != http.StatusConflict {
-		t.Fatalf("重复分配应返回 409，实际 %d", code)
+	// 同一台鱼可以直接换绑到另一个席位，旧席位必须自动释放
+	code, reassigned := call(http.MethodPost, "/api/competition/match/assign",
+		`{"side":"red","slot":"R1","deviceId":"fish-a"}`)
+	if code != http.StatusOK {
+		t.Fatalf("换绑失败: %d %+v", code, reassigned)
+	}
+	if got := playerDevice(reassigned, "blue", "B1"); got != "" {
+		t.Fatalf("换绑后旧席位应释放，实际 %q", got)
+	}
+	if got := playerDevice(reassigned, "red", "R1"); got != "fish-a" {
+		t.Fatalf("换绑后 R1 应绑定 fish-a，实际 %q", got)
 	}
 
 	// 离线设备不能被分配
@@ -207,12 +214,12 @@ func TestCompetitionDeviceAssignment(t *testing.T) {
 		t.Fatalf("离线设备应返回 409，实际 %d", code)
 	}
 
-	// 分配后设备列表反映归属
+	// 分配后设备列表反映新归属
 	_, listed = call(http.MethodGet, "/api/competition/devices", "")
 	for _, raw := range listed["devices"].([]any) {
 		item := raw.(map[string]any)
-		if item["deviceId"] == "fish-a" && item["assignedTo"] != "blue/B1" {
-			t.Fatalf("fish-a 归属应为 blue/B1: %+v", item)
+		if item["deviceId"] == "fish-a" && item["assignedTo"] != "red/R1" {
+			t.Fatalf("fish-a 归属应为 red/R1: %+v", item)
 		}
 	}
 
@@ -223,8 +230,14 @@ func TestCompetitionDeviceAssignment(t *testing.T) {
 	} else if got := playerDevice(released, "blue", "B1"); got != "" {
 		t.Fatalf("解除后应为空，实际 %q", got)
 	}
+	if code, released := call(http.MethodPost, "/api/competition/match/unassign",
+		`{"side":"red","slot":"R1"}`); code != http.StatusOK {
+		t.Fatalf("解除失败: %d", code)
+	} else if got := playerDevice(released, "red", "R1"); got != "" {
+		t.Fatalf("解除后 R1 应为空，实际 %q", got)
+	}
 	if code, _ := call(http.MethodPost, "/api/competition/match/assign",
-		`{"side":"red","slot":"R1","deviceId":"fish-a"}`); code != http.StatusOK {
+		`{"side":"blue","slot":"B2","deviceId":"fish-a"}`); code != http.StatusOK {
 		t.Fatalf("重新分配失败: %d", code)
 	}
 }

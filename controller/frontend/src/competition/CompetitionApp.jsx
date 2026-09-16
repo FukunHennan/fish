@@ -4,6 +4,7 @@ import {
   competitionStateLabel,
   formatCompetitionClock,
 } from "./competitionApi.js";
+import CompetitionVideoPanel from "./CompetitionVideoPanel.jsx";
 
 const pages = [
   { id: "lobby", label: "比赛大厅", icon: "home", ratio: "1685 / 934", ratioValue: 1.8041 },
@@ -337,9 +338,7 @@ function MatchHud({ match, elapsedMs, onAction, busy }) {
 
 function DeviceAssignment({ team, slot, devices, onAssign, busy }) {
   const player = playerForSlot(team, slot);
-  const availableDevices = devices.filter((device) => (
-    device.online && (!device.assignedTo || device.assignedTo.toUpperCase() === `${team.side}/${slot}`.toUpperCase())
-  ));
+  const availableDevices = devices.filter((device) => device.online);
   return (
     <label className="deviceAssignment">
       <span>{slot} · {player.name || "待签到"}</span>
@@ -349,7 +348,10 @@ function DeviceAssignment({ team, slot, devices, onAssign, busy }) {
         onChange={(event) => onAssign(team.side, slot, event.target.value)}
       >
         <option value="">未分配机器鱼</option>
-        {availableDevices.map((device) => <option key={device.deviceId} value={device.deviceId}>{deviceLabel(device)}</option>)}
+        {availableDevices.map((device) => {
+          const assignment = device.assignedTo ? ` · 当前 ${device.assignedTo}` : " · 未分配";
+          return <option key={device.deviceId} value={device.deviceId}>{deviceLabel(device)}{assignment}</option>;
+        })}
       </select>
     </label>
   );
@@ -397,8 +399,7 @@ function ControlPage({ match, elapsedMs, devices, onAction, busy }) {
       </aside>
 
       <main className="fieldPanel glassCard hoverCard">
-        <header><h2>实时场地画面（顶部视角）</h2><span>LIVE　高清 / 30 FPS</span></header>
-        <ControlPool />
+        <CompetitionVideoPanel />
         <footer><span>水池尺寸：6.0m × 4.0m</span><span>{current.matchNo} · {competitionStateLabel(current.state)}</span></footer>
       </main>
 

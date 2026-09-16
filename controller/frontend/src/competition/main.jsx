@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import CompetitionApp from "./CompetitionApp.jsx";
 import "./competition.css";
+import "../styles.css";
 
 const root = document.getElementById("competition-root");
 

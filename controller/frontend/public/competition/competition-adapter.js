@@ -499,7 +499,11 @@
   // 把后端 WebRTC 画面接到界面的“实时赛场”区域。共享视觉会话提供赛场
   // 画面，因此使用 root 会话；连接建立后只重新挂载 video 元素，
   // 页面切换不会重建媒体连接。
-  var video = { peer: null, stream: null, sessionId: null, timer: null, connecting: false, statusText: "视觉未启用" };
+  var video = {
+    peer: null, stream: null, sessionId: null, timer: null, connecting: false,
+    statusText: "视觉未启用", source: "server", cameras: [], cameraIndex: "",
+    localStream: null, localDeviceId: "", localCameras: [], cameraLoading: false, controls: null,
+  };
 
   function videoSurface() {
     // 选手端是 poolStage，裁判端的 .videoStage 自带 video 样式
@@ -536,7 +540,7 @@
   }
 
   function connectVideo() {
-    if (video.connecting || video.peer) return;
+    if (video.source === "local" || video.connecting || video.peer) return;
     video.connecting = true;
     api("/api/vision/sessions/current")
       .then(function (payload) {
@@ -601,6 +605,29 @@
   function mountVideoSurface() {
     var stage = videoSurface();
     if (!stage) return;
+    ensureVideoControls(stage);
+    if (video.source === "local") {
+      var localElement = stage.querySelector("video[data-fish-local-video]");
+      if (!localElement) {
+        localElement = document.createElement("video");
+        localElement.setAttribute("data-fish-local-video", "1");
+        localElement.autoplay = true;
+        localElement.muted = true;
+        localElement.setAttribute("playsinline", "");
+        localElement.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-index:2;background:#020b13";
+        stage.appendChild(localElement);
+      }
+      localElement.srcObject = video.localStream || null;
+      if (video.localStream) {
+        var localPlayed = localElement.play();
+        if (localPlayed && localPlayed.catch) localPlayed.catch(function () {});
+      }
+      var remoteElement = stage.querySelector("video[data-fish-video]");
+      if (remoteElement) remoteElement.hidden = true;
+      return;
+    }
+    var staleLocal = stage.querySelector("video[data-fish-local-video]");
+    if (staleLocal) staleLocal.remove();
     var element = stage.querySelector("video[data-fish-video]");
     if (!element) {
       element = document.createElement("video");
@@ -624,13 +651,234 @@
       var played = element.play();
       if (played && played.catch) played.catch(function () { /* 自动播放被拦截时忽略 */ });
     }
+    element.hidden = false;
+  }
+
+  function stopLocalCamera() {
+    if (!video.localStream) return;
+    video.localStream.getTracks().forEach(function (track) { track.stop(); });
+    video.localStream = null;
+    mountVideoSurface();
+  }
+
+  function refreshLocalCameras(requestPermission) {
+    if (!window.navigator.mediaDevices || !window.navigator.mediaDevices.enumerateDevices) {
+      return Promise.reject(new Error("当前浏览器不支持本机摄像头选择"));
+    }
+    var permission = requestPermission && !video.localStream
+      ? window.navigator.mediaDevices.getUserMedia({ video: true, audio: false }).then(function (stream) {
+        stream.getTracks().forEach(function (track) { track.stop(); });
+      }) : Promise.resolve();
+    return permission.then(function () {
+      return window.navigator.mediaDevices.enumerateDevices();
+    }).then(function (items) {
+      video.localCameras = items.filter(function (item) { return item.kind === "videoinput"; });
+      if (!video.localDeviceId || !video.localCameras.some(function (item) { return item.deviceId === video.localDeviceId; })) {
+        video.localDeviceId = video.localCameras[0] ? video.localCameras[0].deviceId : "";
+      }
+      renderVideoControls();
+      return video.localCameras;
+    });
+  }
+
+  function cameraText(camera, index) {
+    var name = camera && (camera.model || camera.name) || "服务器摄像头 " + (index + 1);
+    var size = camera && camera.width && camera.height ? " · " + camera.width + "×" + camera.height : "";
+    return name + size;
+  }
+
+  function localCameraText(camera, index) {
+    var name = camera && camera.label || "本机摄像头 " + (index + 1);
+    return /integrated|built[- ]?in|内置|facetime/i.test(name) ? name + " · 电脑自带" : name;
+  }
+
+  function renderVideoControls() {
+    if (!video.controls) return;
+    var source = video.controls.querySelector("[data-video-source]");
+    var camera = video.controls.querySelector("[data-video-camera]");
+    var action = video.controls.querySelector("[data-video-action]");
+    var list = video.source === "local" ? (video.localCameras || []) : video.cameras;
+    if (source) source.value = video.source;
+    if (camera) {
+      camera.innerHTML = list.length
+        ? list.map(function (item, index) {
+          var value = video.source === "local" ? item.deviceId : String(item.index);
+          var selected = video.source === "local" ? value === video.localDeviceId : value === String(video.cameraIndex);
+          return '<option value="' + escapeHtml(value || "") + '"' + (selected ? " selected" : "") + ">" + escapeHtml(video.source === "local" ? localCameraText(item, index) : cameraText(item, index)) + "</option>";
+        }).join("")
+        : '<option value="">暂无可用摄像头</option>';
+      camera.disabled = !list.length;
+    }
+    if (action) {
+      action.textContent = video.source === "local" ? (video.localStream ? "关闭本机预览" : "打开本机预览") : (video.sessionId ? "停止服务器视频" : "启动真实视频");
+      action.disabled = video.source === "local" ? !video.localDeviceId && !video.localStream : (!video.sessionId && !video.cameraIndex);
+    }
+  }
+
+  function ensureVideoControls(stage) {
+    if (video.controls && video.controls.isConnected) return;
+    var controls = document.createElement("div");
+    controls.className = "fishVideoControls";
+    controls.style.cssText = "position:absolute;left:10px;right:10px;top:10px;z-index:8;display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:7px 8px;border:1px solid rgba(80,205,255,.26);border-radius:8px;background:rgba(2,18,34,.84);backdrop-filter:blur(7px);font:11px system-ui,'Microsoft YaHei',sans-serif";
+    controls.innerHTML = '<label style="display:flex;align-items:center;gap:4px;color:#a8d8ec">画面来源<select data-video-source style="max-width:180px;padding:4px 6px;border-radius:5px;background:#071c31;color:#eaffff;border:1px solid rgba(80,205,255,.3)"><option value="server">服务器摄像头 · 赛事共享</option><option value="local">电脑摄像头 · 本机预览</option></select></label>' +
+      '<label style="display:flex;align-items:center;gap:4px;color:#a8d8ec">摄像头<select data-video-camera style="max-width:220px;padding:4px 6px;border-radius:5px;background:#071c31;color:#eaffff;border:1px solid rgba(80,205,255,.3)"></select></label>' +
+      '<button type="button" data-video-action style="padding:5px 8px;border:1px solid rgba(65,230,162,.35);border-radius:5px;background:#0a6149;color:#eaffff;font-weight:800"></button>';
+    stage.appendChild(controls);
+      video.controls = controls;
+    controls.querySelector("[data-video-source]").addEventListener("change", function (event) {
+      video.source = event.target.value;
+      if (video.source === "local") {
+        closeVideoPeer();
+        refreshLocalCameras(true).then(function (list) {
+          if (list.length) startLocalCamera(video.localDeviceId || list[0].deviceId);
+        }).catch(function (error) { setVisionStatus(error.message, "error"); video.source = "server"; renderVideoControls(); });
+      } else {
+        stopLocalCamera();
+        setVisionStatus(video.sessionId ? "服务器真实视频" : "服务器视频未启动", "info");
+        mountVideoSurface();
+      }
+      renderVideoControls();
+    });
+    controls.querySelector("[data-video-camera]").addEventListener("change", function (event) {
+      if (video.source === "local") startLocalCamera(event.target.value);
+      else switchServerCamera(event.target.value);
+    });
+    controls.querySelector("[data-video-action]").addEventListener("click", function () {
+      if (video.source === "local") {
+        if (video.localStream) stopLocalCamera(); else startLocalCamera(video.localDeviceId);
+      } else if (video.sessionId) stopServerVideo(); else startServerVideo();
+    });
+    renderVideoControls();
+  }
+
+  function closeVideoPeer() {
+    if (video.timer) {
+      clearTimeout(video.timer);
+      video.timer = null;
+    }
+    if (video.peer) {
+      try { video.peer.close(); } catch (e) { /* 忽略关闭异常 */ }
+    }
+    video.peer = null;
+    video.stream = null;
+    video.connecting = false;
+    var stage = videoSurface();
+    var element = stage && stage.querySelector("video[data-fish-video]");
+    if (element) {
+      element.srcObject = null;
+      element.hidden = true;
+    }
+  }
+
+  function sessionData(payload) {
+    return payload && (payload.data || payload) || {};
+  }
+
+  function loadServerCameras() {
+    return api("/api/vision/cameras").then(function (payload) {
+      var list = Array.isArray(payload) ? payload : (payload && Array.isArray(payload.cameras) ? payload.cameras : []);
+      video.cameras = list;
+      if (!video.cameraIndex || !list.some(function (camera) { return String(camera.index) === String(video.cameraIndex); })) {
+        video.cameraIndex = list[0] && list[0].index != null ? String(list[0].index) : "";
+      }
+      renderVideoControls();
+      return list;
+    }).catch(function (error) {
+      video.cameras = [];
+      renderVideoControls();
+      setVisionStatus("服务器摄像头读取失败：" + error.message, "error");
+      return [];
+    });
+  }
+
+  function startServerVideo() {
+    if (!video.cameraIndex) {
+      setVisionStatus("请先选择服务器摄像头", "warn");
+      return;
+    }
+    setVisionStatus("正在启动真实摄像头视频…", "info");
+    return api("/api/vision/sessions", {
+      method: "POST",
+      body: { cameraId: "camera-" + video.cameraIndex, cameraIndex: Number(video.cameraIndex), trackingMode: "single_fish" },
+    }).then(function (payload) {
+      var session = sessionData(payload);
+      video.sessionId = session.sessionId || null;
+      video.source = "server";
+      closeVideoPeer();
+      renderVideoControls();
+      setVisionStatus(video.sessionId ? "真实视频已启动，正在连接…" : "服务器视频未启动", video.sessionId ? "info" : "warn");
+      if (video.sessionId) connectVideo();
+      return session;
+    }).catch(function (error) {
+      setVisionStatus("真实视频启动失败：" + error.message, "error");
+    });
+  }
+
+  function stopServerVideo() {
+    var sessionId = video.sessionId;
+    if (!sessionId) {
+      setVisionStatus("服务器视频未启动", "info");
+      return Promise.resolve();
+    }
+    return api("/api/vision/sessions/" + encodeURIComponent(sessionId), { method: "DELETE" })
+      .then(function () {
+        video.sessionId = null;
+        closeVideoPeer();
+        renderVideoControls();
+        setVisionStatus("服务器视频已停止；手动操控仍可用", "info");
+      }).catch(function (error) {
+        setVisionStatus("停止服务器视频失败：" + error.message, "error");
+      });
+  }
+
+  function switchServerCamera(index) {
+    video.cameraIndex = String(index || "");
+    renderVideoControls();
+    if (!video.sessionId || !video.cameraIndex) return;
+    return api("/api/vision/sessions/" + encodeURIComponent(video.sessionId) + "/camera", {
+      method: "POST",
+      body: { cameraId: "camera-" + video.cameraIndex, cameraIndex: Number(video.cameraIndex) },
+    }).then(function () {
+      closeVideoPeer();
+      setVisionStatus("服务器摄像头已切换，视频保持开启", "ok");
+      connectVideo();
+    }).catch(function (error) {
+      setVisionStatus("切换服务器摄像头失败：" + error.message, "error");
+    });
+  }
+
+  function startLocalCamera(deviceId) {
+    if (!window.navigator.mediaDevices || !window.navigator.mediaDevices.getUserMedia) {
+      setVisionStatus("当前浏览器不支持本机摄像头", "error");
+      return Promise.resolve();
+    }
+    var selected = deviceId || video.localDeviceId;
+    return window.navigator.mediaDevices.getUserMedia({
+      video: selected ? { deviceId: { exact: selected } } : true,
+      audio: false,
+    }).then(function (stream) {
+      if (video.localStream) video.localStream.getTracks().forEach(function (track) { track.stop(); });
+      video.localStream = stream;
+      video.localDeviceId = selected || "";
+      video.source = "local";
+      mountVideoSurface();
+      renderVideoControls();
+      setVisionStatus("电脑摄像头预览已接入；视觉与手动操控独立", "ok");
+      return refreshLocalCameras(false);
+    }).catch(function (error) {
+      setVisionStatus("电脑摄像头无法开启：" + error.message, "error");
+    });
   }
 
   function ensureVideoSurface() {
     if (!state.user) return;       // 未登录不请求视觉接口
     setVisionStatus(video.statusText || "视觉未启用", "info");
     mountVideoSurface();
-    if (!video.peer) connectVideo();
+    if (!video.cameras.length && !video.cameraLoading) {
+      video.cameraLoading = true;
+      loadServerCameras().finally(function () { video.cameraLoading = false; });
+    }
+    if (video.source === "server" && !video.peer) connectVideo();
   }
 
   function observeRenders() {
@@ -778,9 +1026,13 @@
 
   function devicesForSlot(devices, slot) {
     return (devices || []).filter(function (device) {
-      if (!device.online) return false;
-      return !device.assignedTo || assignedToSlot(device, slot);
+      return !!device.online;
     });
+  }
+
+  function deviceAssignmentLabel(device) {
+    if (!device || !device.assignedTo) return "未分配";
+    return "当前 " + device.assignedTo;
   }
 
   function currentDeviceForSlot(devices, slot) {
@@ -969,15 +1221,15 @@
       available.forEach(function (device) {
         var mine = assignedToSlot(device, slot);
         var id = device.deviceId || device.id || "";
-        var label = deviceLabel(device) + (mine ? "（本席位）" : "");
+        var label = deviceLabel(device) + (mine ? "（本席位）" : "（" + deviceAssignmentLabel(device) + "，将自动换绑）");
         options.push('<option value="' + escapeHtml(id) + '"' + (mine ? " selected" : "") + ">" + escapeHtml(label) + "</option>");
       });
       select.innerHTML = options.join("");
       if (currentDevice) select.value = currentDevice.deviceId || currentDevice.id || "";
       if (hint) {
         var onlineCount = list.filter(function (device) { return device.online; }).length;
-        hint.textContent = available.length ? ("可分配 " + available.length + " 条")
-          : (onlineCount ? "在线机器鱼均已分配" : "无在线机器鱼");
+        hint.textContent = available.length ? ("在线可分配 " + available.length + " 条；选中已分配鱼会自动换绑")
+          : (onlineCount ? "暂无在线机器鱼" : "无在线机器鱼");
       }
       paintSignupFish(list);
       paintSelectFish(list);
