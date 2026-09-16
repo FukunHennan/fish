@@ -6,11 +6,8 @@ CONTROLLER="$ROOT/controller"
 FRONTEND="$CONTROLLER/frontend"
 RUNTIME="$CONTROLLER/.runtime"
 EXE="$RUNTIME/fish-controller"
-FRPC_CONFIG="$ROOT/config/frpc.toml"
-FRPC_LOG="$RUNTIME/frpc.log"
 CONTROLLER_LOG="$RUNTIME/fish-controller.log"
 CONTROLLER_PID="$RUNTIME/fish-controller.pid"
-FRPC_PID="$RUNTIME/frpc.pid"
 
 if [[ ! -f "$CONTROLLER/go.mod" ]]; then
   echo "[ERROR] controller/go.mod not found."
@@ -54,22 +51,6 @@ if [[ ! -f "$CONTROLLER_PID" ]]; then
   echo "[4/4] Starting Fish Controller..."
   "$EXE" >>"$CONTROLLER_LOG" 2>&1 &
   echo $! > "$CONTROLLER_PID"
-fi
-
-if [[ -f "$FRPC_CONFIG" ]]; then
-  FRPC_BIN="${FISH_FRPC:-}"
-  if [[ -z "$FRPC_BIN" ]]; then
-    if command -v frpc >/dev/null 2>&1; then
-      FRPC_BIN="$(command -v frpc)"
-    fi
-  fi
-  if [[ -n "$FRPC_BIN" ]]; then
-    echo "[INFO] Starting frpc using $FRPC_CONFIG..."
-    "$FRPC_BIN" -c "$FRPC_CONFIG" >"$FRPC_LOG" 2>&1 &
-    echo $! > "$FRPC_PID"
-  else
-    echo "[INFO] frpc was not found in PATH; skipping public tunnel."
-  fi
 fi
 
 echo

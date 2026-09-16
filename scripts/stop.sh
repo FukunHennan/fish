@@ -26,6 +26,5 @@ stop_pidfile() {
 }
 
 stop_pidfile "$RUNTIME/fish-controller.pid" "Fish Controller"
-stop_pidfile "$RUNTIME/frpc.pid" "frpc"
 
 echo "Stopped."

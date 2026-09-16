@@ -83,8 +83,8 @@ USB 烧录需要连接设备后执行 PlatformIO Upload。仅修改电脑端 GUI
 
 ## 配置提醒
 
-- `config/deployment.json` 和 `config/frpc.toml` 是本机运行配置。
+- `config/deployment.json` 是本机设备部署配置。
 - 当前平台面向内部研发和受控环境，暂不以公网或商用部署为目标，也不把相关安全性作为当前开发重点。
-- 如需临时使用 FRP，主要用于网络连通性和视频链路调试，不作为当前重点。
+- 公网访问统一使用 `fish-cloudflared.service` 管理的 Cloudflare Tunnel。
 - OTA 只能由管理员发起。
 - 设备断线、控制器心跳超时、视觉异常和 OTA 开始时都应停止运动。

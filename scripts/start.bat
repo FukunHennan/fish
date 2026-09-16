@@ -8,8 +8,6 @@ set "CONTROLLER=%ROOT%\controller"
 set "FRONTEND=%CONTROLLER%\frontend"
 set "RUNTIME=%CONTROLLER%\.runtime"
 set "EXE=%RUNTIME%\fish-controller.exe"
-set "FRPC_CONFIG=%ROOT%\config\frpc.toml"
-set "FRPC_LOG=%RUNTIME%\frpc.log"
 
 if not exist "%CONTROLLER%\go.mod" (
   echo [ERROR] controller\go.mod not found.
@@ -75,29 +73,8 @@ for /f "tokens=1" %%P in ('tasklist /FI "IMAGENAME eq fish-controller.exe" /NH 2
 echo [4/4] Starting Fish Controller...
 start "FishController" /D "%CONTROLLER%" cmd /k ""%EXE%""
 
-if exist "%FRPC_CONFIG%" (
-  call :start_frpc
-)
-
 echo.
 echo Started. Open: http://localhost:8081
-exit /b 0
-
-:start_frpc
-where frpc >nul 2>nul
-if errorlevel 1 (
-  echo [INFO] frpc was not found in PATH; skipping public tunnel.
-  exit /b 0
-)
-for /f "tokens=1" %%P in ('tasklist /FI "IMAGENAME eq frpc.exe" /NH 2^>nul') do (
-  if /I "%%P"=="frpc.exe" (
-    echo [INFO] An existing frpc is running. Stopping it first...
-    taskkill /IM frpc.exe /T /F >nul 2>nul
-    timeout /t 1 /nobreak >nul
-  )
-)
-echo [INFO] Starting frpc using %FRPC_CONFIG%...
-start "FRPC" /D "%ROOT%" cmd /k "frpc -c \"%FRPC_CONFIG%\" > \"%FRPC_LOG%\" 2>&1"
 exit /b 0
 
 :fail
