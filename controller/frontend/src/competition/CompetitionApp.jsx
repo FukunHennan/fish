@@ -73,7 +73,7 @@ function formatRecordTime(value) {
 function normalizeLoginAccount(value) {
   const account = String(value || "").trim();
   if (!account || account.includes("@")) return account;
-  return `${account}@example.com`;
+  return `${account}@fish.local`;
 }
 
 function pageFromHash() {

@@ -1,5 +1,11 @@
 import { useState } from "react";
 
+function normalizeLoginAccount(value) {
+  const account = String(value || "").trim();
+  if (!account || account.includes("@")) return account;
+  return `${account}@fish.local`;
+}
+
 export default function AuthScreen({ onAuthenticated, bootstrap }) {
   const [mode, setMode] = useState(bootstrap ? "bootstrap" : "login");
   const [name, setName] = useState("");
@@ -23,7 +29,7 @@ export default function AuthScreen({ onAuthenticated, bootstrap }) {
       const response = await fetch(mode === "login" ? "/api/auth/login" : "/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(mode === "login" ? { email, password } : { name, email, password }),
+        body: JSON.stringify(mode === "login" ? { email: normalizeLoginAccount(email), password } : { name, email, password }),
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || result.authenticated === false) {
@@ -74,7 +80,7 @@ export default function AuthScreen({ onAuthenticated, bootstrap }) {
               {mode === "bootstrap" ? <div className="auth-two-col">
                 <label className="auth-field"><span>姓名</span><input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" placeholder="请输入姓名" /></label>
                 <label className="auth-field"><span>邮箱</span><input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" placeholder="请输入账号邮箱" /></label>
-              </div> : <label className="auth-field"><span>邮箱</span><input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" placeholder="例如 zhouzimo@example.com" /></label>}
+              </div> : <label className="auth-field"><span>账号</span><input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="username" placeholder="referee 或 team-blue" /></label>}
               {mode === "bootstrap" ? <div className="auth-two-col">
                 <label className="auth-field"><span>设置密码</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" /></label>
                 <label className="auth-field"><span>确认密码</span><input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" /></label>

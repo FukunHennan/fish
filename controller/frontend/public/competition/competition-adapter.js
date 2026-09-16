@@ -70,7 +70,7 @@
 
   function currentTeamSide() {
     var text = ((state.user && (state.user.name + " " + state.user.email)) || "").toLowerCase();
-    if (text.indexOf("红队") >= 0 || text.indexOf("red") >= 0 || text.indexOf("linzeyu") >= 0) return "red";
+    if (text.indexOf("红队") >= 0 || text.indexOf("team-red") >= 0) return "red";
     return "blue";
   }
 
@@ -207,7 +207,7 @@
     var account = document.getElementById("teamAccountInput");
     var password = document.querySelector("#teamLoginCard input[type=password]");
     var email = account ? String(account.value).trim() : "";
-    if (email && email.indexOf("@") < 0) email += "@example.com";
+    if (email && email.indexOf("@") < 0) email += "@fish.local";
     return {
       email: email,
       password: password ? String(password.value) : "",

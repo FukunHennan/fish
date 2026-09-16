@@ -110,7 +110,7 @@ export default function AdminUsers({ currentUser }) {
       </div>
       <form className="admin-create-form" onSubmit={createUser}>
         <label className="setting"><span>姓名</span><input value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} placeholder="例如：张三" required /></label>
-        <label className="setting"><span>邮箱</span><input type="email" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} placeholder="name@example.com" required /></label>
+        <label className="setting"><span>账号地址</span><input type="email" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} placeholder="account@fish.local" required /></label>
         <label className="setting"><span>初始密码</span><input type="password" minLength="8" value={form.password} onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} placeholder="至少 8 位" required /></label>
         <label className="setting"><span>账户类型</span><select value={form.role} onChange={(event) => setForm((current) => ({ ...current, role: event.target.value }))}><option value="User">普通用户：可以使用控制台</option><option value="Admin">管理员：可以管理账户</option></select></label>
         <button className="action" disabled={busy}>创建账户</button>

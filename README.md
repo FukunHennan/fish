@@ -6,6 +6,8 @@
 
 - [机器鱼项目统一手册](docs/机器鱼项目统一手册.md)
 
+公网入口：[https://fish.chenfukun.space](https://fish.chenfukun.space)
+
 ## 系统结构
 
 ```text

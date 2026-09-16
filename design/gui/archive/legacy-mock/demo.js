@@ -1,5 +1,5 @@
 const devices = [
-  { id: "Fish001", name: "机器鱼 1", ip: "192.168.1.31", mode: "forward", battery: 85, rssi: -52, source: "manual", online: true, lease: { ownerId: "admin-1", ownerName: "陈富坤", ownerEmail: "chenfukun@example.com", mode: "manual", expiresAt: "2026-09-03T10:27:00+08:00" } },
+  { id: "Fish001", name: "机器鱼 1", ip: "192.168.1.31", mode: "forward", battery: 85, rssi: -52, source: "manual", online: true, lease: { ownerId: "admin-1", ownerName: "赛事裁判", ownerEmail: "referee@fish.local", mode: "manual", expiresAt: "2026-09-03T10:27:00+08:00" } },
   { id: "Fish002", name: "机器鱼 2", ip: "192.168.1.32", mode: "stop", battery: 64, rssi: -61, source: "idle", online: true },
   { id: "Fish003", name: "机器鱼 3", ip: "192.168.1.33", mode: "left", battery: 27, rssi: -74, source: "vision", online: true, lease: { ownerId: "user-1", ownerName: "实验员", ownerEmail: "operator@example.com", mode: "vision", expiresAt: "2026-09-03T10:25:00+08:00" } },
   { id: "Fish004", name: "机器鱼 4", ip: "—", mode: "stop", battery: null, rssi: null, source: "offline", online: false },
@@ -7,7 +7,7 @@ const devices = [
 
 const modeLabels = { stop: "停止", idle: "待机", forward: "前进", left: "左转", right: "右转" };
 const accounts = [
-  { id: "admin-1", name: "陈富坤", email: "chenfukun@example.com", role: "Admin", status: "启用", lastLogin: "2026-09-03 09:57" },
+  { id: "admin-1", name: "赛事裁判", email: "referee@fish.local", role: "Admin", status: "启用", lastLogin: "2026-09-03 09:57" },
   { id: "admin-2", name: "FanDiXia", email: "fandixia@example.com", role: "Admin", status: "启用", lastLogin: "2026-09-01 17:20" },
   { id: "user-1", name: "实验员", email: "operator@example.com", role: "User", status: "启用", lastLogin: "2026-09-02 14:18" },
 ];
@@ -117,7 +117,7 @@ function topbar() {
             <option value="User" ${!isAdmin() ? "selected" : ""}>普通用户</option>
           </select>
         </label>
-        <span class="user">${isAdmin() ? "管理员" : "普通用户"} <strong>${isAdmin() ? "chenfukun" : "operator"}</strong></span>
+        <span class="user">${isAdmin() ? "管理员" : "普通用户"} <strong>${isAdmin() ? "referee" : "operator"}</strong></span>
         ${isAdmin() ? '<button class="stop-all" data-action="stop-all">全部停止</button>' : ""}
       </div>
     </header>
