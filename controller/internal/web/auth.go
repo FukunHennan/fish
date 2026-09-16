@@ -209,6 +209,14 @@ func validateUserInput(name, email, password string) (string, string, error) {
 	return name, email, nil
 }
 
+func normalizeLoginIdentifier(value string) string {
+	identifier := strings.ToLower(strings.TrimSpace(value))
+	if identifier != "" && !strings.Contains(identifier, "@") {
+		return identifier + "@fish.local"
+	}
+	return identifier
+}
+
 func (a *authStore) createUser(name, email, password, role string) (authUser, error) {
 	name, email, err := validateUserInput(name, email, password)
 	if err != nil {
@@ -339,7 +347,7 @@ func (a *authStore) deleteUser(id, actorID string) error {
 func (a *authStore) authenticate(email, password string) (authUser, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	email = strings.ToLower(strings.TrimSpace(email))
+	email = normalizeLoginIdentifier(email)
 	user, ok := a.users[email]
 	if !ok || user.Status != "active" {
 		return authUser{}, false

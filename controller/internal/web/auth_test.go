@@ -54,3 +54,23 @@ func TestLegacyRolesMigrateToAdminAndUser(t *testing.T) {
 		t.Fatal("管理员角色被错误转换")
 	}
 }
+
+func TestAuthenticateAcceptsShortAccountName(t *testing.T) {
+	store := newAuthStore(filepath.Join(t.TempDir(), "users.json"))
+	created, err := store.createUser("蓝队", "team-blue@fish.local", "123456789", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	shortAccount, ok := store.authenticate("team-blue", "123456789")
+	if !ok || shortAccount.ID != created.ID {
+		t.Fatalf("短账号登录失败: %#v, ok=%v", shortAccount, ok)
+	}
+	fullAccount, ok := store.authenticate("team-blue@fish.local", "123456789")
+	if !ok || fullAccount.ID != created.ID {
+		t.Fatalf("完整账号登录失败: %#v, ok=%v", fullAccount, ok)
+	}
+	if _, ok := store.authenticate("team-red", "123456789"); ok {
+		t.Fatal("未建立的短账号不应登录成功")
+	}
+}
