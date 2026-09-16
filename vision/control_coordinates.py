@@ -1,17 +1,4 @@
-"""Coordinate mapping for vision control and optional metric calibration.
-
-Tracking and physical measurement are deliberately separated here:
-
-- IMAGE mode maps the full camera frame into the configured control plane, so
-  a path drawn in the same image can be followed without a manual pool
-  calibration step.
-- FIELD mode uses an explicit pool homography when one is available. This is
-  the mode to use when centimetre/metre accuracy matters for measurement,
-  speed reporting, or turn-radius experiments.
-
-The rest of the navigation stack can therefore consume one consistent control
-coordinate system without treating field calibration as a tracking precondition.
-"""
+"""Strict calibrated coordinate mapping for vision control."""
 
 from __future__ import annotations
 
@@ -31,7 +18,7 @@ class CoordinateMapping:
 
 
 class ControlCoordinateMapper:
-    """Resolve a control transform with optional calibrated field override."""
+    """Resolve control coordinates only from an explicit field calibration."""
 
     def __init__(
         self,
@@ -48,32 +35,14 @@ class ControlCoordinateMapper:
             raise ValueError("画面尺寸必须大于 1 像素")
         if self.control_width <= 0.0 or self.control_height <= 0.0:
             raise ValueError("控制坐标尺寸必须大于零")
-        self._image_homography = self._build_image_homography()
-
-    def _build_image_homography(self) -> np.ndarray:
-        src = np.float32([
-            [0.0, 0.0],
-            [self.frame_width - 1.0, 0.0],
-            [self.frame_width - 1.0, self.frame_height - 1.0],
-            [0.0, self.frame_height - 1.0],
-        ])
-        dst = np.float32([
-            [0.0, 0.0],
-            [self.control_width, 0.0],
-            [self.control_width, self.control_height],
-            [0.0, self.control_height],
-        ])
-        homography = cv2.getPerspectiveTransform(src, dst)
-        if homography is None or not np.isfinite(homography).all():
-            raise RuntimeError("无法建立默认画面控制坐标")
-        return homography
 
     def resolve(self, field_homography: Optional[np.ndarray] = None) -> CoordinateMapping:
-        if field_homography is not None:
-            matrix = np.asarray(field_homography, dtype=np.float64).reshape((3, 3))
-            if np.isfinite(matrix).all() and abs(float(np.linalg.det(matrix))) > 1e-12:
-                return CoordinateMapping("FIELD", matrix)
-        return CoordinateMapping("IMAGE", self._image_homography.copy())
+        if field_homography is None:
+            raise RuntimeError("场地标定是视觉控制的必要条件，未启用图像坐标回退")
+        matrix = np.asarray(field_homography, dtype=np.float64).reshape((3, 3))
+        if not np.isfinite(matrix).all() or abs(float(np.linalg.det(matrix))) <= 1e-12:
+            raise RuntimeError("场地标定矩阵无效")
+        return CoordinateMapping("FIELD", matrix)
 
     def map_points(
         self,

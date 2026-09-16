@@ -10,7 +10,6 @@ import main as vision_main
 from camera_stream import RestartSafeCameraStream
 from config import DEFAULT_CAMERA_INDEX, resolve_yolo_model
 from service import CameraCatalog, VisionService, enumerate_cameras
-from tracking_application import TrackingVisionApplication
 from web_api import create_app
 from webrtc import WebRTCServer
 
@@ -18,7 +17,7 @@ from webrtc import WebRTCServer
 # DirectShow shutdown semantics for this path so a new session cannot race a
 # capture thread that still owns the USB camera.
 vision_main.CameraStream = RestartSafeCameraStream
-VisionApplication = TrackingVisionApplication
+VisionApplication = vision_main.VisionApplication
 
 
 def start_application_runner(

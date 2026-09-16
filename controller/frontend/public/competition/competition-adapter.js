@@ -14,7 +14,16 @@
 (function () {
   "use strict";
 
-  var CLIENT_ID = "competition-" + Math.random().toString(36).slice(2, 10) + "-" + Date.now();
+  var CLIENT_ID = "";
+  try {
+    CLIENT_ID = window.sessionStorage.getItem("fish-webrtc-client-id") || "";
+    if (!CLIENT_ID) {
+      CLIENT_ID = "competition-" + Math.random().toString(36).slice(2, 10) + "-" + Date.now();
+      window.sessionStorage.setItem("fish-webrtc-client-id", CLIENT_ID);
+    }
+  } catch (e) {
+    CLIENT_ID = "competition-" + Math.random().toString(36).slice(2, 10) + "-" + Date.now();
+  }
   var PLAYERS = ["b1", "b2"];
   var MOTION_ACTIONS = { forward: 1, left: 1, right: 1, stop: 1, idle: 1 };
   var DEFAULT_PARAMS = { frequency: 2.5, amplitude: 28 };
@@ -503,13 +512,19 @@
     peer: null, stream: null, sessionId: null, timer: null, connecting: false,
     statusText: "视觉未启用", source: "server", cameras: [], cameraIndex: "",
     localStream: null, localDeviceId: "", localCameras: [], cameraLoading: false, controls: null,
+    processing: false, sessionRefreshing: false, lastSessionRefresh: 0,
   };
 
   function videoSurface() {
-    // 选手端是 poolStage，裁判端的 .videoStage 自带 video 样式
+    if (isRefereePage()) {
+      return document.querySelector(".page:not(.hidden) #refereeLiveStage")
+        || document.querySelector(".page:not(.hidden) #refereeMatchStage")
+        || document.getElementById("refereeLiveStage")
+        || document.getElementById("refereeMatchStage");
+    }
+    // 选手端是 poolStage；裁判端由上面的实时场地区域承载画面。
     return document.querySelector(".poolStage.matchPool")
-      || document.querySelector(".poolStage")
-      || document.querySelector(".videoStage");
+      || document.querySelector(".poolStage");
   }
 
   function waitForIce(peer) {
@@ -546,7 +561,7 @@
       .then(function (payload) {
         var session = payload && (payload.data || payload);
         if (!session || !session.sessionId) throw new Error("视觉会话尚未建立");
-        video.sessionId = session.sessionId;
+        applyVisionSession(session);
         return api("/api/vision/webrtc/config");
       })
       .then(function (config) {
@@ -555,7 +570,11 @@
           iceServers: (config && Array.isArray(config.iceServers)) ? config.iceServers : [],
         });
         video.peer = peer;
-        peer.addTransceiver("video", { direction: "recvonly" });
+        var transceiver = peer.addTransceiver("video", { direction: "recvonly" });
+        try {
+          if ("playoutDelayHint" in transceiver.receiver) transceiver.receiver.playoutDelayHint = 0.05;
+          if ("jitterBufferTarget" in transceiver.receiver) transceiver.receiver.jitterBufferTarget = 50;
+        } catch (e) { /* 接收端不支持延迟提示时继续使用默认缓冲 */ }
         peer.ontrack = function (event) {
           video.stream = (event.streams && event.streams[0]) || new window.MediaStream([event.track]);
           mountVideoSurface();
@@ -697,6 +716,8 @@
     var source = video.controls.querySelector("[data-video-source]");
     var camera = video.controls.querySelector("[data-video-camera]");
     var action = video.controls.querySelector("[data-video-action]");
+    var processingAction = video.controls.querySelector("[data-vision-processing-action]");
+    var processingStatus = video.controls.querySelector("[data-vision-processing-status]");
     var list = video.source === "local" ? (video.localCameras || []) : video.cameras;
     if (source) source.value = video.source;
     if (camera) {
@@ -713,40 +734,48 @@
       action.textContent = video.source === "local" ? (video.localStream ? "关闭本机预览" : "打开本机预览") : (video.sessionId ? "停止服务器视频" : "启动真实视频");
       action.disabled = video.source === "local" ? !video.localDeviceId && !video.localStream : (!video.sessionId && !video.cameraIndex);
     }
+    if (processingAction) {
+      processingAction.textContent = video.processing ? "停止视觉识别" : "启动视觉识别";
+      processingAction.disabled = !video.sessionId;
+    }
+    if (processingStatus) {
+      processingStatus.textContent = video.processing ? "CUDA · 识别运行中" : "严格 CUDA · 未启动";
+    }
   }
 
   function ensureVideoControls(stage) {
     if (video.controls && video.controls.isConnected) return;
+    if (!isRefereePage()) return;
+    var configured = document.querySelector("[data-referee-video-controls]");
+    if (configured) {
+      video.controls = configured;
+      if (!configured.dataset.videoBound) {
+        configured.dataset.videoBound = "1";
+        configured.querySelector("[data-video-camera]").addEventListener("change", function (event) {
+          switchServerCamera(event.target.value);
+        });
+        configured.querySelector("[data-video-action]").addEventListener("click", function () {
+          if (video.sessionId) stopServerVideo(); else startServerVideo();
+        });
+        configured.querySelector("[data-vision-processing-action]").addEventListener("click", toggleVisionProcessing);
+      }
+      renderVideoControls();
+      return;
+    }
     var controls = document.createElement("div");
     controls.className = "fishVideoControls";
     controls.style.cssText = "position:absolute;left:10px;right:10px;top:10px;z-index:8;display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:7px 8px;border:1px solid rgba(80,205,255,.26);border-radius:8px;background:rgba(2,18,34,.84);backdrop-filter:blur(7px);font:11px system-ui,'Microsoft YaHei',sans-serif";
-    controls.innerHTML = '<label style="display:flex;align-items:center;gap:4px;color:#a8d8ec">画面来源<select data-video-source style="max-width:180px;padding:4px 6px;border-radius:5px;background:#071c31;color:#eaffff;border:1px solid rgba(80,205,255,.3)"><option value="server">服务器摄像头 · 赛事共享</option><option value="local">电脑摄像头 · 本机预览</option></select></label>' +
-      '<label style="display:flex;align-items:center;gap:4px;color:#a8d8ec">摄像头<select data-video-camera style="max-width:220px;padding:4px 6px;border-radius:5px;background:#071c31;color:#eaffff;border:1px solid rgba(80,205,255,.3)"></select></label>' +
+    controls.innerHTML =
+      '<span style="color:#a8d8ec;font-weight:800">裁判视觉配置</span>' +
+      '<label style="display:flex;align-items:center;gap:4px;color:#a8d8ec">服务器摄像头<select data-video-camera style="max-width:220px;padding:4px 6px;border-radius:5px;background:#071c31;color:#eaffff;border:1px solid rgba(80,205,255,.3)"></select></label>' +
       '<button type="button" data-video-action style="padding:5px 8px;border:1px solid rgba(65,230,162,.35);border-radius:5px;background:#0a6149;color:#eaffff;font-weight:800"></button>';
     stage.appendChild(controls);
-      video.controls = controls;
-    controls.querySelector("[data-video-source]").addEventListener("change", function (event) {
-      video.source = event.target.value;
-      if (video.source === "local") {
-        closeVideoPeer();
-        refreshLocalCameras(true).then(function (list) {
-          if (list.length) startLocalCamera(video.localDeviceId || list[0].deviceId);
-        }).catch(function (error) { setVisionStatus(error.message, "error"); video.source = "server"; renderVideoControls(); });
-      } else {
-        stopLocalCamera();
-        setVisionStatus(video.sessionId ? "服务器真实视频" : "服务器视频未启动", "info");
-        mountVideoSurface();
-      }
-      renderVideoControls();
-    });
+    video.controls = controls;
     controls.querySelector("[data-video-camera]").addEventListener("change", function (event) {
-      if (video.source === "local") startLocalCamera(event.target.value);
-      else switchServerCamera(event.target.value);
+      switchServerCamera(event.target.value);
     });
     controls.querySelector("[data-video-action]").addEventListener("click", function () {
-      if (video.source === "local") {
-        if (video.localStream) stopLocalCamera(); else startLocalCamera(video.localDeviceId);
-      } else if (video.sessionId) stopServerVideo(); else startServerVideo();
+      if (video.sessionId) stopServerVideo(); else startServerVideo();
     });
     renderVideoControls();
   }
@@ -772,6 +801,39 @@
 
   function sessionData(payload) {
     return payload && (payload.data || payload) || {};
+  }
+
+  function applyVisionSession(session) {
+    video.sessionId = session.sessionId || null;
+    video.processing = session.state === "processing" || session.state === "tracking";
+    if (session.cameraIndex != null) video.cameraIndex = String(session.cameraIndex);
+    renderVideoControls();
+  }
+
+  function refreshVisionSession() {
+    var now = Date.now();
+    if (video.sessionRefreshing || now - video.lastSessionRefresh < 2000) return;
+    video.sessionRefreshing = true;
+    video.lastSessionRefresh = now;
+    api("/api/vision/sessions/current").then(function (payload) {
+      applyVisionSession(sessionData(payload));
+    }).catch(function () {}).finally(function () {
+      video.sessionRefreshing = false;
+    });
+  }
+
+  function toggleVisionProcessing() {
+    if (!video.sessionId) {
+      setVisionStatus("请先启动真实视频", "warn");
+      return;
+    }
+    var path = "/api/vision/sessions/" + encodeURIComponent(video.sessionId) + "/processing";
+    return api(path, { method: video.processing ? "DELETE" : "POST" }).then(function (payload) {
+      applyVisionSession(sessionData(payload));
+      setVisionStatus(video.processing ? "YOLO 视觉识别已启动（CUDA）" : "视觉识别已停止，视频预览保持开启", "ok");
+    }).catch(function (error) {
+      setVisionStatus("视觉识别切换失败：" + error.message, "error");
+    });
   }
 
   function loadServerCameras() {
@@ -802,7 +864,7 @@
       body: { cameraId: "camera-" + video.cameraIndex, cameraIndex: Number(video.cameraIndex), trackingMode: "single_fish" },
     }).then(function (payload) {
       var session = sessionData(payload);
-      video.sessionId = session.sessionId || null;
+      applyVisionSession(session);
       video.source = "server";
       closeVideoPeer();
       renderVideoControls();
@@ -823,6 +885,7 @@
     return api("/api/vision/sessions/" + encodeURIComponent(sessionId), { method: "DELETE" })
       .then(function () {
         video.sessionId = null;
+        video.processing = false;
         closeVideoPeer();
         renderVideoControls();
         setVisionStatus("服务器视频已停止；手动操控仍可用", "info");
@@ -874,7 +937,8 @@
     if (!state.user) return;       // 未登录不请求视觉接口
     setVisionStatus(video.statusText || "视觉未启用", "info");
     mountVideoSurface();
-    if (!video.cameras.length && !video.cameraLoading) {
+    if (isRefereePage()) refreshVisionSession();
+    if (isRefereePage() && !video.cameras.length && !video.cameraLoading) {
       video.cameraLoading = true;
       loadServerCameras().finally(function () { video.cameraLoading = false; });
     }
@@ -1369,6 +1433,8 @@
     }, true);
 
     window.addEventListener("pagehide", function () {
+      closeVideoPeer();
+      stopLocalCamera();
       PLAYERS.forEach(function (player) {
         if (state.bound[player]) release(state.bound[player]);
       });

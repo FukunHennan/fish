@@ -1,8 +1,10 @@
 import unittest
 from fractions import Fraction
+from unittest import mock
 
 import numpy as np
 
+from config import WEBRTC_MAX_FPS
 from webrtc import (
     VIDEO_CLOCK_RATE,
     WebRTCServer,
@@ -35,6 +37,17 @@ class WebRTCFrameTests(unittest.TestCase):
         server = WebRTCServer()
         self.assertTrue(browser_ice_servers())
         self.assertEqual(browser_ice_servers()[0]["urls"], "stun:stun.l.google.com:19302")
+        self.assertEqual(server.peer_count, 0)
+        server.close()
+
+    def test_nominal_camera_jitter_does_not_drop_every_other_frame(self):
+        server = WebRTCServer()
+        frame = np.zeros((2, 3, 3), dtype=np.uint8)
+        with mock.patch("webrtc.time.monotonic", side_effect=[1.0, 1.031, 1.064]):
+            server.update(frame)
+            server.update(frame)
+            server.update(frame)
+        self.assertEqual(server._source._sequence, 3)
         server.close()
 
 
@@ -78,7 +91,10 @@ class WebRTCTrackTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first.time_base, Fraction(1, VIDEO_CLOCK_RATE))
         self.assertEqual(second.time_base, Fraction(1, VIDEO_CLOCK_RATE))
         self.assertGreater(second.pts, first.pts)
-        self.assertEqual(second.pts - first.pts, VIDEO_CLOCK_RATE // 30)
+        self.assertEqual(
+            second.pts - first.pts,
+            round(VIDEO_CLOCK_RATE / WEBRTC_MAX_FPS),
+        )
 
 
 if __name__ == "__main__":

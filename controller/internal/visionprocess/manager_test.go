@@ -79,6 +79,7 @@ func TestEnsureStartsAndLaterStopsOwnedVisionProcess(t *testing.T) {
 }
 
 func TestWatchdogRestartsBackendAfterConsecutiveHealthFailures(t *testing.T) {
+	t.Setenv("FISH_VISION_WATCHDOG_FAILURES", "2")
 	var healthy atomic.Bool
 	healthy.Store(true)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

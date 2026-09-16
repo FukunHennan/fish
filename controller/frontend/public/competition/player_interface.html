@@ -4235,6 +4235,26 @@ p {
 
 
 /* ===== player v5: restore赛事中心, move device test into比赛操控 ===== */
+.deviceTestOpen{display:inline-flex;align-items:center;gap:6px}
+.deviceTestOpen svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8}
+.deviceTestOpen.complete{border-color:rgba(77,231,177,.48);background:rgba(9,105,76,.72);color:#dffff2}
+.deviceTestModal{position:fixed;inset:0;z-index:1200;display:grid;place-items:center;padding:24px;background:rgba(1,9,20,.72);backdrop-filter:blur(10px)}
+.deviceTestModal[hidden]{display:none}
+.deviceTestDialog{width:min(980px,calc(100vw - 32px));max-height:min(760px,calc(100vh - 32px));overflow:auto;padding:18px;border:1px solid rgba(103,220,255,.3);border-radius:14px;background:linear-gradient(145deg,rgba(5,27,49,.98),rgba(3,15,31,.98));box-shadow:0 24px 80px rgba(0,0,0,.48)}
+.deviceTestDialog>header{display:flex;justify-content:space-between;gap:20px;align-items:flex-start}
+.deviceTestDialog header span,.deviceTestDialog header p,.deviceTestDialog footer span{color:#7faec6;font-size:12px}
+.deviceTestDialog h2{margin:5px 0 4px;font-size:22px;color:#eaffff}
+.deviceTestDialog header p{margin:0}
+.deviceTestClose{width:32px;height:32px;border:1px solid rgba(139,211,238,.3);border-radius:8px;background:rgba(8,39,65,.8);color:#dff7ff;font-size:22px;line-height:1;cursor:pointer}
+.deviceTestSummary{display:flex;align-items:baseline;gap:10px;margin:16px 0 12px;padding:10px 12px;border-left:3px solid #4ce1b2;background:rgba(9,53,72,.54)}
+.deviceTestSummary b{font-size:24px;color:#7ff2c0}.deviceTestSummary span{color:#dff7ff;font-size:13px}.deviceTestSummary small{margin-left:auto;color:#83afc5;font-size:11px}
+.deviceTestGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.deviceTestGrid .preflightDeviceCard{min-height:0}
+.deviceTestDialog footer{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:14px;padding-top:12px;border-top:1px solid rgba(126,194,220,.16)}
+.deviceTestDone{padding:8px 18px;border:1px solid rgba(77,231,177,.44);border-radius:8px;background:#0b654d;color:#eaffff;font-weight:800;cursor:pointer}
+.deviceTestDone:disabled{cursor:not-allowed;opacity:.5;background:#173b46}
+.poolStage.matchPool{background:#02070c!important}
+.poolStage.matchPool::before,.poolStage.matchPool::after{display:none!important}
+@media (max-width:700px){.deviceTestGrid{grid-template-columns:1fr}.deviceTestSummary{display:grid}.deviceTestSummary small{margin-left:0}.deviceTestDialog{padding:14px}}
 .controlPreflight{
   display:grid !important;
   grid-template-columns:1fr !important;
@@ -5387,14 +5407,32 @@ p {
   }
 
   function matchHud() {
+    const progress = preflightProgress();
+    const testLabel = progress.complete ? '✓ 设备检查完成' : '设备检查 ' + progress.ok + ' / 2';
     return '<section class="matchHud v3MatchHud">' +
       '<div class="matchIdentity"><span>当前比赛</span><h2>机器鱼水球 · 2v2</h2><p>第 08 场 · 学生组 · A 赛场</p></div>' +
       '<div class="matchOpponent"><span>我方</span><b>海洋先锋队</b><em>VS</em><b class="enemy">深海动力队</b></div>' +
       '<div class="hudScore v3Score"><small>实时比分</small><b class="blue">36</b><em>:</em><b class="red">24</b></div>' +
       '<div class="hudTimer"><small>剩余时间</small><strong>01:28</strong></div>' +
       '<div class="hudLiveState"><i></i><span>比赛进行中</span></div>' +
+      '<button type="button" class="deviceTestOpen v3DeviceTestOpen ' + (progress.complete ? 'complete' : '') + '" data-device-test-open>' + controllerIcon() + '<span>' + testLabel + '</span></button>' +
       '<button type="button" class="keyConfigOpen v3KeyConfig">' + keyboardIcon() + '<span>按键设置</span></button>' +
       '</section>';
+  }
+
+  function deviceTestDialog() {
+    const progress = preflightProgress();
+    return '<section class="deviceTestModal" data-device-test-modal hidden>' +
+      '<div class="deviceTestDialog" role="dialog" aria-modal="true" aria-label="设备测试">' +
+        '<header><div><span>比赛操控 · 快速检查</span><h2>设备测试</h2><p>在当前比赛界面完成受限试动与设备确认。</p></div><button type="button" class="deviceTestClose" data-device-test-close aria-label="关闭">×</button></header>' +
+        '<div class="deviceTestSummary"><b>' + progress.ok + ' / 2</b><span>队伍设备已确认</span><small>设备测试不计时、不计分，视觉与手动操控独立。</small></div>' +
+        '<section class="deviceTestGrid">' +
+          deviceTestCard('b1', 'B1', '陈同学', 'Fish-B1-03', 'playerA') +
+          deviceTestCard('b2', 'B2', '李同学', 'Fish-B2-07', 'playerB') +
+        '</section>' +
+        '<footer><span>' + (progress.complete ? '两台设备均已确认，可以继续比赛' : '请分别确认 B1 / B2 设备状态') + '</span><button type="button" class="deviceTestDone" data-device-test-close ' + (progress.complete ? '' : 'disabled') + '>' + (progress.complete ? '✓ 设备检查完成' : '等待设备确认') + '</button></footer>' +
+      '</div>' +
+    '</section>';
   }
 
   function telemetryIcon(type) {
@@ -5431,16 +5469,7 @@ p {
   }
 
   function matchPool() {
-    return '<div class="poolStage matchPool">' +
-      '<div class="poolWater"></div><div class="poolCaustics"></div><div class="poolGrid"></div>' +
-      '<div class="matchCenterLine"></div><div class="matchCenterCircle"></div>' +
-      '<div class="matchGoal blueGoal"><span>蓝方球门</span></div><div class="matchGoal redGoal"><span>红方球门</span></div>' +
-      '<span class="fishMarker blue ownFish focusFish" style="left:27%;top:35%" data-label="B1"><b>B1</b></span>' +
-      '<span class="fishMarker blue ownFish" style="left:31%;top:68%" data-label="B2"><b>B2</b></span>' +
-      '<span class="fishMarker red rivalFish" style="left:72%;top:34%" data-label="R1"><b>R1</b></span>' +
-      '<span class="fishMarker red rivalFish" style="left:68%;top:66%" data-label="R2"><b>R2</b></span>' +
-      '<span class="matchBall" style="left:50%;top:50%"></span>' +
-      '</div>';
+    return '<div class="poolStage matchPool" aria-label="真实赛事视频"></div>';
   }
 
   function matchPlayerCard(player, fishId, student, device, metrics, playerClass = '') {
@@ -5485,7 +5514,6 @@ p {
   }
 
   function controlPage() {
-    if (!preflightProgress().complete) return preMatchControlPage();
     const b1Metrics =
       deviceMetric('battery', '电量', '78%', 'good') +
       deviceMetric('wifi', '延迟', '12 ms', 'good') +
@@ -5499,9 +5527,9 @@ p {
       matchHud() +
       matchPlayerCard('b1', 'B1', '陈同学', 'Fish-B1-03', b1Metrics, 'playerA') +
       '<main class="fieldPanel v3FieldPanel glassCard">' +
-        '<header><div><h2>实时赛场</h2><p>顶部视角 · 本队机器鱼高亮</p></div><span class="liveBadge"><i></i>视觉独立接入</span></header>' +
+        '<header><div><h2>实时赛场</h2><p>原始摄像头画面 · 无模拟覆盖</p></div><span class="liveBadge"><i></i>视觉独立接入</span></header>' +
         matchPool() +
-        '<footer><span>蓝队：B1 / B2</span><b>比赛球已识别</b><span>红队：R1 / R2</span></footer>' +
+        '<footer><span>原始视频</span><b>识别结果由裁判端独立处理</b><span>手动控制不受视觉影响</span></footer>' +
       '</main>' +
       matchPlayerCard('b2', 'B2', '李同学', 'Fish-B2-07', b2Metrics, 'playerB') +
       '<section class="matchStatusBar glassCard">' +
@@ -5511,7 +5539,7 @@ p {
         '<div><span>边界保护</span><b class="greenState">正常</b></div>' +
         '<div><span>控制模式</span><b>双人独立控制</b></div>' +
       '</section>' +
-      '</section>' + keyConfigModal();
+      '</section>' + keyConfigModal() + deviceTestDialog();
   }
 
 
@@ -6193,6 +6221,22 @@ p {
   }
 
   function bindInteractions() {
+    root.querySelectorAll('[data-device-test-open]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const modal = root.querySelector('[data-device-test-modal]');
+        if (modal) modal.hidden = false;
+      });
+    });
+    root.querySelectorAll('[data-device-test-close]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const modal = root.querySelector('[data-device-test-modal]');
+        if (modal) modal.hidden = true;
+      });
+    });
+    const deviceTestModal = root.querySelector('[data-device-test-modal]');
+    if (deviceTestModal) deviceTestModal.addEventListener('mousedown', (event) => {
+      if (event.target === deviceTestModal) deviceTestModal.hidden = true;
+    });
     const openButton = root.querySelector('.keyConfigOpen');
     if (openButton) openButton.addEventListener('click', openKeyConfig);
     const modal = root.querySelector('.keyConfigModal');
@@ -6238,6 +6282,8 @@ p {
         if (!deviceTestState.opened) return;
         deviceTestState[player] = result === 'ok' ? 'ok' : 'fault';
         render();
+        const modal = root.querySelector('[data-device-test-modal]');
+        if (modal) modal.hidden = false;
       });
     });
     root.querySelectorAll('[data-enter-live-match]').forEach((button) => {
@@ -6427,6 +6473,6 @@ p {
 })();
 </script>
 
-<script src="competition-adapter.js?v=20260916-camera-controls"></script>
+<script src="competition-adapter.js?v=20260916-strict-cuda-video"></script>
 </body>
 </html>

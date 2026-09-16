@@ -330,11 +330,9 @@ class VisionApplication:
 
             if not self.processing_enabled:
                 self._update_loop_fps()
-                image = self.presentation.render_preview(
-                    snapshot["frame"],
-                    snapshot["timestamp"],
-                    camera_fps=self.cam.measured_fps,
-                    loop_fps=self._loop_fps,
+                image = snapshot["frame"] if self.headless else self.presentation.render_preview(
+                    snapshot["frame"], snapshot["timestamp"],
+                    camera_fps=self.cam.measured_fps, loop_fps=self._loop_fps,
                 )
                 self._publish_frame(image, snapshot["timestamp"])
                 self._publish_preview_metrics(snapshot["frame"], snapshot["timestamp"])
@@ -461,25 +459,17 @@ class VisionApplication:
     def _render_and_publish(self, result, decision):
         rates = self.tablet.get_comm_fps()
         mcu_hz = self.fish_comm.get_mcu_hz()
-        image = self.presentation.render(
-            result,
-            calibration=self.runtime.calibration,
-            marker_roi=self.runtime.marker_roi,
-            heading=self.runtime.heading,
-            drawn_path=self.runtime.drawn_path,
-            decision=decision,
-            control_active=self.control.active,
-            turn_session=self.turn_session,
-            status=self.status,
-            recording=self.is_recording,
-            camera_fps=self.cam.measured_fps,
-            loop_fps=self._loop_fps,
-            exposure=self.cam.exposure_val,
-            tablet_rates=rates,
-            mcu_hz=mcu_hz,
+        image = result.frame if self.headless else self.presentation.render(
+            result, calibration=self.runtime.calibration,
+            marker_roi=self.runtime.marker_roi, heading=self.runtime.heading,
+            drawn_path=self.runtime.drawn_path, decision=decision,
+            control_active=self.control.active, turn_session=self.turn_session,
+            status=self.status, recording=self.is_recording,
+            camera_fps=self.cam.measured_fps, loop_fps=self._loop_fps,
+            exposure=self.cam.exposure_val, tablet_rates=rates, mcu_hz=mcu_hz,
             clahe_enabled=self.pipeline.use_clahe,
         )
-        if self.presentation.overlay_options.get("paths", True):
+        if not self.headless and self.presentation.overlay_options.get("paths", True):
             self._draw_tablet_trajectory(image)
         telemetry = self.presentation.telemetry(
             result,

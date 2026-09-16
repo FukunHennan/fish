@@ -142,6 +142,7 @@ def create_app(service, camera_provider=None, camera_catalog=None, webrtc_server
             return jsonify({"available": False, "iceServers": []})
         return jsonify({
             "available": bool(webrtc_server.available),
+            "activePeers": webrtc_server.peer_count,
             "iceServers": webrtc_server.browser_ice_servers(),
         })
 

@@ -141,9 +141,7 @@ def enumerate_cameras(
             continue
 
         if open_capture is None:
-            # Use the exact same DSHOW -> MSMF -> ANY fallback policy as the
-            # real camera stream. This prevents discovery from repeatedly
-            # assuming DirectShow works when it cannot capture by index.
+            # Probe with the same explicit backend policy as the real stream.
             try:
                 capture, backend_name, _first_frame = _open_working_capture(index)
             except RuntimeError:

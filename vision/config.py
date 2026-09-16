@@ -23,6 +23,8 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 # Keep generated third-party caches outside the source directory.
 os.environ["YOLO_CONFIG_DIR"] = os.path.join(CACHE_DIR, "ultralytics")
 os.environ["MPLCONFIGDIR"] = os.path.join(CACHE_DIR, "matplotlib")
+os.makedirs(os.environ["YOLO_CONFIG_DIR"], exist_ok=True)
+os.makedirs(os.environ["MPLCONFIGDIR"], exist_ok=True)
 os.environ["OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS"] = "0"
 
 # Camera and browser video.
@@ -73,7 +75,7 @@ MJPEG_STREAM_WIDTH = VIDEO_WIDTH
 MJPEG_STREAM_HEIGHT = VIDEO_HEIGHT
 MJPEG_JPEG_QUALITY = 50
 MJPEG_MAX_FPS = VIDEO_FPS
-WEBRTC_MAX_FPS = VIDEO_FPS
+WEBRTC_MAX_FPS = int(os.environ.get("FISH_WEBRTC_MAX_FPS", str(VIDEO_FPS)))
 WEBRTC_OFFER_TIMEOUT_S = 10.0
 
 # STUN enables the common public-NAT case. A TURN server is still required

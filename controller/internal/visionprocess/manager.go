@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,15 +23,16 @@ type Process interface {
 type StartFunc func(visionDir string) (Process, error)
 
 type Manager struct {
-	baseURL        string
-	process        Process
-	client         *http.Client
-	start          StartFunc
-	startupTimeout time.Duration
-	mu             sync.Mutex
-	stop           chan struct{}
-	done           chan struct{}
-	closing        bool
+	baseURL          string
+	process          Process
+	client           *http.Client
+	start            StartFunc
+	startupTimeout   time.Duration
+	failureThreshold int
+	mu               sync.Mutex
+	stop             chan struct{}
+	done             chan struct{}
+	closing          bool
 }
 
 type PythonCommand struct {
@@ -53,7 +55,11 @@ func FindDir(candidates ...string) (string, error) {
 }
 
 func Ensure(baseURL string, start StartFunc, timeout time.Duration) (*Manager, error) {
-	manager := &Manager{baseURL: baseURL, client: &http.Client{Timeout: 500 * time.Millisecond}, start: start, startupTimeout: timeout, stop: make(chan struct{}), done: make(chan struct{})}
+	failureThreshold := 20
+	if configured, err := strconv.Atoi(strings.TrimSpace(os.Getenv("FISH_VISION_WATCHDOG_FAILURES"))); err == nil && configured >= 2 {
+		failureThreshold = configured
+	}
+	manager := &Manager{baseURL: baseURL, client: &http.Client{Timeout: 500 * time.Millisecond}, start: start, startupTimeout: timeout, failureThreshold: failureThreshold, stop: make(chan struct{}), done: make(chan struct{})}
 	if manager.healthy() {
 		go manager.guard()
 		return manager, nil
@@ -105,7 +111,7 @@ func (m *Manager) guard() {
 			continue
 		}
 		failures++
-		if failures < 2 {
+		if failures < m.failureThreshold {
 			continue
 		}
 		now := time.Now()

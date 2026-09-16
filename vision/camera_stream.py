@@ -1,10 +1,8 @@
-"""Restart-safe camera stream with backend fallback for the web vision service.
+"""Restart-safe camera stream with an explicit platform backend.
 
-The web UI repeatedly opens and closes camera sessions.  This implementation
-keeps shutdown strict and makes startup defensive: a backend must actually
-open and return a frame before it is accepted, optional camera properties are
-best-effort, and Windows falls back from DirectShow to Media Foundation and
-finally OpenCV's automatic backend selection.
+The web UI repeatedly opens and closes camera sessions. This implementation
+keeps shutdown strict and requires a backend to return a real frame before it
+is accepted. Linux uses V4L2 explicitly and never changes capture backends.
 """
 
 from __future__ import annotations
@@ -62,11 +60,7 @@ def _linux_v4l2_present_names(
 
 def _backend_candidates():
     if sys.platform.startswith("linux"):
-        candidates = []
-        if hasattr(cv2, "CAP_V4L2"):
-            candidates.append(("V4L2", cv2.CAP_V4L2))
-        candidates.append(("ANY", None))
-        return candidates
+        return [("V4L2", cv2.CAP_V4L2)] if hasattr(cv2, "CAP_V4L2") else []
 
     if sys.platform == "darwin":
         candidates = []
@@ -177,7 +171,7 @@ def _open_working_capture(src):
 
 
 class RestartSafeCameraStream:
-    """Camera capture with restart-safe stop/release and backend fallback."""
+    """Camera capture with restart-safe stop/release and a fixed backend."""
 
     def __init__(self, src=0):
         self.src = src

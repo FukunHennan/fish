@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from fractions import Fraction
 
 import cv2
 
@@ -82,7 +83,10 @@ class _LatestFrameBuffer:
                 return None
             if not changed or self._frame is None or self._sequence == previous_sequence:
                 return None
-            return self._sequence, self._frame.copy(), self._timestamp
+            # update() owns an immutable copy and replaces the reference on the
+            # next capture. Viewers can safely share it without another full-frame
+            # copy for every peer.
+            return self._sequence, self._frame, self._timestamp
 
     @property
     def closed(self):
@@ -153,6 +157,7 @@ if _IMPORT_ERROR is None:
             self._source = source
             self._quality = quality
             self._sequence = -1
+            self._pts = 0
 
         async def recv(self):
             while True:
@@ -175,12 +180,10 @@ if _IMPORT_ERROR is None:
                     # Never push an excessively old frame into the browser after a
                     # processing/network stall. Wait for a newer capture.
                     continue
-                # Let aiortc own the 90 kHz real-time clock. Using the camera
-                # sequence as PTS makes dropped frames change playback speed.
-                pts, time_base = await self.next_timestamp()
                 video_frame = VideoFrame.from_ndarray(_resize_for_video(frame, self._quality), format="bgr24")
-                video_frame.pts = pts
-                video_frame.time_base = time_base
+                video_frame.pts = self._pts
+                video_frame.time_base = Fraction(1, VIDEO_CLOCK_RATE)
+                self._pts += max(1, round(VIDEO_CLOCK_RATE / max(1, WEBRTC_MAX_FPS)))
                 return video_frame
 else:
     _LatestVideoTrack = None
@@ -202,6 +205,11 @@ class WebRTCServer:
     @property
     def import_error(self):
         return _IMPORT_ERROR
+
+    @property
+    def peer_count(self):
+        with self._pcs_lock:
+            return len(self._pcs)
 
     def browser_ice_servers(self):
         return browser_ice_servers()
@@ -227,7 +235,12 @@ class WebRTCServer:
         if not self.available or self._closed or frame is None:
             return
         now = time.monotonic()
-        if now - self._last_update_t < 1.0 / max(1, WEBRTC_MAX_FPS):
+        # A camera nominally running at 30 FPS naturally jitters around the
+        # exact 33.3 ms boundary. A strict comparison alternates accepted and
+        # rejected frames, producing visible 15/30 FPS pulsing. The tolerance
+        # still caps faster cameras while preserving every nominal-rate frame.
+        minimum_interval = 0.8 / max(1, WEBRTC_MAX_FPS)
+        if now - self._last_update_t < minimum_interval:
             return
         self._last_update_t = now
         self._source.update(frame, timestamp)
@@ -261,6 +274,9 @@ class WebRTCServer:
 
         @pc.on("connectionstatechange")
         async def on_connectionstatechange():
+            # "disconnected" may be a transient ICE state during network
+            # changes. Only terminal states are closed here; the browser owns
+            # retry timing for temporary interruptions.
             if pc.connectionState in {"failed", "closed"}:
                 await self._remove_peer(pc)
 

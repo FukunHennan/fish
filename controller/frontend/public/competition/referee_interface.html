@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Fish Control · 裁判工作台 · 视频回放</title>
 <style>
+:root{color-scheme:dark}
+select,select option{background:#071c31 !important;color:#eaffff !important}
+#refereeLiveStage,#refereeMatchStage{background:#02070c!important}
+#refereeLiveStage::before,#refereeLiveStage::after,#refereeMatchStage::before,#refereeMatchStage::after{display:none!important}
 :root{
   --bg:#04111f;--panel:#071b30;--panel2:#0a223a;--line:#184566;
   --cyan:#39d8ff;--green:#41e6a2;--yellow:#ffc95f;--red:#ff6479;
@@ -1985,15 +1989,15 @@ input:focus,select:focus{
 
  <section id="calibration" class="page calibration hidden">
   <section class="viewCard panel"><div class="viewHead"><h2>实时场地画面</h2><div class="badges"><span class="badge">LIVE</span><span class="badge" id="resBadge">1920 × 1080</span><span class="badge" id="fpsBadge">30 FPS</span></div></div>
-   <div class="arena"><div class="pool"></div><span class="mark m1">1</span><span class="mark m2">2</span><span class="mark m4">4</span><span class="mark m3">3</span><span class="axisX"></span><span class="axisY"></span><div class="crop" id="crop"></div><span class="fish blue f1"></span><span class="fish blue f2"></span><span class="fish red f3"></span><span class="fish red f4"></span><span class="ball"></span></div>
-   <div class="viewFoot"><span class="badge">Mark #1 原点 · #1→#2 +X · #1→#3 +Y</span><button class="btn" id="snapshotBtn">保存截图</button></div>
+   <div class="arena" id="refereeLiveStage" aria-label="原始摄像头画面"></div>
+   <div class="viewFoot"><span class="badge">原始摄像头画面 · 无图像叠加</span><button class="btn" id="snapshotBtn">保存截图</button></div>
   </section>
   <aside class="side">
-   <section class="card panel"><h3>摄像头</h3><div class="formrow"><label>分辨率</label><select id="resolution"><option>1280 × 720</option><option selected>1920 × 1080</option><option>2600 × 2160</option></select></div><div class="formrow"><label>帧率</label><select id="fpsSelect"><option>30 FPS</option><option>25 FPS</option><option>20 FPS</option><option>15 FPS</option></select></div><button class="btn wide" id="applyCameraBtn">应用采集参数</button></section>
+   <section class="card panel" id="refereeCameraPanel" data-referee-video-controls><h3>摄像头与视觉</h3><div class="formrow"><label>视频设备</label><select data-video-camera><option value="">正在读取真实摄像头…</option></select></div><button class="btn wide good" type="button" data-video-action>启动真实视频</button><button class="btn wide" type="button" data-vision-processing-action>启动视觉识别</button><div class="inlineStatus"><span>识别设备</span><b data-vision-processing-status>严格 CUDA · 未启动</b></div><div class="formrow"><label>分辨率</label><select id="resolution"><option>1280 × 720</option><option selected>1920 × 1080</option><option>2600 × 2160</option></select></div><div class="formrow"><label>帧率</label><select id="fpsSelect"><option>30 FPS</option><option>25 FPS</option><option>20 FPS</option><option>15 FPS</option></select></div><button class="btn wide" id="applyCameraBtn">应用采集参数</button></section>
    <section class="card panel"><h3>画面</h3><div class="formrow"><label>曝光</label><input id="exposureRange" type="range" min="0" max="100" value="42"></div><div class="inlineStatus"><span>当前曝光</span><b id="exposureValue">42%</b></div></section>
    <section class="card panel"><h3>裁剪</h3><div class="formrow"><label>边距</label><input id="cropRange" type="range" min="0" max="15" value="6"></div><div class="twoBtns"><button class="btn" id="applyCropBtn">应用裁剪</button><button class="btn" id="resetCropBtn">恢复全画面</button></div></section>
    <section class="card panel"><h3>场地尺寸</h3><div class="formrow"><label>宽度 X</label><input type="number" value="3.14" step=".01"></div><div class="formrow"><label>高度 Y</label><input type="number" value="1.60" step=".01"></div></section>
-   <section class="card panel"><h3>场地状态</h3><div class="statuslist"><div class="statusitem"><span>Mark</span><b>4 / 4</b></div><div class="statusitem"><span>坐标</span><b>FIELD</b></div><div class="statusitem"><span>目标</span><b>5 / 5</b></div></div></section>
+   <section class="card panel"><h3>场地状态</h3><div class="statuslist"><div class="statusitem"><span>Mark</span><b>未标定</b></div><div class="statusitem"><span>坐标</span><b>未建立</b></div><div class="statusitem"><span>目标</span><b>未识别</b></div></div></section>
    <section class="deviceConfirmCard panel">
     <div class="deviceConfirmHead"><div><h3>设备确认</h3><p>由选手自己测试并回传结果</p></div><b id="deviceConfirmCount">0 / 4</b></div>
     <div class="deviceConfirmList" id="deviceConfirmList"></div>
@@ -2005,7 +2009,7 @@ input:focus,select:focus{
 
  <section id="match" class="page match hidden">
   <section class="scorebar panel"><div class="sideScore"><span>蓝队</span><b class="blueTxt" id="blueScore">36</b></div><div class="clock"><strong id="clock">01:28</strong><small id="clockState">剩余时间</small></div><div class="sideScore red"><b class="redTxt" id="redScore">24</b><span>红队</span></div></section>
-  <section class="arenaCard panel"><div class="arenaHead"><h2>比赛画面</h2><span>视觉独立接入</span></div><div class="arena"><div class="pool"><span class="goal l"></span><span class="goal r"></span></div><span class="mark m1">1</span><span class="mark m2">2</span><span class="mark m4">4</span><span class="mark m3">3</span><span class="fish blue f1"><span>B1</span></span><span class="fish blue f2"><span>B2</span></span><span class="fish red f3"><span>R1</span></span><span class="fish red f4"><span>R2</span></span><span class="ball"></span></div><div class="arenaFoot"><span>机器鱼在线状态按真实设备心跳显示</span><span>视觉目标独立统计</span></div></section>
+  <section class="arenaCard panel"><div class="arenaHead"><h2>比赛画面</h2><span>原始视频 · 识别数据独立</span></div><div class="arena" id="refereeMatchStage" aria-label="原始比赛视频"></div><div class="arenaFoot"><span>机器鱼在线状态按真实设备心跳显示</span><span>视觉目标独立统计</span></div></section>
   <aside class="scoreSidePanel">
    <section class="teamQuick panel"><div class="teamQuickHead"><h3 class="blueTxt">蓝队</h3><b id="blueQuick">36</b></div><div class="quickBtns"><button class="goalBtn" data-team="blue" data-score="10">⚽ 进球<br>+10</button><button class="assistBtn" data-team="blue" data-score="2">⇄ 配合<br>+2</button><button class="outBtn" data-team="blue" data-score="-2">⚠ 越界<br>-2</button></div></section>
    <section class="teamQuick panel"><div class="teamQuickHead"><h3 class="redTxt">红队</h3><b id="redQuick">24</b></div><div class="quickBtns"><button class="goalBtn" data-team="red" data-score="10">⚽ 进球<br>+10</button><button class="assistBtn" data-team="red" data-score="2">⇄ 配合<br>+2</button><button class="outBtn" data-team="red" data-score="-2">⚠ 越界<br>-2</button></div></section>
@@ -2127,7 +2131,7 @@ function renderSignup(){
 function renderSelect(){['blue','red'].forEach(side=>document.getElementById(side+'Select').innerHTML=state.players.filter(p=>p.side===side).map(p=>`<button class="selectPlayer" data-slot="${p.slot}" ${p.done?'disabled':''}><div><b>${p.slot} · ${p.name}</b><small>${p.id} · ${p.fish}</small></div><span>${p.done?'已签到':'选择 →'}</span></button>`).join(''));document.querySelectorAll('.selectPlayer').forEach(b=>b.onclick=()=>openConfirm(b.dataset.slot))}
 function openConfirm(slot){selectedPlayer=state.players.find(p=>p.slot===slot);selectStep.style.display='none';confirmStep.classList.add('show');modalTitle.textContent='核对签到信息';avatar.textContent=selectedPlayer.slot;confirmName.textContent=selectedPlayer.name;confirmTeam.textContent=selectedPlayer.team;confirmId.textContent=selectedPlayer.id;confirmSlot.textContent=selectedPlayer.slot;confirmFish.textContent=selectedPlayer.fish}
 openSignup.onclick=()=>{selectStep.style.display='block';confirmStep.classList.remove('show');modal.classList.add('show');renderSelect()};closeBtn.onclick=()=>modal.classList.remove('show');back.onclick=()=>{selectStep.style.display='block';confirmStep.classList.remove('show')};confirmBtn.onclick=()=>{selectedPlayer.done=true;selectedPlayer.time=now();modal.classList.remove('show');renderSignup();toast('签到成功')};signupNext.onclick=()=>show('calibration');
-cropRange.oninput=e=>{const v=Number(e.target.value);crop.style.left=v+'%';crop.style.right=v+'%';crop.style.top=Math.max(0,v-1)+'%';crop.style.bottom=Math.max(0,v-1)+'%'};lockCal.onclick=()=>{
+cropRange.oninput=e=>{if(!crop)return;const v=Number(e.target.value);crop.style.left=v+'%';crop.style.right=v+'%';crop.style.top=Math.max(0,v-1)+'%';crop.style.bottom=Math.max(0,v-1)+'%'};lockCal.onclick=()=>{
  state.calLocked=!state.calLocked;
  if(!state.calLocked){
    state.deviceTestOpen=false;
@@ -2377,6 +2381,6 @@ snapshotBtn.onclick=()=>toast('已保存当前场地图像');
 recordPath.value=state.savePath;updateRecState('','● 未录制');
 renderSignup();renderDeviceConfirm();renderMatch();renderHistory();renderHistoryDetail();show('signup');
 </script>
-<script src="competition-adapter.js?v=20260916-camera-controls"></script>
+<script src="competition-adapter.js?v=20260916-strict-cuda-video"></script>
 </body>
 </html>

@@ -20,7 +20,11 @@ def resolve_inference_device(requested, model_device, cuda_available=None):
         if cuda_available is None:
             import torch
             cuda_available = torch.cuda.is_available() and requested < torch.cuda.device_count()
-        return requested if cuda_available else "cpu"
+        if not cuda_available:
+            raise RuntimeError(
+                f"CUDA device {requested} is required but unavailable; CPU fallback is disabled"
+            )
+        return requested
     return requested
 
 
@@ -60,8 +64,6 @@ class FishDetector:
         }
         self._tracks = {}
         self._next_track_id = 1
-        self._last_nonempty_result = None
-        self._detection_hold_seconds = 0.75
         self._status_lock = threading.Lock()
         self._status = {
             "loading": False,
@@ -146,19 +148,29 @@ class FishDetector:
         load_seconds = time.perf_counter() - load_started
         if self._stop_event.is_set():
             return
+        try:
+            inference_device = resolve_inference_device(
+                self.device, getattr(model, "device", self.device)
+            )
+        except RuntimeError as error:
+            with self._status_lock:
+                self._status.update(
+                    loading=False,
+                    ready=False,
+                    error=str(error),
+                    load_seconds=load_seconds,
+                )
+            print(f"[YOLO] Strict CUDA requirement failed: {error}")
+            return
         with self._status_lock:
             self._status.update(
                 loading=False,
                 ready=True,
                 error=None,
                 load_seconds=load_seconds,
+                device=str(inference_device),
             )
-        print(f"[YOLO] Model ready in {load_seconds:.2f}s")
-        inference_device = resolve_inference_device(
-            self.device, getattr(model, "device", self.device)
-        )
-        with self._status_lock:
-            self._status["device"] = str(inference_device)
+        print(f"[YOLO] Model ready in {load_seconds:.2f}s on CUDA device {inference_device}")
 
         while not self._stop_event.is_set():
             with self._latest_frame_lock:
@@ -235,10 +247,10 @@ class FishDetector:
             "detections": [],
         }
         if not results:
-            return self._hold_recent_detection(parsed, frame_time)
+            return parsed
         boxes = getattr(results[0], "boxes", None)
         if boxes is None or len(boxes) == 0:
-            return self._hold_recent_detection(parsed, frame_time)
+            return parsed
 
         previous = dict(self._tracks)
         used = set()
@@ -269,23 +281,7 @@ class FishDetector:
         parsed["bbox"] = list(best["bbox"])
         parsed["confidence"] = best["confidence"]
         parsed["track_id"] = best["trackId"]
-        self._last_nonempty_result = dict(parsed)
         return parsed
-
-    def _hold_recent_detection(self, empty, frame_time):
-        previous = self._last_nonempty_result
-        if previous is None:
-            return empty
-        age = float(frame_time) - float(previous.get("frame_time", 0.0))
-        if age < 0.0 or age > self._detection_hold_seconds:
-            return empty
-        held = dict(previous)
-        held["frame_time"] = frame_time
-        held["confidence"] = float(held.get("confidence", 0.0)) * max(
-            0.35, 1.0 - age / self._detection_hold_seconds
-        )
-        held["detections"] = [dict(item, held=True) for item in held.get("detections", [])]
-        return held
 
     @staticmethod
     def _merge_duplicate_candidates(candidates):
@@ -331,7 +327,7 @@ class ReferenceSource:
     RIGID_BODY = "RIGID_BODY"
     MARKER = "MARKER"
     PREDICTED = "PREDICTED"
-    ESTIMATED_FALLBACK = "ESTIMATED_FALLBACK"
+    YOLO = "YOLO"
     INVALID = "INVALID"
 
 
@@ -1230,7 +1226,7 @@ class FixedReferenceTracker:
                 position = ((x1 + x2) * 0.5, (y1 + y2) * 0.5)
                 return ReferenceObservation(
                     timestamp=timestamp,
-                    source=ReferenceSource.ESTIMATED_FALLBACK,
+                    source=ReferenceSource.YOLO,
                     position=position,
                     confidence=float(np.clip(yolo_confidence, 0.0, 1.0)),
                     quality=float(np.clip(yolo_confidence, 0.0, 1.0)),
@@ -1583,16 +1579,6 @@ class VisionPipeline:
             ),
             None,
         )
-        if target is None and len(detections) == 1 and self._target_hold_center is not None:
-            candidate = detections[0]
-            center = candidate.get("center")
-            if center is not None:
-                distance = float(
-                    ((float(center[0]) - self._target_hold_center[0]) ** 2
-                     + (float(center[1]) - self._target_hold_center[1]) ** 2) ** 0.5
-                )
-                if distance <= self._target_hold_max_distance_px:
-                    target = candidate
         selected["targetFound"] = target is not None
         if target is None:
             selected.update({
@@ -1636,8 +1622,20 @@ class VisionPipeline:
         )
 
         yolo_pixel = yolo_result.get("pixel")
-        pixel = (tuple(float(value) for value in reference.position) if reference.position is not None else (tuple(float(value) for value in yolo_pixel) if yolo_pixel is not None else None))
-        position_source = reference.source if reference.position is not None else ReferenceSource.ESTIMATED_FALLBACK
+        yolo_age = frame_time - float(yolo_result.get("frame_time") or 0.0)
+        current_yolo = yolo_pixel is not None and 0.0 <= yolo_age <= max(0.5, YOLO_DETECT_INTERVAL_S * 2.5)
+        if reference.position is not None and reference.source in {
+            ReferenceSource.RIGID_BODY,
+            ReferenceSource.MARKER,
+        }:
+            pixel = tuple(float(value) for value in reference.position)
+            position_source = reference.source
+        elif current_yolo:
+            pixel = tuple(float(value) for value in yolo_pixel)
+            position_source = ReferenceSource.YOLO
+        else:
+            pixel = None
+            position_source = ReferenceSource.INVALID
         display_pixel = self._smooth_pixel(pixel)
         current, direct_marker = self._world_position(
             pixel, position_source, frame_time, homography
@@ -1715,8 +1713,7 @@ class VisionPipeline:
         allowed = {
             ReferenceSource.RIGID_BODY,
             ReferenceSource.MARKER,
-            ReferenceSource.PREDICTED,
-            ReferenceSource.ESTIMATED_FALLBACK,
+            ReferenceSource.YOLO,
         }
         if homography is None or pixel is None or source not in allowed:
             self._position_smooth = None

@@ -78,7 +78,6 @@ from dataclasses import dataclass
 from functools import lru_cache
 import os
 import time
-from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 import cv2
@@ -602,8 +601,8 @@ class VisionHud:
     SOURCE_NAMES = {
         "RIGID_BODY": "白色刚性鱼身",
         "MARKER": "鱼尾定位",
+        "YOLO": "YOLO 实时检测",
         "PREDICTED": "短时预测",
-        "ESTIMATED_FALLBACK": "识别框降级",
         "INVALID": "位置无效",
     }
     STATUS_NAMES = {
@@ -650,11 +649,9 @@ class VisionHud:
 
     @staticmethod
     def _source_color(source: str) -> Color:
-        if source in ("RIGID_BODY", "MARKER"):
+        if source in ("RIGID_BODY", "MARKER", "YOLO"):
             return UiPalette.SUCCESS
         if source == "PREDICTED":
-            return UiPalette.WARNING
-        if source == "ESTIMATED_FALLBACK":
             return UiPalette.WARNING
         return UiPalette.DANGER
 
@@ -1009,7 +1006,6 @@ class VisionPresentation:
                 "RECORD": recording,
                 "CLAHE": clahe_enabled,
             })
-        self._draw_video_timing(image, result.frame_time)
         return image
 
     def render_preview(
@@ -1020,35 +1016,8 @@ class VisionPresentation:
         camera_fps: float,
         loop_fps: float,
     ) -> np.ndarray:
-        del camera_fps, loop_fps
-        preview = image.copy()
-        self._draw_video_timing(preview, frame_time)
-        return preview
-
-    @staticmethod
-    def _draw_video_timing(image: np.ndarray, frame_time: float) -> None:
-        captured = datetime.fromtimestamp(frame_time).strftime("%H:%M:%S.%f")[:-3]
-        label = f"采集 {captured}"
-        text_width, text_height = measure_unicode_text(label, 12, bold=True)
-        height, width = image.shape[:2]
-        panel_width = min(max(1, width - 16), text_width + 18)
-        left = max(8, width - panel_width - 8)
-        top = 8
-        draw_translucent_panel(
-            image,
-            (left, top, left + panel_width, top + text_height + 12),
-            color=UiPalette.PANEL,
-            alpha=0.72,
-            radius=5,
-        )
-        draw_unicode_text(
-            image,
-            label,
-            (left + 9, top + 6),
-            12,
-            UiPalette.TEXT,
-            bold=True,
-        )
+        del frame_time, camera_fps, loop_fps
+        return image
 
     def _draw_selection(self, image, marker_roi, heading, result):
         if marker_roi["selecting"] and marker_roi["start"] is not None:
@@ -1141,8 +1110,8 @@ class VisionPresentation:
             colours = {
                 "RIGID_BODY": UiPalette.SUCCESS,
                 "MARKER": UiPalette.SUCCESS,
+                "YOLO": UiPalette.SUCCESS,
                 "PREDICTED": UiPalette.WARNING,
-                "ESTIMATED_FALLBACK": UiPalette.WARNING,
             }
             colour = colours.get(result.reference.source, UiPalette.DANGER)
             cv2.rectangle(image, (cx - 15, cy - 15), (cx + 15, cy + 15), colour, 2)

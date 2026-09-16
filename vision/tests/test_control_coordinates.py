@@ -1,37 +1,33 @@
-import os
-import sys
+import unittest
 
 import numpy as np
-
-VISION_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if VISION_DIR not in sys.path:
-    sys.path.insert(0, VISION_DIR)
 
 from control_coordinates import ControlCoordinateMapper
 
 
-def test_image_mapping_covers_control_plane():
-    mapper = ControlCoordinateMapper(640, 480, control_width=3.2, control_height=1.6)
-    points = mapper.map_points([(0, 0), (639, 479)])
-    assert np.allclose(points[0], [0.0, 0.0], atol=1e-6)
-    assert np.allclose(points[1], [3.2, 1.6], atol=1e-6)
-    assert mapper.resolve().mode == "IMAGE"
+class ControlCoordinateTests(unittest.TestCase):
+    def test_image_mapping_is_rejected_without_field_calibration(self):
+        mapper = ControlCoordinateMapper(640, 480, control_width=3.2, control_height=1.6)
+        with self.assertRaisesRegex(RuntimeError, "必要条件"):
+            mapper.map_points([(0, 0), (639, 479)])
+
+    def test_field_homography_is_used(self):
+        mapper = ControlCoordinateMapper(640, 480, control_width=3.2, control_height=1.6)
+        field = np.array([
+            [0.01, 0.0, 0.5],
+            [0.0, 0.01, 0.25],
+            [0.0, 0.0, 1.0],
+        ], dtype=np.float64)
+        mapped = mapper.map_point((100, 50), field)
+        self.assertEqual(mapper.resolve(field).mode, "FIELD")
+        self.assertTrue(np.allclose(mapped, [1.5, 0.75], atol=1e-6))
+
+    def test_heading_mapping_preserves_direction(self):
+        mapper = ControlCoordinateMapper(640, 480, control_width=3.2, control_height=1.6)
+        heading = mapper.map_heading((320, 240), (1, 0), np.eye(3))
+        self.assertGreater(heading[0], 0.999)
+        self.assertLess(abs(heading[1]), 1e-6)
 
 
-def test_field_homography_overrides_image_mapping():
-    mapper = ControlCoordinateMapper(640, 480, control_width=3.2, control_height=1.6)
-    field = np.array([
-        [0.01, 0.0, 0.5],
-        [0.0, 0.01, 0.25],
-        [0.0, 0.0, 1.0],
-    ], dtype=np.float64)
-    mapped = mapper.map_point((100, 50), field)
-    assert mapper.resolve(field).mode == "FIELD"
-    assert np.allclose(mapped, [1.5, 0.75], atol=1e-6)
-
-
-def test_heading_mapping_preserves_direction():
-    mapper = ControlCoordinateMapper(640, 480, control_width=3.2, control_height=1.6)
-    heading = mapper.map_heading((320, 240), (1, 0))
-    assert heading[0] > 0.999
-    assert abs(heading[1]) < 1e-6
+if __name__ == "__main__":
+    unittest.main()

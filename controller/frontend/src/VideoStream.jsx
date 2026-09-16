@@ -2,7 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { visionWebRTCConfigUrl, visionWebRTCOfferUrl } from "./visionSession.js";
 
 const transportCache = new Map();
-const KEEP_ALIVE_MS = 30000;
+const KEEP_ALIVE_MS = 3000;
 const CONNECT_TIMEOUT_MS = 12000;
 
 function waitForIceGatheringComplete(peerConnection, signal) {
@@ -149,7 +149,13 @@ const VideoStream = forwardRef(function VideoStream({
                 closeTransport(cacheKey, entry);
               }
             }, CONNECT_TIMEOUT_MS);
-            peer.addTransceiver("video", { direction: "recvonly" });
+            const transceiver = peer.addTransceiver("video", { direction: "recvonly" });
+            try {
+              if ("playoutDelayHint" in transceiver.receiver) transceiver.receiver.playoutDelayHint = 0.05;
+              if ("jitterBufferTarget" in transceiver.receiver) transceiver.receiver.jitterBufferTarget = 50;
+            } catch {
+              // Receiver latency hints are optional and browser-dependent.
+            }
             peer.ontrack = (event) => {
               entry.stream = event.streams?.[0] || new MediaStream([event.track]);
               for (const track of entry.stream.getTracks()) {
