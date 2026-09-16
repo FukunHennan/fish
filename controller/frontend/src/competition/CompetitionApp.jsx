@@ -169,7 +169,9 @@ function Header({ page, onPageChange, user, backendStatus, onLogout }) {
         <span className={`backendBadge ${backendStatus === "online" ? "online" : "offline"}`}>
           <i />{backendStatus === "online" ? "后端已接入" : "后端连接中"}
         </span>
-        {user && <button className="userBadge" type="button" onClick={onLogout} title="退出登录">{user.name || user.email} · 退出</button>}
+        {user?.id === "local-anonymous"
+          ? <span className="userBadge">本地开发</span>
+          : user && <button className="userBadge" type="button" onClick={onLogout} title="退出登录">{user.name || user.email} · 退出</button>}
       </div>
     </header>
   );

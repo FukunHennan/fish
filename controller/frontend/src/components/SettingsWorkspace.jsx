@@ -316,7 +316,7 @@ export default function SettingsWorkspace({
   lowBatteryCount = 0,
   sending = false,
   stopAll = () => {},
-  onLogout = () => {},
+  onLogout = null,
   firmwareInfo = { available: false },
   firmwareFile = null,
   setFirmwareFile = () => {},
@@ -423,7 +423,7 @@ export default function SettingsWorkspace({
           <TabButton key={id} id={id} active={activeTab === id} onClick={setActiveTab}>{label}</TabButton>
         ))}
         <div className="settings-nav-footer">
-          <button type="button" className="quiet" onClick={onLogout}>退出登录</button>
+          {onLogout && <button type="button" className="quiet" onClick={onLogout}>退出登录</button>}
           {isAdmin && <button type="button" className="danger" disabled={!onlineDevices.length || sending} onClick={stopAll}>全部停止</button>}
         </div>
       </nav>

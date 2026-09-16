@@ -141,6 +141,7 @@ function App() {
 
   const onlineDevices = useMemo(() => devices.filter((device) => device.online), [devices]);
   const isAdmin = auth.user?.role === "Admin";
+  const authBypassed = auth.user?.id === "local-anonymous";
   const lowBatteryCount = useMemo(() => onlineDevices.filter((device) => (batteryLevel(device) ?? 101) < 20).length, [onlineDevices]);
   const selectedDevice = useMemo(() => devices.find((device) => device.deviceId === selectedDeviceId) || null, [devices, selectedDeviceId]);
   const selectedManualMotion = useMemo(() => {
@@ -787,7 +788,7 @@ function App() {
           <span className="status online"><i />服务器在线</span>
           <span className="user">{roleLabel(auth.user)} <strong>{auth.user?.name || auth.user?.email}</strong></span>
           {isAdmin && <button className="top-stop" disabled={!onlineDevices.length || sending} onClick={stopAll}>全部停止</button>}
-          <button className="logout-button" onClick={logout}>退出</button>
+          {!authBypassed && <button className="logout-button" onClick={logout}>退出</button>}
         </div>
       </header>
 
@@ -836,7 +837,7 @@ function App() {
           lowBatteryCount={lowBatteryCount}
           sending={sending}
           stopAll={stopAll}
-          onLogout={logout}
+          onLogout={authBypassed ? null : logout}
           firmwareInfo={firmwareInfo}
           firmwareFile={firmwareFile}
           setFirmwareFile={(file) => {
