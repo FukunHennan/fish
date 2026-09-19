@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "updated_at": 1787911457.73093,
+  "note": "HYBRID 满转视觉拟合；左右分别保存，仅作为曲率前馈端点",
+  "directions": {
+    "LEFT": {
+      "direction": "LEFT",
+      "center_x_m": 0.655879332342648,
+      "center_y_m": 0.48864152411860107,
+      "radius_m": 0.2155154100477194,
+      "rms_residual_m": 0.03329948632990186,
+      "arc_coverage_deg": 438.2103337129427,
+      "sample_count": 153,
+      "inlier_count": 150,
+      "started_at": 1787911408.6672049,
+      "ended_at": 1787911457.178683,
+      "diameter_m": 0.4310308200954388,
+      "curvature_per_m": 4.640039428171656,
+      "mode": "HYBRID",
+      "turn_strength": 1.0
+    }
+  }
+}

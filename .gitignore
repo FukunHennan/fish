@@ -8,7 +8,6 @@ dist
 controller/frontend/node_modules
 controller/internal/web/dist
 controller/.runtime/
-config/deployment.json
 .superpowers/
 
 # Local runtime output and generated binaries
@@ -31,7 +30,7 @@ vision/.cache/
 __pycache__/
 *.py[cod]
 .pytest_cache/
-vision/assets/*.local.json
+# Local calibration profiles are project state and are intentionally tracked.
 firmware/include/FactoryWifi.local.h
 
 .vscode/.browse_c_cpp.db*

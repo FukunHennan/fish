@@ -835,7 +835,8 @@ func TestRealtimeMatchCommandIsAllowedOutsideRunningCompetition(t *testing.T) {
 
 func TestControlSocketForwardsRealtimeFrame(t *testing.T) {
 	h := hub.New()
-	connection := &captureConn{}
+	sent := make(chan any, 1)
+	connection := &captureConn{onWrite: func(value any) { sent <- value }}
 	h.Register(hub.Device{ID: "fish-1"}, connection)
 	ts := httptest.NewServer(NewHandler(h, testKey()))
 	defer ts.Close()
@@ -872,10 +873,13 @@ func TestControlSocketForwardsRealtimeFrame(t *testing.T) {
 	if !ok || result["sent"] != true || result["success"] != true {
 		t.Fatalf("WebSocket 控制未确认入队: %#v", frame)
 	}
-	if len(connection.sent) != 1 {
-		t.Fatalf("WebSocket 控制未发送到设备: %d", len(connection.sent))
+	var rawMessage any
+	select {
+	case rawMessage = <-sent:
+	case <-time.After(time.Second):
+		t.Fatal("WebSocket 控制未发送到设备")
 	}
-	message := connection.sent[0].(map[string]any)
+	message := rawMessage.(map[string]any)
 	if message["command"] != "motion.set" {
 		t.Fatalf("设备收到的命令错误: %#v", message)
 	}
