@@ -1,5 +1,6 @@
 import unittest
 from queue import Empty
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from service import CameraInfo, VisionService
@@ -194,6 +195,61 @@ class VisionWebApiTests(unittest.TestCase):
         self.assertEqual(created.status_code, 201)
         self.assertEqual(created.get_json()["data"]["yoloModel"], "fish.pt")
         self.assertEqual(selected, ["/vision/assets/fish.pt"])
+
+    def test_match_recording_contract_uses_active_video_session(self):
+        calls = []
+        recording = {
+            "active": True,
+            "recordingId": "match-1",
+            "fileName": "match_match-1.mp4",
+            "width": 320,
+            "height": 240,
+        }
+        video = SimpleNamespace(
+            start_recording=lambda output, recording_id, metadata=None: (
+                calls.append(("start", output, recording_id, metadata)) or dict(recording)
+            ),
+            stop_recording=lambda recording_id, discard=False: (
+                calls.append(("stop", recording_id, discard))
+                or dict(recording, active=False)
+            ),
+            recording_status=lambda: dict(recording),
+            browser_ice_servers=lambda: [],
+            available=True,
+            peer_count=0,
+        )
+        service = VisionService(runner_factory=lambda *_: lambda: None)
+        service.create_session("camera-1", 1)
+        client = create_app(
+            service,
+            camera_provider=lambda: [],
+            webrtc_server=video,
+        ).test_client()
+
+        started = client.post(
+            "/recordings",
+            json={"recordingId": "match-1", "matchNo": "第 01 场"},
+        )
+        self.assertEqual(started.status_code, 201)
+        self.assertEqual(started.get_json()["recording"]["recordingId"], "match-1")
+        stopped = client.delete("/recordings/match-1")
+        self.assertEqual(stopped.status_code, 200)
+        self.assertEqual([item[0] for item in calls], ["start", "stop"])
+
+    def test_recording_requires_a_live_video_session(self):
+        video = SimpleNamespace(
+            recording_status=lambda: {"active": False},
+            browser_ice_servers=lambda: [],
+            available=True,
+            peer_count=0,
+        )
+        client = create_app(
+            VisionService(runner_factory=lambda *_: lambda: None),
+            camera_provider=lambda: [],
+            webrtc_server=video,
+        ).test_client()
+        response = client.post("/recordings", json={"recordingId": "match-1"})
+        self.assertEqual(response.status_code, 409)
 
 
 if __name__ == "__main__":

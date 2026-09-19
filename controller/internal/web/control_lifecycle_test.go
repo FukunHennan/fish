@@ -48,6 +48,88 @@ func TestEveryLeaseCleanupDeliversExpiredStop(t *testing.T) {
 	}
 }
 
+func TestDeadmanProtectedLeaseCleanupSkipsRedundantStop(t *testing.T) {
+	l := newLeaseStore(time.Minute)
+	stops := 0
+	l.onRelease = func(string) { stops++ }
+	l.leases["fish"] = controlLease{
+		OwnerID: "user", ClientID: "browser", DeadmanProtected: true,
+		ExpiresAt: time.Now().Add(-time.Second),
+	}
+	l.expire()
+	if stops != 0 {
+		t.Fatalf("设备端已有失联回中保护，不应补发停止命令: %d", stops)
+	}
+}
+
+func TestVisionTakeoverPreemptsDeadmanProtectedLease(t *testing.T) {
+	l := newLeaseStore(time.Minute)
+	stops := 0
+	l.onRelease = func(string) { stops++ }
+	l.leases["fish"] = controlLease{
+		OwnerID: "browser", ClientID: "tab", DeadmanProtected: true,
+		ExpiresAt: time.Now().Add(time.Minute),
+	}
+	if !l.admitVision("fish", "start", func() bool { return true }) {
+		t.Fatal("vision takeover rejected")
+	}
+	if stops != 1 {
+		t.Fatalf("vision takeover must queue one neutral command, got %d", stops)
+	}
+	if got := l.snapshot()["fish"]; got.OwnerID != "vision-bot" {
+		t.Fatalf("owner = %q, want vision-bot", got.OwnerID)
+	}
+}
+
+func TestAdminTakeoverStopsDeadmanProtectedLease(t *testing.T) {
+	l := newLeaseStore(time.Minute)
+	stops := 0
+	l.onRelease = func(string) { stops++ }
+	l.leases["fish"] = controlLease{
+		OwnerID: "browser", ClientID: "tab", DeadmanProtected: true,
+		ExpiresAt: time.Now().Add(time.Minute),
+	}
+	admin := authUser{ID: "admin", Role: "Admin", Status: "active"}
+	if _, _, ok := l.acquireExclusive("fish", admin, "manual", true, "admin-tab"); !ok {
+		t.Fatal("admin takeover rejected")
+	}
+	if stops != 1 {
+		t.Fatalf("admin takeover must queue one neutral command, got %d", stops)
+	}
+}
+
+func TestPlayerLeaseCannotBeTakenByAnotherBrowserOfSameAccount(t *testing.T) {
+	l := newLeaseStore(time.Minute)
+	user := authUser{ID: "same-user", Role: "Admin", Status: "active"}
+	if _, _, ok := l.acquireExclusive("fish", user, "player", false, "player-tab-a"); !ok {
+		t.Fatal("first player browser could not acquire lease")
+	}
+	if lease, _, ok := l.acquireExclusive("fish", user, "player", false, "player-tab-b"); ok {
+		t.Fatal("second player browser took the existing player lease")
+	} else if lease.ClientID != "player-tab-a" {
+		t.Fatalf("lease client = %q, want player-tab-a", lease.ClientID)
+	}
+	if _, _, ok := l.acquireExclusive("fish", user, "player", false, "player-tab-a"); !ok {
+		t.Fatal("own player browser could not refresh its lease")
+	}
+}
+
+func TestPlayerControlRequiresLockedAssignedField(t *testing.T) {
+	store := &competitionStore{Match: newDevelopmentMatch()}
+	store.Match.Blue.Players[0].DeviceID = "fish"
+	s := &server{competition: store}
+	if s.playerControlAllowed("fish", "B1") {
+		t.Fatal("player control allowed before field lock")
+	}
+	store.Match.FieldLocked = true
+	if !s.playerControlAllowed("fish", "B1") {
+		t.Fatal("assigned player denied after field lock")
+	}
+	if s.playerControlAllowed("fish", "B2") || s.playerControlAllowed("other", "B1") {
+		t.Fatal("wrong slot or device was allowed")
+	}
+}
+
 func TestLeaseReplacementQueuesStopBeforeNewMotion(t *testing.T) {
 	l := newLeaseStore(time.Minute)
 	user := authUser{ID: "user"}

@@ -82,7 +82,7 @@ func TestHealthAndDashboard(t *testing.T) {
 	handler := NewHandler(hub.New(), testKey())
 	for _, tc := range []struct{ path, contains string }{
 		{"/healthz", "ok"},
-		{"/", "赛事界面总入口"},
+		{"/", "FISH CONTROL · 赛事平台"},
 		{"/console.html", "机器鱼控制台"},
 	} {
 		r := httptest.NewRequest("GET", tc.path, nil)
@@ -476,6 +476,22 @@ func TestVisionDeviceCommandFailsWhenDeviceDoesNotAcknowledge(t *testing.T) {
 	}
 }
 
+func TestVisionMotionReturnsPendingWhenAckArrivesLate(t *testing.T) {
+	h := hub.New()
+	connection := &captureConn{}
+	h.Register(hub.Device{ID: "fish-1"}, connection)
+	prepareVisionSession(t, h, "fish-1", "session-1", connection)
+	handler := NewHandler(h, testKey())
+	r := httptest.NewRequest(http.MethodPost, "/api/vision/device-command", strings.NewReader(
+		`{"operation":"motion","deviceId":"fish-1","sessionId":"session-1","mode":"forward","frequency":2.5,"amplitude":20}`,
+	))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+	if w.Code != http.StatusAccepted || !strings.Contains(w.Body.String(), `"pending":true`) || !strings.Contains(w.Body.String(), `"success":true`) {
+		t.Fatalf("late motion ACK should remain usable: status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
 func TestVisionDeviceCommandRoutesToExplicitTargetAmongMultipleFish(t *testing.T) {
 	h := hub.New()
 	first := &captureConn{}
@@ -578,6 +594,52 @@ func TestDynamicChallengeRegistersDevice(t *testing.T) {
 	}
 }
 
+func TestProtocolV2RegistrationKeepsIdentityMetadata(t *testing.T) {
+	key := make([]byte, 32)
+	h := hub.New()
+	testServer := httptest.NewServer(NewHandler(h, key))
+	defer testServer.Close()
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(testServer.URL, "http")+"/ws/device", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetReadDeadline(time.Now().Add(time.Second))
+	var challenge map[string]any
+	if err := conn.ReadJSON(&challenge); err != nil {
+		t.Fatal(err)
+	}
+	const deviceID = "AC:27:6E:7C:37:19"
+	proof, err := identity.Proof(key, "fish-websocket-v1", text(challenge["nonce"]), deviceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.WriteJSON(map[string]any{
+		"type": "register", "protocolVersion": 2, "deviceId": deviceID, "proof": proof,
+		"name": "V2 机器鱼", "bootId": "boot-1234", "firmwareVersion": "1.4.0",
+		"ip": "192.168.1.50", "servoCenter": 87.5, "i2cAddresses": []int{35, 74},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var result map[string]any
+	if err := conn.ReadJSON(&result); err != nil || result["success"] != true {
+		t.Fatalf("v2 注册失败: %#v %v", result, err)
+	}
+	var devices []hub.Device
+	deadline := time.Now().Add(250 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		devices = h.List()
+		if len(devices) == 1 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if len(devices) != 1 || devices[0].ProtocolVersion != 2 || devices[0].BootID != "boot-1234" ||
+		devices[0].ServoCenter != 87.5 || len(devices[0].I2CAddresses) != 2 {
+		t.Fatalf("v2 身份信息没有完整保存: %+v", devices)
+	}
+}
+
 // The React operator console moved from "/" to "/console.html" when the
 // competition platform page took over the root path.
 func TestConsoleServesReactApplication(t *testing.T) {
@@ -637,6 +699,32 @@ func TestMotionCommandIncludesBiasAndRequestID(t *testing.T) {
 	}
 }
 
+func TestProtocolV2SmallAckKeepsHTTPAppliedContract(t *testing.T) {
+	h := hub.New()
+	c := &captureConn{onWrite: func(value any) {
+		message := value.(map[string]any)
+		h.ResolveCommandResult(map[string]any{
+			"type": "command.result", "requestId": message["requestId"],
+			"success": true, "code": "OK", "message": "accepted",
+		})
+	}}
+	h.Register(hub.Device{ID: "fish-v2", ProtocolVersion: 2}, c)
+	handler := NewHandler(h, testKey())
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(
+		http.MethodPost, "/api/command",
+		strings.NewReader(`{"deviceId":"fish-v2","mode":"left","frequency":2.5,"amplitude":28,"bias":-8}`),
+	))
+	var body map[string]any
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil {
+		t.Fatalf("v2 小回执请求失败: %d %s", response.Code, response.Body.String())
+	}
+	applied, ok := body["applied"].(map[string]any)
+	if !ok || applied["mode"] != "left" || applied["bias"] != -8.0 {
+		t.Fatalf("HTTP API 没有补回 applied 兼容字段: %+v", body)
+	}
+}
+
 func TestMotionCommandSupportsStopAndIdleModes(t *testing.T) {
 	for _, mode := range []string{"stop", "idle"} {
 		t.Run(mode, func(t *testing.T) {
@@ -689,6 +777,107 @@ func TestRealtimeCommandDropsOutOfOrderKeyboardFrame(t *testing.T) {
 	}
 	if post(1, "forward").Code != http.StatusConflict {
 		t.Fatal("过期的前进命令不应覆盖停止命令")
+	}
+}
+
+func TestRealtimeMatchCommandIsAllowedOutsideRunningCompetition(t *testing.T) {
+	t.Setenv("FISH_COMPETITION_STATE", filepath.Join(t.TempDir(), "competition.json"))
+	h := hub.New()
+	sent := make(chan map[string]any, 2)
+	c := &captureConn{onWrite: func(value any) { sent <- value.(map[string]any) }}
+	h.Register(hub.Device{ID: "fish-1"}, c)
+	handler := NewHandler(h, testKey())
+
+	forward := httptest.NewRecorder()
+	handler.ServeHTTP(forward, httptest.NewRequest(
+		http.MethodPost,
+		"/api/command/realtime",
+		strings.NewReader(`{"deviceId":"fish-1","context":"match","mode":"forward","frequency":2.5,"amplitudePercent":40,"deadmanMs":350,"sequence":1}`),
+	))
+	if forward.Code != http.StatusOK {
+		t.Fatalf("未开赛时也应允许选手运动命令: status=%d body=%s", forward.Code, forward.Body.String())
+	}
+	var forwardMessage map[string]any
+	select {
+	case forwardMessage = <-sent:
+	case <-time.After(time.Second):
+		t.Fatal("未开赛时的比赛命令没有发往设备")
+	}
+	payload := forwardMessage["payload"].(map[string]any)
+	if payload["deadmanMs"] != 350 {
+		t.Fatalf("实时运动命令没有携带设备端失联回中时限: %+v", payload)
+	}
+	if payload["transitionMs"] != float64(600) {
+		t.Fatalf("实时运动命令没有携带舵机平滑过渡时间: %+v", payload)
+	}
+	if forwardMessage["ackRequired"] != false {
+		t.Fatalf("实时运动帧不应要求无 requestId 的设备应答: %+v", forwardMessage)
+	}
+
+	stop := httptest.NewRecorder()
+	handler.ServeHTTP(stop, httptest.NewRequest(
+		http.MethodPost,
+		"/api/command/realtime",
+		strings.NewReader(`{"deviceId":"fish-1","context":"match","mode":"stop","frequency":0.3,"amplitude":0,"sequence":2}`),
+	))
+	if stop.Code != http.StatusOK {
+		t.Fatalf("安全停止命令应始终允许: status=%d body=%s", stop.Code, stop.Body.String())
+	}
+	select {
+	case stopMessage := <-sent:
+		if stopMessage["payload"].(map[string]any)["mode"] != "stop" {
+			t.Fatalf("安全停止命令模式错误: %+v", stopMessage)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("安全停止命令没有发往设备")
+	}
+}
+
+func TestControlSocketForwardsRealtimeFrame(t *testing.T) {
+	h := hub.New()
+	connection := &captureConn{}
+	h.Register(hub.Device{ID: "fish-1"}, connection)
+	ts := httptest.NewServer(NewHandler(h, testKey()))
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/control"
+	conn, response, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		if response != nil {
+			t.Fatalf("控制 WebSocket 升级失败: %v (status=%s)", err, response.Status)
+		}
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	if err := conn.WriteJSON(map[string]any{
+		"deviceId":         "fish-1",
+		"mode":             "forward",
+		"frequency":        2.5,
+		"amplitudePercent": 40,
+		"deadmanMs":        2000,
+		"sequence":         1,
+	}); err != nil {
+		t.Fatalf("发送 WebSocket 运动帧失败: %v", err)
+	}
+
+	var frame map[string]any
+	if err := conn.ReadJSON(&frame); err != nil {
+		t.Fatalf("读取 WebSocket 控制结果失败: %v", err)
+	}
+	if frame["status"] != float64(http.StatusOK) || frame["deviceId"] != "fish-1" {
+		t.Fatalf("WebSocket 控制结果错误: %#v", frame)
+	}
+	result, ok := frame["result"].(map[string]any)
+	if !ok || result["sent"] != true || result["success"] != true {
+		t.Fatalf("WebSocket 控制未确认入队: %#v", frame)
+	}
+	if len(connection.sent) != 1 {
+		t.Fatalf("WebSocket 控制未发送到设备: %d", len(connection.sent))
+	}
+	message := connection.sent[0].(map[string]any)
+	if message["command"] != "motion.set" {
+		t.Fatalf("设备收到的命令错误: %#v", message)
 	}
 }
 

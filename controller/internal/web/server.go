@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -16,8 +17,10 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -29,22 +32,42 @@ import (
 var frontendFiles embed.FS
 
 const maxFirmwareSize int64 = 8 << 20
+
 // Wi-Fi and ESP32 scheduling can briefly delay a heartbeat. A longer socket
 // deadline avoids turning short LAN jitter into a full reconnect.
 const deviceHeartbeatTimeout = 10 * time.Second
 const visionMotionTimeout = 3 * time.Second
 
+// commandAckTimeout expands the ACK window using the measured device
+// WebSocket RTT. This matters when an ESP32 is connected through a public
+// tunnel: a fixed window can report a healthy device as offline.
+func (s *server) commandAckTimeout(deviceID string, base, maximum time.Duration) time.Duration {
+	wait := base
+	if rtt, ok := s.hub.HeartbeatRTT(deviceID); ok {
+		candidate := 500*time.Millisecond + 4*rtt
+		if candidate > wait {
+			wait = candidate
+		}
+	}
+	if wait > maximum {
+		return maximum
+	}
+	return wait
+}
+
 type server struct {
-	hub             *hub.Hub
-	key             []byte
-	firmwarePath    string
-	firmwareName    string
-	firmwareMu      sync.RWMutex
-	calibrationMu   sync.Mutex
-	calibrationPath string
-	auth            *authStore
-	leases          *leaseStore
-	competition     *competitionStore
+	hub              *hub.Hub
+	key              []byte
+	firmwarePath     string
+	firmwareName     string
+	firmwareMu       sync.RWMutex
+	calibrationMu    sync.Mutex
+	calibrationPath  string
+	auth             *authStore
+	leases           *leaseStore
+	competition      *competitionStore
+	visionAPIAddress string
+	visionHTTPClient *http.Client
 }
 
 type deviceView struct {
@@ -90,6 +113,11 @@ func (c *deviceConn) WriteJSON(value any) error {
 		return err
 	}
 	return c.conn.WriteJSON(value)
+}
+func (c *deviceConn) WritePing(payload string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.conn.WriteControl(websocket.PingMessage, []byte(payload), time.Now().Add(time.Second))
 }
 func (c *deviceConn) Close() error { return c.conn.Close() }
 
@@ -145,8 +173,17 @@ func newHandler(h *hub.Hub, key []byte, apiAddress, streamAddress, firmwarePath 
 	s := &server{
 		hub: h, key: append([]byte(nil), key...), firmwarePath: firmwarePath,
 		calibrationPath: motionCalibrationPath(), auth: newAuthStore(authStorePath()),
-		leases:      newLeaseStore(60 * time.Second),
-		competition: newCompetitionStore(competitionPath()),
+		leases:           newLeaseStore(60 * time.Second),
+		competition:      newCompetitionStore(competitionPath()),
+		visionAPIAddress: strings.TrimRight(apiAddress, "/"),
+		visionHTTPClient: &http.Client{Timeout: 10 * time.Second},
+	}
+	// With authentication disabled and no explicit state path, the controller is
+	// running in local development mode. Seed the four known competitors as
+	// already logged in, while keeping any existing saved match untouched.
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("FISH_DEVELOPMENT_MODE")), "true") &&
+		!s.authActive() && strings.TrimSpace(os.Getenv("FISH_COMPETITION_STATE")) == "" {
+		s.competition.ensureDevelopmentMatch()
 	}
 	if s.authActive() {
 		if err := s.leases.loadReservations(authStorePath() + ".reservations.json"); err != nil {
@@ -176,6 +213,14 @@ func newHandler(h *hub.Hub, key []byte, apiAddress, streamAddress, firmwarePath 
 	// that escape the embedded FS.
 	embedded := http.FileServer(http.FS(staticFiles))
 	m.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// The competition shell, iframe pages, and adapter script are deployed
+		// together. Do not let a public CDN/browser keep an older bundle after a
+		// controller restart, otherwise the outer page and iframe can disagree
+		// about their session state and appear to refresh repeatedly.
+		if r.URL.Path == "/" || strings.HasPrefix(r.URL.Path, "/competition") {
+			w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
+			w.Header().Set("Pragma", "no-cache")
+		}
 		switch r.URL.Path {
 		case "/", "/console.html":
 			// "/" 是赛事平台页面；"/console.html" 保留原主操控台入口，
@@ -216,7 +261,56 @@ func newHandler(h *hub.Hub, key []byte, apiAddress, streamAddress, firmwarePath 
 	m.HandleFunc("/api/vision/device-command", s.visionDeviceCommand)
 	m.Handle("/api/vision/", s.authenticatedVisionProxy(visionHandler))
 	m.HandleFunc("/ws/device", s.deviceSocket)
+	m.HandleFunc("/ws/control", s.controlSocket)
 	return m
+}
+
+// controlSocket carries the browser's high-rate motion frames over one
+// persistent connection. It deliberately reuses realtimeCommand so auth,
+// lease ownership, sequence ordering and device admission stay identical to
+// the HTTP fallback path.
+func (s *server) controlSocket(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.currentUser(r); !ok {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+	_ = conn.SetReadDeadline(time.Now().Add(20 * time.Second))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(20 * time.Second))
+	})
+	for {
+		var input map[string]any
+		if err := conn.ReadJSON(&input); err != nil {
+			return
+		}
+		body, err := json.Marshal(input)
+		if err != nil {
+			return
+		}
+		req := httptest.NewRequest(http.MethodPost, "/api/command/realtime", bytes.NewReader(body))
+		req.Header = r.Header.Clone()
+		req = req.WithContext(r.Context())
+		response := httptest.NewRecorder()
+		s.realtimeCommand(response, req)
+		var result any
+		if json.Unmarshal(response.Body.Bytes(), &result) != nil {
+			result = map[string]any{"message": strings.TrimSpace(response.Body.String())}
+		}
+		frame := map[string]any{
+			"status":   response.Code,
+			"deviceId": strings.TrimSpace(fmt.Sprint(input["deviceId"])),
+			"result":   result,
+		}
+		if err := conn.WriteJSON(frame); err != nil {
+			return
+		}
+		_ = conn.SetReadDeadline(time.Now().Add(20 * time.Second))
+	}
 }
 
 func (s *server) leaseWatchdog() {
@@ -386,6 +480,7 @@ func (s *server) ota(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "设备参数无效", http.StatusBadRequest)
 		return
 	}
+	input.DeviceID = s.connectedDeviceID(input.DeviceID)
 	path, name := s.firmwareSnapshot()
 	info, err := firmwareInfo(path, name)
 	if err != nil {
@@ -404,7 +499,7 @@ func (s *server) ota(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSpace(input.Name) == "" {
 		for _, device := range s.hub.List() {
-			if device.ID == input.DeviceID {
+			if strings.EqualFold(device.ID, input.DeviceID) {
 				input.Name = device.Name
 				break
 			}
@@ -505,6 +600,7 @@ func (s *server) visionDeviceCommand(w http.ResponseWriter, r *http.Request) {
 	if !unique {
 		deviceID, unique = s.hub.OnlyDeviceID()
 	}
+	deviceID = s.connectedDeviceID(deviceID)
 	w.Header().Set("Content-Type", "application/json")
 	if !unique {
 		w.WriteHeader(http.StatusConflict)
@@ -514,6 +610,7 @@ func (s *server) visionDeviceCommand(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	payload["transitionMs"] = s.motionTransitionMsForDevice(deviceID)
 	if command.Operation == "motion" {
 		command.Mode = strings.ToLower(strings.TrimSpace(command.Mode))
 		if !isMotionMode(command.Mode) || command.Mode == "stop" {
@@ -550,14 +647,15 @@ func (s *server) visionDeviceCommand(w http.ResponseWriter, r *http.Request) {
 		payload["amplitude"] = amplitude
 		payload["bias"] = bias
 	}
-	payload["deviceId"] = deviceID
 	payload["controlSource"] = "vision-bot"
 	message := map[string]any{
-		"type": "command", "requestId": requestID, "deviceId": deviceID,
+		"type": "command", "requestId": requestID, "ackRequired": true,
 		"command": "motion.set", "payload": payload,
 	}
-	wait := 700 * time.Millisecond
+	wait := s.commandAckTimeout(deviceID, 700*time.Millisecond, 5*time.Second)
 	if command.Operation == "motion" {
+		// Continuous frames use the short response path below; a late ACK is
+		// reported as pending instead of interrupting the tracker.
 		wait = 250 * time.Millisecond
 	}
 	var receipt *hub.Receipt
@@ -589,6 +687,17 @@ func (s *server) visionDeviceCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !acknowledged {
+		// Motion is a continuous stream. Once the WebSocket write completed,
+		// waiting for a late ACK must not stop the tracker; the next frame will
+		// confirm connectivity and the watchdog still stops a stale session.
+		if command.Operation == "motion" && sent {
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"sent": true, "acknowledged": false, "success": true, "pending": true,
+				"requestId": requestID, "message": "运动指令已发送，设备确认仍在返回",
+			})
+			return
+		}
 		w.WriteHeader(http.StatusGatewayTimeout)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"sent": true, "acknowledged": false, "success": false,
@@ -606,6 +715,22 @@ func (s *server) visionDeviceCommand(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) health(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// connectedDeviceID resolves a persisted/requested MAC to the exact ID used
+// by the live WebSocket entry. Names are deliberately ignored: they are only
+// display labels and must never become command addresses.
+func (s *server) connectedDeviceID(requested string) string {
+	requested = strings.TrimSpace(requested)
+	if requested == "" {
+		return ""
+	}
+	for _, device := range s.hub.List() {
+		if strings.EqualFold(strings.TrimSpace(device.ID), requested) {
+			return device.ID
+		}
+	}
+	return requested
 }
 
 func (s *server) devices(w http.ResponseWriter, r *http.Request) {
@@ -702,6 +827,7 @@ func (s *server) leasesAPI(w http.ResponseWriter, r *http.Request) {
 		DeviceID string `json:"deviceId"`
 		ClientID string `json:"clientId"`
 		Mode     string `json:"mode"`
+		Slot     string `json:"slot"`
 		Force    bool   `json:"force"`
 	}
 	if r.Body != nil {
@@ -711,6 +837,7 @@ func (s *server) leasesAPI(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	input.DeviceID = strings.TrimSpace(input.DeviceID)
+	input.DeviceID = s.connectedDeviceID(input.DeviceID)
 	if input.DeviceID == "" {
 		http.Error(w, "设备参数无效", http.StatusBadRequest)
 		return
@@ -724,7 +851,16 @@ func (s *server) leasesAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"renewed": true})
 	case http.MethodPost:
-		lease, _, acquired := s.leases.acquireExclusive(input.DeviceID, user, input.Mode, input.Force && canAdmin(user), input.ClientID)
+		if strings.EqualFold(strings.TrimSpace(input.Mode), "player") &&
+			!s.playerControlAllowed(input.DeviceID, input.Slot) {
+			writeAuthError(w, http.StatusConflict, "场地尚未锁定，或该机器鱼未分配给当前席位")
+			return
+		}
+		// Administrators are the management authority and may take over a
+		// device without a second force flag. The flag remains accepted for
+		// compatibility with older clients.
+		forceTakeover := canAdmin(user) && !strings.EqualFold(strings.TrimSpace(input.Mode), "player")
+		lease, _, acquired := s.leases.acquireExclusive(input.DeviceID, user, input.Mode, forceTakeover, input.ClientID)
 		if !acquired {
 			w.WriteHeader(http.StatusConflict)
 			_ = json.NewEncoder(w).Encode(map[string]any{"acquired": false, "lease": lease, "message": "这条鱼正在被其他用户控制"})
@@ -733,7 +869,7 @@ func (s *server) leasesAPI(w http.ResponseWriter, r *http.Request) {
 		s.hub.Notify()
 		_ = json.NewEncoder(w).Encode(map[string]any{"acquired": true, "lease": lease})
 	case http.MethodDelete:
-		released := s.leases.release(input.DeviceID, user, input.Force && canAdmin(user), input.ClientID)
+		released := s.leases.release(input.DeviceID, user, canAdmin(user), input.ClientID)
 		if !released {
 			w.WriteHeader(http.StatusConflict)
 			_ = json.NewEncoder(w).Encode(map[string]any{"released": false, "message": "只能释放自己的控制权，管理员可强制释放"})
@@ -843,8 +979,8 @@ func (s *server) stopDevice(deviceID string) bool {
 		"type": "command", "requestId": requestID,
 		"command": "motion.set",
 		"payload": map[string]any{
-			"deviceId": deviceID, "controlSource": "lease",
-			"mode": "stop", "frequency": 0.3, "amplitude": 0.0, "bias": 0.0,
+			"controlSource": "lease",
+			"mode":          "stop", "frequency": 0.3, "amplitude": 0.0, "bias": 0.0,
 		},
 	}
 	_, sent, _ := s.hub.SendAndWait(deviceID, requestID, message, 700*time.Millisecond)
@@ -965,6 +1101,11 @@ func (s *server) motionProfileForDevice(deviceID string) motionCalibrationProfil
 	return profile
 }
 
+func (s *server) motionTransitionMsForDevice(deviceID string) float64 {
+	profile := s.motionProfileForDevice(deviceID)
+	return clampMotionValue(profile.TransitionMs, 100, 1500, 600)
+}
+
 func (s *server) applyMotionGeometry(deviceID, mode string, frequency, amplitude, bias float64, hasBias bool, amplitudePercent *float64) (float64, float64, float64, bool) {
 	mode = strings.ToLower(strings.TrimSpace(mode))
 	if mode != "forward" && mode != "left" && mode != "right" && mode != "idle" && mode != "stop" {
@@ -1070,6 +1211,7 @@ func (s *server) command(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "请求格式错误", http.StatusBadRequest)
 		return
 	}
+	x.DeviceID = s.connectedDeviceID(x.DeviceID)
 	if x.DeviceID == "" || x.Frequency < 0.3 || x.Frequency > 5 || x.Amplitude < 0 || x.Amplitude > 90 || (x.AmplitudePercent != nil && (*x.AmplitudePercent < 0 || *x.AmplitudePercent > 100)) || (x.Bias != nil && (*x.Bias < -90 || *x.Bias > 90)) {
 		http.Error(w, "参数无效", http.StatusBadRequest)
 		return
@@ -1087,9 +1229,9 @@ func (s *server) command(w http.ResponseWriter, r *http.Request) {
 	x.Frequency, x.Amplitude, bias, hasBias = s.applyMotionGeometry(x.DeviceID, mode, x.Frequency, x.Amplitude, bias, hasBias, x.AmplitudePercent)
 	requestID := fmt.Sprintf("%d", time.Now().UnixNano())
 	payload := map[string]any{
-		"deviceId": x.DeviceID, "controlSource": user.Email,
-		"mode": mode, "frequency": x.Frequency,
-		"amplitude": x.Amplitude,
+		"controlSource": "manual",
+		"mode":          mode, "frequency": x.Frequency,
+		"amplitude": x.Amplitude, "transitionMs": s.motionTransitionMsForDevice(x.DeviceID),
 	}
 	if mode == "stop" {
 		// A stop is an explicit neutral command. Never inherit the previous turn bias.
@@ -1104,7 +1246,7 @@ func (s *server) command(w http.ResponseWriter, r *http.Request) {
 		payload["bias"] = bias
 	}
 	msg := map[string]any{
-		"type": "command", "requestId": requestID, "deviceId": x.DeviceID, "command": "motion.set",
+		"type": "command", "requestId": requestID, "command": "motion.set",
 		"payload": payload,
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -1120,7 +1262,8 @@ func (s *server) command(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusConflict, "设备离线或控制权已转移，请重新获取控制权")
 		return
 	}
-	ack, sent, acknowledged := receipt.Wait(2500 * time.Millisecond)
+	s.leases.setDeadmanProtected(x.DeviceID, user, x.ClientID, false)
+	ack, sent, acknowledged := receipt.Wait(s.commandAckTimeout(x.DeviceID, 2500*time.Millisecond, 8*time.Second))
 	if !sent {
 		w.WriteHeader(http.StatusConflict)
 		_ = json.NewEncoder(w).Encode(map[string]any{"sent": false, "acknowledged": false, "requestId": requestID, "message": "device offline"})
@@ -1133,14 +1276,21 @@ func (s *server) command(w http.ResponseWriter, r *http.Request) {
 	}
 	if success, _ := ack["success"].(bool); !success {
 		w.WriteHeader(http.StatusConflict)
+	} else if _, exists := ack["applied"]; !exists {
+		// Protocol v2 keeps device acknowledgements small. Preserve the HTTP API
+		// contract by returning the command parameters already validated here.
+		ack["applied"] = payload
 	}
 	ack["sent"] = true
 	ack["acknowledged"] = true
 	_ = json.NewEncoder(w).Encode(ack)
 }
 
-// realtimeCommand is used by keyboard control. It acknowledges queueing only;
-// the regular command endpoint remains responsible for device-level ACKs.
+// realtimeCommand is used by keyboard control. It returns immediately so the
+// keyboard loop stays responsive. Realtime frames are deliberately fire-and-
+// forget: the browser sends a fresh frame every 100 ms and the device's
+// deadman timer provides the safety boundary. Requiring an acknowledgement
+// here would make the firmware reject frames that have no requestId.
 func (s *server) realtimeCommand(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "仅支持 POST", http.StatusMethodNotAllowed)
@@ -1155,17 +1305,20 @@ func (s *server) realtimeCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var x struct {
-		DeviceID, Mode, ClientID string
-		Frequency, Amplitude     float64
-		AmplitudePercent, Bias   *float64
-		Sequence                 uint64
+		DeviceID, Mode, ClientID, Context string
+		Frequency, Amplitude              float64
+		AmplitudePercent, Bias            *float64
+		Sequence                          uint64
+		DeadmanMs                         int
 	}
 	if json.NewDecoder(r.Body).Decode(&x) != nil {
 		http.Error(w, "请求格式错误", http.StatusBadRequest)
 		return
 	}
+	x.DeviceID = s.connectedDeviceID(x.DeviceID)
 	if x.DeviceID == "" || x.Frequency < 0.3 || x.Frequency > 5 ||
 		x.Amplitude < 0 || x.Amplitude > 90 ||
+		x.DeadmanMs < 0 || x.DeadmanMs > 2000 || (x.DeadmanMs > 0 && x.DeadmanMs < 150) ||
 		(x.AmplitudePercent != nil && (*x.AmplitudePercent < 0 || *x.AmplitudePercent > 100)) ||
 		(x.Bias != nil && (*x.Bias < -90 || *x.Bias > 90)) {
 		http.Error(w, "参数无效", http.StatusBadRequest)
@@ -1176,6 +1329,10 @@ func (s *server) realtimeCommand(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "运动模式无效", http.StatusBadRequest)
 		return
 	}
+	// Match state is presentation and scoring state, not a motion interlock.
+	// Operators must be able to recover, test, or move a fish before a match,
+	// while paused, and after it finishes. Device ownership, online state and
+	// OTA safety checks below remain the authority for accepting commands.
 	var bias float64
 	hasBias := x.Bias != nil
 	if hasBias {
@@ -1192,16 +1349,22 @@ func (s *server) realtimeCommand(w http.ResponseWriter, r *http.Request) {
 		s.applyMotionGeometry(x.DeviceID, mode, x.Frequency, x.Amplitude, bias, hasBias, x.AmplitudePercent)
 	requestID := fmt.Sprintf("realtime-%d", time.Now().UnixNano())
 	payload := map[string]any{
-		"deviceId": x.DeviceID, "controlSource": user.Email,
-		"mode": mode, "frequency": x.Frequency,
-		"amplitude": x.Amplitude,
+		"controlSource": "manual",
+		"mode":          mode, "frequency": x.Frequency,
+		"amplitude": x.Amplitude, "transitionMs": s.motionTransitionMsForDevice(x.DeviceID),
 	}
 	if hasBias {
 		payload["bias"] = bias
 	}
+	if mode != "stop" && x.DeadmanMs > 0 {
+		payload["deadmanMs"] = x.DeadmanMs
+	}
 	message := map[string]any{
-		"type": "command", "requestId": requestID, "deviceId": x.DeviceID,
-		"command": "motion.set", "payload": payload,
+		"type": "command",
+		// Realtime frames are deliberately fire-and-forget. Do not include a
+		// requestId: firmware only sends command.result when one is present,
+		// and suppressing those replies keeps multi-device control responsive.
+		"command": "motion.set", "ackRequired": false, "payload": payload,
 	}
 	required := mode != "stop" && (x.ClientID != "" || s.authActive())
 	if !s.leases.admit(x.DeviceID, user, x.ClientID, required, func() bool {
@@ -1221,6 +1384,7 @@ func (s *server) realtimeCommand(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	s.leases.setDeadmanProtected(x.DeviceID, user, x.ClientID, x.DeadmanMs > 0 || mode == "stop")
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"sent": true, "queued": true, "acknowledged": false,
@@ -1231,7 +1395,9 @@ func (s *server) realtimeCommand(w http.ResponseWriter, r *http.Request) {
 func (s *server) authenticatedVisionProxy(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := s.requireUser(w, r)
-		if !ok { return }
+		if !ok {
+			return
+		}
 		r.Header.Del("X-Fish-Workspace-User")
 		r.Header.Del("X-Fish-Workspace-Client")
 		prefix := "/api/vision/workspaces/"
@@ -1239,7 +1405,9 @@ func (s *server) authenticatedVisionProxy(next http.Handler) http.Handler {
 			rest := strings.TrimPrefix(r.URL.Path, prefix)
 			parts := strings.SplitN(rest, "/", 2)
 			clientID := strings.TrimSpace(r.Header.Get("X-Fish-Client"))
-			if clientID == "" { clientID = strings.TrimSpace(r.URL.Query().Get("clientId")) }
+			if clientID == "" {
+				clientID = strings.TrimSpace(r.URL.Query().Get("clientId"))
+			}
 			if len(parts) != 2 || parts[0] == "" || clientID == "" || !canControl(user) {
 				writeAuthError(w, http.StatusForbidden, "视觉工作区身份无效")
 				return
@@ -1289,6 +1457,7 @@ func (s *server) rgb(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
+	input.DeviceID = s.connectedDeviceID(input.DeviceID)
 	input.Mode = strings.ToUpper(input.Mode)
 	input.Order = strings.ToUpper(input.Order)
 	if input.Order == "" {
@@ -1310,7 +1479,7 @@ func (s *server) rgb(w http.ResponseWriter, r *http.Request) {
 	}
 	requestID := fmt.Sprintf("rgb-%d", time.Now().UnixNano())
 	message := map[string]any{"type": "command", "requestId": requestID, "command": "rgb.set", "payload": map[string]any{"mode": input.Mode, "order": input.Order, "red": input.Red, "green": input.Green, "blue": input.Blue, "brightness": input.Brightness}}
-	ack, sent, acknowledged := s.hub.SendAndWait(input.DeviceID, requestID, message, 2500*time.Millisecond)
+	ack, sent, acknowledged := s.hub.SendAndWait(input.DeviceID, requestID, message, s.commandAckTimeout(input.DeviceID, 2500*time.Millisecond, 8*time.Second))
 	w.Header().Set("Content-Type", "application/json")
 	if !sent {
 		w.WriteHeader(http.StatusConflict)
@@ -1353,11 +1522,51 @@ func (s *server) deviceSocket(w http.ResponseWriter, r *http.Request) {
 	id, _ := reg["deviceId"].(string)
 	proof, _ := reg["proof"].(string)
 	version, _ := reg["protocolVersion"].(float64)
-	if id == "" || version != 1 || !identity.Verify(s.key, "fish-websocket-v1", nonce, id, proof) {
+	if id == "" || (version != 1 && version != 2) || !identity.Verify(s.key, "fish-websocket-v1", nonce, id, proof) {
 		_ = c.WriteJSON(map[string]any{"type": "register.result", "success": false})
 		return
 	}
-	d := hub.Device{ID: id, Name: text(reg["name"]), IP: text(reg["ip"]), FirmwareVersion: text(reg["firmwareVersion"]), Capabilities: texts(reg["capabilities"])}
+	d := hub.Device{
+		ID: id, Name: text(reg["name"]), IP: text(reg["ip"]),
+		FirmwareVersion: text(reg["firmwareVersion"]),
+		ProtocolVersion: int(version), BootID: text(reg["bootId"]),
+		Capabilities: texts(reg["capabilities"]),
+	}
+	if sensors, ok := reg["sensors"].([]any); ok {
+		for _, value := range sensors {
+			if sensor, ok := value.(string); ok && sensor != "" {
+				d.Sensors = append(d.Sensors, sensor)
+			}
+		}
+	}
+	if pin, ok := reg["servoPin"].(float64); ok && pin >= 0 && pin <= 48 {
+		d.ServoPin = int(pin)
+	}
+	if pin, ok := reg["statusLedPin"].(float64); ok && pin >= 0 && pin <= 48 {
+		d.StatusLedPin = int(pin)
+	}
+	if pin, ok := reg["batterySensePin"].(float64); ok && pin >= 0 && pin <= 48 {
+		d.BatterySensePin = int(pin)
+	}
+	if ratio, ok := reg["batteryDividerRatio"].(float64); ok && ratio > 0 && ratio < 100 {
+		d.BatteryDividerRatio = ratio
+	}
+	if voltage, ok := reg["batteryEmptyVoltage"].(float64); ok && voltage >= 0 && voltage < 100 {
+		d.BatteryEmptyVoltage = voltage
+	}
+	if voltage, ok := reg["batteryFullVoltage"].(float64); ok && voltage >= 0 && voltage < 100 {
+		d.BatteryFullVoltage = voltage
+	}
+	if center, ok := reg["servoCenter"].(float64); ok && center >= 0 && center <= 180 {
+		d.ServoCenter = center
+	}
+	if addresses, ok := reg["i2cAddresses"].([]any); ok {
+		for _, value := range addresses {
+			if address, ok := value.(float64); ok && address > 0 && address < 127 {
+				d.I2CAddresses = append(d.I2CAddresses, int(address))
+			}
+		}
+	}
 	// Complete the protocol handshake before exposing the device to command
 	// handlers. Otherwise a concurrent HTTP request could enqueue a command
 	// before the ESP32 has received register.result and it would ignore it.
@@ -1367,6 +1576,16 @@ func (s *server) deviceSocket(w http.ResponseWriter, r *http.Request) {
 	s.hub.Register(d, c)
 	log.Printf("device registered: %s (%s), source %s", id, d.IP, r.RemoteAddr)
 	defer s.hub.Remove(id, c)
+	rawConn.SetPongHandler(func(payload string) error {
+		sentAt, parseErr := strconv.ParseInt(payload, 10, 64)
+		if parseErr == nil {
+			rtt := time.Since(time.Unix(0, sentAt))
+			if rtt >= 0 && rtt <= deviceHeartbeatTimeout {
+				s.hub.UpdateHeartbeatRTT(id, rtt)
+			}
+		}
+		return rawConn.SetReadDeadline(time.Now().Add(deviceHeartbeatTimeout))
+	})
 	_ = rawConn.SetReadDeadline(time.Now().Add(deviceHeartbeatTimeout))
 	done := make(chan struct{})
 	go func() {
@@ -1375,6 +1594,11 @@ func (s *server) deviceSocket(w http.ResponseWriter, r *http.Request) {
 		for {
 			select {
 			case <-ticker.C:
+				if err := c.WritePing(strconv.FormatInt(time.Now().UnixNano(), 10)); err != nil {
+					log.Printf("device ping failed: %s: %v", id, err)
+					_ = c.Close()
+					return
+				}
 				if !s.hub.Send(id, map[string]any{"type": "heartbeat"}) {
 					log.Printf("device heartbeat failed: %s", id)
 					_ = c.Close()
@@ -1398,7 +1622,9 @@ func (s *server) deviceSocket(w http.ResponseWriter, r *http.Request) {
 			s.hub.ResolveCommandResult(msg)
 		}
 		switch messageType {
-		case "heartbeat", "state", "command.result":
+		case "heartbeat", "state", "motion.state", "rgb.state",
+			"telemetry.battery", "telemetry.light", "telemetry.link",
+			"identity", "ota.progress", "command.result":
 			s.hub.Update(id, msg)
 		}
 	}

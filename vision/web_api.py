@@ -7,12 +7,14 @@ from threading import Lock
 import json
 import os
 
-from flask import Flask, Response, jsonify, request, stream_with_context, g
+from flask import Flask, Response, jsonify, request, stream_with_context, g, send_from_directory
 
 import crop_region
+import video_transform
 from camera_policy import camera_blocked
 from service import CameraCatalog, UNSET, enumerate_cameras
-from config import YOLO_MODEL_PATH, list_yolo_models, resolve_yolo_model
+from config import OUTPUT_DIR, YOLO_MODEL_PATH, list_yolo_models, resolve_yolo_model
+from recording import RecordingError
 from session import InvalidTransition, SessionMismatch
 from webrtc import WebRTCServer, WebRTCUnavailable
 
@@ -23,7 +25,7 @@ def create_app(service, camera_provider=None, camera_catalog=None, webrtc_server
 
     @app.before_request
     def serialize_camera_mutations():
-        if request.method in ("POST", "PUT", "PATCH", "DELETE") and (request.path.startswith("/sessions") or request.path in ("/crop", "/start", "/stop", "/action")):
+        if request.method in ("POST", "PUT", "PATCH", "DELETE") and (request.path.startswith("/sessions") or request.path.startswith("/recordings") or request.path in ("/crop", "/rotation", "/start", "/stop", "/action")):
             lifecycle_lock.acquire()
             g.camera_mutation_locked = True
 
@@ -95,6 +97,8 @@ def create_app(service, camera_provider=None, camera_catalog=None, webrtc_server
     def crop_settings():
         if request.method == "GET":
             return jsonify(crop_region.load())
+        if webrtc_server is not None and getattr(webrtc_server, "recording_status", lambda: {})().get("active"):
+            return jsonify({"message": "比赛录像进行中，不能修改选手有效区"}), 409
         current = service.current_session()
         if current and current.get("state") in ("processing", "tracking"):
             return jsonify({"message": "请先关闭识别和循迹，再调整裁剪"}), 409
@@ -103,6 +107,8 @@ def create_app(service, camera_provider=None, camera_catalog=None, webrtc_server
             crop_region.save(region)
         except (ValueError, OSError) as error:
             return jsonify({"message": str(error)}), 400
+        if webrtc_server is not None:
+            webrtc_server.set_crop_region(region)
         if current and current.get("state") == "previewing":
             service.stop_session(current["sessionId"])
             service.create_session(current["cameraId"], current["cameraIndex"])
@@ -116,6 +122,24 @@ def create_app(service, camera_provider=None, camera_catalog=None, webrtc_server
             for camera in camera_catalog.list(allow_refresh=not running)
             if not camera_blocked(camera.index, camera.name)
         ])
+
+    @app.route("/rotation", methods=["GET", "PUT"])
+    def rotation_settings():
+        if request.method == "GET":
+            return jsonify(video_transform.load())
+        if webrtc_server is not None and getattr(webrtc_server, "recording_status", lambda: {})().get("active"):
+            return jsonify({"message": "比赛录像进行中，不能修改画面旋转"}), 409
+        current = service.current_session()
+        if current and current.get("state") in ("processing", "tracking"):
+            return jsonify({"message": "请先关闭识别和循迹，再调整画面旋转"}), 409
+        try:
+            transform = video_transform.save(request.get_json(silent=True))
+        except (ValueError, OSError) as error:
+            return jsonify({"message": str(error)}), 400
+        if current and current.get("state") == "previewing":
+            service.stop_session(current["sessionId"])
+            service.create_session(current["cameraId"], current["cameraIndex"])
+        return jsonify(transform)
 
     @app.post("/start")
     def start():
@@ -145,6 +169,60 @@ def create_app(service, camera_provider=None, camera_catalog=None, webrtc_server
             "activePeers": webrtc_server.peer_count,
             "iceServers": webrtc_server.browser_ice_servers(),
         })
+
+    @app.post("/recordings")
+    def start_recording():
+        if webrtc_server is None:
+            return jsonify({"message": "视频服务未配置，无法录像"}), 503
+        body = request.get_json(silent=True) or {}
+        recording_id = body.get("recordingId")
+        if not isinstance(recording_id, str) or not recording_id.strip():
+            return jsonify({"message": "recordingId 不能为空"}), 400
+        current = service.current_session()
+        if current.get("state") not in ("previewing", "processing", "tracking"):
+            return jsonify({"message": "请先启动真实相机视频，再开始比赛"}), 409
+        metadata = {
+            key: body.get(key)
+            for key in ("matchNo", "group", "venue", "blueName", "redName")
+            if body.get(key) is not None
+        }
+        try:
+            status = webrtc_server.start_recording(
+                os.path.join(OUTPUT_DIR, "recordings"),
+                recording_id.strip(),
+                metadata=metadata,
+            )
+        except RecordingError as error:
+            return jsonify({"message": str(error)}), 409
+        return jsonify({"recording": status}), 201
+
+    @app.get("/recordings/current")
+    def current_recording():
+        if webrtc_server is None:
+            return jsonify({"recording": {"active": False, "recordingId": None}})
+        return jsonify({"recording": webrtc_server.recording_status()})
+
+    @app.delete("/recordings/<recording_id>")
+    def stop_recording(recording_id):
+        if webrtc_server is None:
+            return jsonify({"message": "视频服务未配置，无法结束录像"}), 503
+        discard = request.args.get("discard", "").lower() in ("1", "true", "yes")
+        try:
+            status = webrtc_server.stop_recording(recording_id, discard=discard)
+        except RecordingError as error:
+            return jsonify({"message": str(error)}), 409
+        return jsonify({"recording": status})
+
+    @app.get("/recordings/files/<path:file_name>")
+    def recording_file(file_name):
+        if file_name != os.path.basename(file_name) or not file_name.lower().endswith(".mp4"):
+            return jsonify({"message": "录像文件名无效"}), 400
+        return send_from_directory(
+            os.path.join(OUTPUT_DIR, "recordings"),
+            file_name,
+            mimetype="video/mp4",
+            conditional=True,
+        )
 
     @app.post("/webrtc/offer")
     def webrtc_offer():
@@ -176,7 +254,10 @@ def create_app(service, camera_provider=None, camera_catalog=None, webrtc_server
             quality = body.get("quality", "smooth")
             if quality not in ("smooth", "hd", "full"):
                 return jsonify({"error": {"message": "无效的观看清晰度"}}), 400
-            answer = webrtc_server.offer(sdp, offer_type, quality=quality)
+            view = body.get("view", "cropped")
+            if view not in ("cropped", "full"):
+                return jsonify({"error": {"message": "无效的视频视图"}}), 400
+            answer = webrtc_server.offer(sdp, offer_type, quality=quality, view=view)
         except WebRTCUnavailable as error:
             return jsonify({
                 "ok": False,

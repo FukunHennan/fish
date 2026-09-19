@@ -2,7 +2,6 @@ package hub
 
 import (
 	"errors"
-	"fmt"
 	"time"
 )
 
@@ -57,8 +56,8 @@ func (h *Hub) StopAndReset(id string) bool {
 	e.outbound = kept
 	e.nextOrder++
 	e.outbound = append(e.outbound, &outboundMessage{order: e.nextOrder, value: map[string]any{
-		"type": "command", "requestId": fmt.Sprintf("lease-stop-%d", time.Now().UnixNano()), "command": "motion.set",
-		"payload": map[string]any{"deviceId": id, "controlSource": "lease", "mode": "stop", "frequency": 0.3, "amplitude": 0.0, "bias": 0.0},
+		"type": "command", "command": "motion.set", "ackRequired": true,
+		"payload": map[string]any{"controlSource": "lease", "mode": "stop", "frequency": 0.3, "amplitude": 0.0, "bias": 0.0},
 	}})
 	select {
 	case e.outboundWake <- struct{}{}:
@@ -119,9 +118,8 @@ func (h *Hub) StopExpiredVisionMotion(now time.Time) []string {
 		e.outbound = append(e.outbound, &outboundMessage{
 			order: e.nextOrder,
 			value: map[string]any{
-				"type": "command", "requestId": fmt.Sprintf("vision-timeout-%d-%s", now.UnixNano(), id),
-				"deviceId": id, "command": "motion.set",
-				"payload": map[string]any{"deviceId": id, "mode": "stop", "frequency": 0.3, "amplitude": 0.0, "bias": 0.0, "controlSource": "vision-timeout"},
+				"type": "command", "command": "motion.set", "ackRequired": true,
+				"payload": map[string]any{"mode": "stop", "frequency": 0.3, "amplitude": 0.0, "bias": 0.0, "controlSource": "vision-timeout"},
 			},
 		})
 		select {

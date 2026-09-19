@@ -39,6 +39,7 @@ def create_runtime_state(
             "auto_locked": False,
             "auto_stable_count": 0,
             "auto_prev_points": None,
+            "frame_size": None,
             "pts_raw": [],
             "pts_disp": [],
         },
@@ -916,13 +917,18 @@ class VisionPresentation:
         self.web_clean = web_clean
         self.overlay_options = {
             "detections": False,
-            "paths": False,
+            "plannedPath": False,
+            "trajectory": False,
         }
 
     def set_overlay_options(self, options):
         if not isinstance(options, dict):
             return
-        for key in ("detections", "paths"):
+        if "paths" in options:
+            visible = bool(options["paths"])
+            self.overlay_options["plannedPath"] = visible
+            self.overlay_options["trajectory"] = visible
+        for key in ("detections", "plannedPath", "trajectory"):
             if key in options:
                 self.overlay_options[key] = bool(options[key])
 
@@ -948,8 +954,10 @@ class VisionPresentation:
     ):
         image = result.frame.copy()
         self._draw_selection(image, marker_roi, heading, result)
-        if self.overlay_options.get("paths", True):
-            self._draw_paths(image, drawn_path)
+        if self.overlay_options.get("plannedPath", False):
+            self._draw_planned_path(image, drawn_path)
+        if self.overlay_options.get("trajectory", False):
+            self._draw_motion_trajectory(image)
         self._draw_calibration(image, calibration, result.corner_pixels)
         if self.overlay_options.get("detections", True):
             self._draw_detection(image, result)
@@ -958,7 +966,7 @@ class VisionPresentation:
             result,
             draw=self.overlay_options.get("detections", True),
         )
-        if self.overlay_options.get("paths", True):
+        if self.overlay_options.get("plannedPath", False):
             self._draw_guidance(image, result, calibration.get("H"), decision)
 
         prompt = self._prompt(
@@ -1056,7 +1064,7 @@ class VisionPresentation:
                     3, cv2.LINE_AA, tipLength=0.18,
                 )
 
-    def _draw_paths(self, image, drawn_path):
+    def _draw_planned_path(self, image, drawn_path):
         pixels = drawn_path["pixels"]
         if len(pixels) > 1:
             path_pixels = np.asarray(pixels, dtype=np.int32).reshape((-1, 1, 2))
@@ -1064,6 +1072,8 @@ class VisionPresentation:
                 image, [path_pixels], False, (255, 0, 255), 3, cv2.LINE_AA
             )
             cv2.circle(image, tuple(pixels[-1]), 7, (0, 255, 0), -1)
+
+    def _draw_motion_trajectory(self, image):
         if len(self.trajectory) > 1:
             points = np.asarray(self.trajectory, np.int32).reshape((-1, 1, 2))
             cv2.polylines(

@@ -11,6 +11,8 @@ import urllib.request
 import urllib.error
 from dataclasses import dataclass
 
+import numpy as np
+
 
 @dataclass
 class MotionPidController:
@@ -24,7 +26,10 @@ class MotionPidController:
     target_speed_mps: float = 0.18
     slow_distance: float = 0.50
     stop_distance: float = 0.10
-    turn_mode_threshold: float = 0.18
+    # Path following must keep propulsion enabled while steering.  The
+    # controller's left/right modes are calibrated pivot-turn presets; using
+    # them for a transient path error makes the fish rotate in place.
+    max_tracking_bias_deg: float = 18.0
 
     def __post_init__(self):
         self.reset()
@@ -92,15 +97,20 @@ class MotionPidController:
             + 12.0 * speed_demand
             + 18.0 * turn_demand
         ) * distance_scale
+        # Keep the fish swimming forward for every tracking update.  A path
+        # correction is a continuous shift of the tail's swing centre, not a
+        # switch to the calibrated left/right pivot presets.  Limit the shift
+        # so a bad frame or a sharp corner cannot command an in-place turn.
         mode = "forward"
-        if abs(float(steering_demand)) >= self.turn_mode_threshold:
-            mode = "left" if steering_demand > 0.0 else "right"
-            steering = 0.0
+        tracking_bias = max(
+            -float(self.max_tracking_bias_deg),
+            min(float(self.max_tracking_bias_deg), -steering),
+        )
         return {
             "mode": mode,
             "frequency": max(0.6, frequency),
             "amplitude": max(4.0, amplitude),
-            "bias": -steering,
+            "bias": tracking_bias,
         }
 
 class RoboFishComm:
@@ -160,6 +170,11 @@ class RoboFishComm:
         if not result.get("sent"):
             raise RuntimeError("没有唯一在线机器鱼可接收运动命令")
         if not result.get("acknowledged"):
+            # Continuous motion may be acknowledged after the HTTP response
+            # when the device is reached through a public network. The Go
+            # controller has already written the command, so keep tracking.
+            if result.get("pending") and result.get("sent") and result.get("success"):
+                return result
             raise RuntimeError(result.get("message") or "机器鱼响应超时")
         if not result.get("success"):
             code = result.get("code") or "DEVICE_REJECTED"
@@ -170,7 +185,7 @@ class RoboFishComm:
     def set_device_id(self, device_id):
         self._device_id = str(device_id or "").strip()
 
-    def _request_motion(self, mode, frequency, amplitude, bias, timeout=0.3):
+    def _request_motion(self, mode, frequency, amplitude, bias, timeout=1.5):
         if str(mode).lower() == "stop":
             with self._state_lock:
                 self._motion_enabled = False
@@ -203,7 +218,7 @@ class RoboFishComm:
                             params["frequency"],
                             params["amplitude"],
                             params["bias"],
-                            timeout=0.3,
+                            timeout=1.5,
                         )
                         latency_ms = (time.perf_counter() - request_started) * 1000.0
                         print(
@@ -211,7 +226,7 @@ class RoboFishComm:
                             f"RTT={latency_ms:.1f}ms"
                         )
                     else:
-                        self._post({"operation": "stop", "sessionId": self._session_id}, timeout=0.2)
+                        self._post({"operation": "stop", "sessionId": self._session_id}, timeout=1.5)
 
                 now = time.time()
                 dt = now - self._last_send_t
@@ -438,18 +453,30 @@ class ControlDecision:
 
 
 class VisionControlSession:
-    def __init__(self, path_guidance, command_interval_s: float = 0.10):
+    def __init__(
+        self,
+        path_guidance,
+        command_interval_s: float = 0.10,
+        target_loss_grace_s: float = 1.5,
+    ):
         self.path_guidance = path_guidance
         self.command_interval_s = float(command_interval_s)
+        self.target_loss_grace_s = max(0.0, float(target_loss_grace_s))
         self.active = False
         self.status = "READY"
         self.segment = 0
         self._last_control_t = float("-inf")
+        self._last_position = None
+        self._last_frame_time = None
+        self._target_lost_since = None
 
     def prepare(self, path_world, position, frame_time, heading):
         """Prepare geometry without enabling propulsion."""
         self.active = False
         self.segment = 0
+        self._last_position = None
+        self._last_frame_time = None
+        self._target_lost_since = None
         return self.path_guidance.start(
             path_world, position, frame_time, heading
         )
@@ -459,12 +486,14 @@ class VisionControlSession:
         self.status = "HYBRID TRACKING"
         self.segment = int(initial_guidance["seg_index"])
         self._last_control_t = float("-inf")
+        self._target_lost_since = None
 
     def stop(self, status="STOPPED", *, clear_path=False) -> bool:
         """Enter a non-driving state and report whether propulsion may exist."""
         was_active = self.active
         self.active = False
         self.status = status
+        self._target_lost_since = None
         if clear_path:
             self.path_guidance.clear()
             self.segment = 0
@@ -489,13 +518,6 @@ class VisionControlSession:
                 stop_required=True,
                 message="场地标定失效，循迹已停止。",
             )
-        if position is None:
-            self.stop("TARGET LOST")
-            return ControlDecision(
-                status=self.status,
-                stop_required=True,
-                message="视觉目标失效，循迹已停止。",
-            )
         if not self.path_guidance.prepared:
             self.stop("PATH INVALID")
             return ControlDecision(
@@ -504,11 +526,40 @@ class VisionControlSession:
                 message="路径引导状态失效，循迹已停止。",
             )
 
+        predicted_loss = position is None
+        if predicted_loss:
+            if self._last_position is None:
+                self.stop("TARGET LOST")
+                return ControlDecision(
+                    status=self.status,
+                    stop_required=True,
+                    message="视觉目标尚未锁定，循迹已停止。",
+                )
+            if self._target_lost_since is None:
+                self._target_lost_since = float(now)
+            lost_for = max(0.0, float(now) - self._target_lost_since)
+            if lost_for > self.target_loss_grace_s:
+                self.stop("TARGET LOST")
+                return ControlDecision(
+                    status=self.status,
+                    stop_required=True,
+                    message=f"视觉目标连续丢失 {lost_for:.1f}s，循迹已停止。",
+                )
+            position = self._predict_lost_position(lost_for)
+            frame_time = self._predict_lost_frame_time(lost_for)
+            allow_course_update = False
+            if self.status != "HYBRID TARGET HOLD":
+                self.status = "HYBRID TARGET HOLD"
+        else:
+            self._last_position = np.asarray(position, dtype=float).reshape(2).copy()
+            self._last_frame_time = float(frame_time)
+            self._target_lost_since = None
+
         guidance = self.path_guidance.update(
             position,
             frame_time,
             allow_course_update=allow_course_update,
-            speed_mps=float(speed_mps),
+            speed_mps=0.0 if predicted_loss else float(speed_mps),
         )
         self.segment = int(guidance["seg_index"])
         if guidance["settled"]:
@@ -535,12 +586,41 @@ class VisionControlSession:
                 "steering_demand": guidance["steering_demand"],
             }
             self._last_control_t = now
-        self.status = (
-            "HYBRID BRAKING" if guidance["brake_request"]
-            else "HYBRID TRACKING"
-        )
+        if not predicted_loss:
+            self.status = (
+                "HYBRID BRAKING" if guidance["brake_request"]
+                else "HYBRID TRACKING"
+            )
         return ControlDecision(
             status=self.status,
             guidance=guidance,
             pid=pid,
         )
+
+    def _predict_lost_position(self, lost_for):
+        """Bridge brief detector gaps without turning a lost target into a drive command."""
+        position = self._last_position.copy()
+        estimator = getattr(
+            getattr(self.path_guidance, "heading_estimator", None),
+            "velocity_estimator",
+            None,
+        )
+        velocity = getattr(estimator, "velocity", None)
+        if velocity is None:
+            return position
+        velocity = np.asarray(velocity, dtype=float).reshape(2)
+        if not np.isfinite(velocity).all():
+            return position
+        # Limit dead-reckoning to a short camera gap; the grace timeout still
+        # guarantees that a genuinely lost fish is stopped by the session.
+        prediction = velocity * min(max(0.0, float(lost_for)), 0.35)
+        length = float(np.linalg.norm(prediction))
+        if length > 0.08:
+            prediction *= 0.08 / length
+        return position + prediction
+
+    def _predict_lost_frame_time(self, lost_for):
+        base = self._last_frame_time
+        if base is None:
+            return float(lost_for)
+        return float(base) + min(max(0.0, float(lost_for)), self.target_loss_grace_s)

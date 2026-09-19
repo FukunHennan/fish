@@ -86,7 +86,7 @@ def translate_web_action(action, frame_size=None):
         if not isinstance(overlays, dict):
             return None
         payload = {}
-        for key in ("detections", "paths"):
+        for key in ("detections", "plannedPath", "trajectory", "paths"):
             if key in overlays:
                 value = overlays.get(key)
                 if not isinstance(value, bool):

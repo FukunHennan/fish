@@ -97,6 +97,9 @@ func TestMotionEndpointsLimitExplicitBiasAndCalibrationPreset(t *testing.T) {
 				if payload["amplitude"] != tc.amplitude || payload["bias"] != tc.bias {
 					t.Fatalf("unsafe payload: %v; want amplitude=%v bias=%v", payload, tc.amplitude, tc.bias)
 				}
+				if payload["transitionMs"] != float64(600) {
+					t.Fatalf("motion payload missing calibrated transition: %v", payload)
+				}
 			case <-time.After(time.Second):
 				t.Fatal("device did not receive command")
 			}

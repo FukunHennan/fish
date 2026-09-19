@@ -36,6 +36,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	// Local commissioning is the current default. It seeds the four known
+	// competitors as logged in; deployments can opt out explicitly later.
+	if _, configured := os.LookupEnv("FISH_DEVELOPMENT_MODE"); !configured {
+		_ = os.Setenv("FISH_DEVELOPMENT_MODE", "true")
+	}
 
 	diagnosticRoot := os.Getenv("FISH_DIAGNOSTIC_DIR")
 	if diagnosticRoot == "" {

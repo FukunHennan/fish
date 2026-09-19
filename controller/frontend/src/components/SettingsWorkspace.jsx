@@ -52,6 +52,10 @@ function SettingsBlock({ title, children, full = false }) {
   );
 }
 
+function sensorLabel(sensor) {
+  return sensor === "battery_adc" ? "电池电压 ADC" : sensor;
+}
+
 function DeviceOverview({ devices = [], onlineDevices = [], lowBatteryCount = 0 }) {
   return (
     <>
@@ -80,6 +84,11 @@ function DeviceOverview({ devices = [], onlineDevices = [], lowBatteryCount = 0 
               <div>
                 <strong>{deviceLabel(device)}</strong>
                 <small>{device.deviceId} · {device.mac || device.ip || "地址未知"}</small>
+                <small>
+                  传感器：{device.sensors?.length ? device.sensors.map(sensorLabel).join("、") : "未上报"}
+                  {device.servoPin != null && ` · 舵机 GPIO${device.servoPin}`}
+                  {device.batterySensePin != null && ` · 电池 ADC GPIO${device.batterySensePin}`}
+                </small>
               </div>
               <span className={device.online ? "online-text" : "offline-text"}>
                 {device.online ? "● 在线" : "○ 离线"}

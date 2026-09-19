@@ -7,12 +7,30 @@ from perception import FishDetector, VisionPipeline, resolve_inference_device
 
 
 class DetectorDeviceTests(unittest.TestCase):
-    def test_cuda_index_is_strict_and_never_falls_back_to_cpu(self):
+    def test_gpu_index_prefers_cuda_then_xpu_and_never_falls_back_to_cpu(self):
         with self.assertRaisesRegex(RuntimeError, "CPU fallback is disabled"):
-            resolve_inference_device(0, "cpu", cuda_available=False)
-        self.assertEqual(resolve_inference_device(0, "cuda:0", cuda_available=True), 0)
+            resolve_inference_device(
+                0, "cpu", cuda_available=False, xpu_available=False
+            )
+        self.assertEqual(
+            resolve_inference_device(
+                0, "cuda:0", cuda_available=True, xpu_available=False
+            ),
+            0,
+        )
+        self.assertEqual(
+            resolve_inference_device(
+                0, "cpu", cuda_available=False, xpu_available=True
+            ),
+            "xpu:0",
+        )
         self.assertEqual(resolve_inference_device("cpu", "cpu"), "cpu")
-        self.assertEqual(resolve_inference_device(0, "cpu", cuda_available=True), 0)
+        self.assertEqual(
+            resolve_inference_device(
+                0, "cpu", cuda_available=True, xpu_available=False
+            ),
+            0,
+        )
 
     def test_colour_signature_distinguishes_coloured_fish_regions(self):
         green = np.full((80, 120, 3), (0, 220, 0), dtype=np.uint8)
@@ -74,6 +92,30 @@ class TargetSelectionTests(unittest.TestCase):
         })
 
         self.assertFalse(selected["targetFound"])
+
+    def test_single_fish_accepts_a_new_track_id(self):
+        pipeline = self.make_pipeline()
+        pipeline.set_single_fish_mode(True)
+        first = pipeline._select_target({
+            "detections": [{
+                "trackId": 7,
+                "center": [100.0, 120.0],
+                "bbox": [80.0, 100.0, 120.0, 140.0],
+                "confidence": 0.8,
+            }],
+        })
+        second = pipeline._select_target({
+            "detections": [{
+                "trackId": 12,
+                "center": [108.0, 123.0],
+                "bbox": [88.0, 103.0, 128.0, 143.0],
+                "confidence": 0.7,
+            }],
+        })
+        self.assertTrue(first["targetFound"])
+        self.assertTrue(second["targetFound"])
+        self.assertEqual(second["targetTrackId"], 12)
+        self.assertEqual(second["track_id"], 12)
 
 
 if __name__ == "__main__":

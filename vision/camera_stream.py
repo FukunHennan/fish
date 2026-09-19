@@ -15,8 +15,9 @@ from pathlib import Path
 
 import cv2
 import crop_region
+import video_transform
 
-from config import TARGET_FPS, TARGET_HEIGHT, TARGET_WIDTH
+from config import CAPTURE_FOURCC, TARGET_FPS, TARGET_HEIGHT, TARGET_WIDTH
 from interface import (
     apply_manual_exposure_for_device,
     get_manual_exposure_for_device,
@@ -31,6 +32,7 @@ from interface import (
 CAMERA_STALL_RECOVERY_S = 2.0
 CAMERA_RECOVERY_RETRY_S = 1.0
 CAMERA_RECOVERY_MAX_INDEX = 8
+CAMERA_WATCHDOG_POLL_S = 0.25
 
 
 def _linux_v4l2_present_names(
@@ -119,6 +121,35 @@ def _safe_get(capture, prop, default=0.0):
         return default
 
 
+def _read_fixed_resolution_frame(
+    capture,
+    attempts=5,
+    expected_width=TARGET_WIDTH,
+    expected_height=TARGET_HEIGHT,
+):
+    """Read the first frame that actually matches the configured sensor mode."""
+    last_size = None
+    for _ in range(attempts):
+        try:
+            ok, frame = capture.read()
+        except (cv2.error, OSError, RuntimeError):
+            continue
+        if not ok or frame is None:
+            continue
+        shape = getattr(frame, "shape", None)
+        # Lightweight test doubles do not expose ndarray shape.
+        if shape is None or len(shape) < 2:
+            return frame
+        last_size = (int(shape[1]), int(shape[0]))
+        if last_size == (expected_width, expected_height):
+            return frame
+    actual = "unknown" if last_size is None else f"{last_size[0]}x{last_size[1]}"
+    raise RuntimeError(
+        "camera_frame_resolution_mismatch: "
+        f"requested={expected_width}x{expected_height}; actual={actual}"
+    )
+
+
 def _open_working_capture(src):
     from camera_policy import camera_blocked
     if camera_blocked(src):
@@ -190,7 +221,17 @@ class RestartSafeCameraStream:
             if sys.platform.startswith("linux") else {}
         )
         self.device_name = present_names.get(src, "")
-        self._configure_capture()
+        try:
+            self._configure_capture()
+            first_frame = _read_fixed_resolution_frame(
+                self.cap,
+                expected_width=self.source_width,
+                expected_height=self.source_height,
+            )
+        except Exception:
+            _safe_release(self.cap)
+            raise
+        first_frame = video_transform.rotate(first_frame, self.rotation_angle)
 
         self.ret = True
         self.frame = first_frame
@@ -198,18 +239,27 @@ class RestartSafeCameraStream:
         self.sequence = 1
         self.last_success_monotonic = time.monotonic()
         self.consecutive_failures = 0
-        self.measured_fps = max(1.0, self.reported_fps)
+        # CAP_PROP_FPS is only a driver claim.  It is intentionally not used
+        # as telemetry or scheduling input; measured_fps starts unknown and is
+        # derived from real frame arrival intervals in update().
+        self.measured_fps = 0.0
         self._last_ts = self.timestamp
         self.thread = threading.Thread(
             target=self.update,
             name=f"camera-capture-{src}-{self.backend_name.lower()}",
             daemon=True,
         )
+        self._watchdog_thread = threading.Thread(
+            target=self._watch_capture,
+            name=f"camera-watchdog-{src}",
+            daemon=True,
+        )
 
         print(
             "[Camera] Initialized: "
             f"backend={self.backend_name}, "
-            f"actual={self.real_width}x{self.real_height}@{self.reported_fps:.1f}"
+            f"actual={self.real_width}x{self.real_height}, "
+            f"driver_fps={self.reported_fps:.1f}, measured_fps=pending"
         )
 
     def _configure_capture(self):
@@ -220,22 +270,19 @@ class RestartSafeCameraStream:
         half-configured capture.
         """
         capture = self.cap
-        # Camera properties are preferences, not startup requirements. Some
-        # UVC drivers report a lower default FPS than the requested target;
-        # asking for more can make reads block for hundreds of milliseconds.
-        device_fps = _safe_get(capture, cv2.CAP_PROP_FPS, 0.0)
-        self.requested_fps = (
-            min(TARGET_FPS, device_fps) if device_fps > 0 else TARGET_FPS
-        )
+        # Fix the sensor mode but let the driver negotiate the fastest real
+        # frame rate available for that mode.  Writing a desired FPS is not
+        # useful on this camera: the driver accepts arbitrary values without
+        # changing delivery cadence.
+        self.requested_fps = None
         _safe_set(
             capture,
             cv2.CAP_PROP_FOURCC,
-            cv2.VideoWriter_fourcc(*"MJPG"),
+            cv2.VideoWriter_fourcc(*CAPTURE_FOURCC),
             "FOURCC",
         )
         _safe_set(capture, cv2.CAP_PROP_FRAME_WIDTH, TARGET_WIDTH, "WIDTH")
         _safe_set(capture, cv2.CAP_PROP_FRAME_HEIGHT, TARGET_HEIGHT, "HEIGHT")
-        _safe_set(capture, cv2.CAP_PROP_FPS, self.requested_fps, "FPS")
 
         self.real_width = int(
             _safe_get(capture, cv2.CAP_PROP_FRAME_WIDTH, TARGET_WIDTH)
@@ -244,10 +291,20 @@ class RestartSafeCameraStream:
             _safe_get(capture, cv2.CAP_PROP_FRAME_HEIGHT, TARGET_HEIGHT)
         )
         self.reported_fps = _safe_get(
-            capture, cv2.CAP_PROP_FPS, self.requested_fps
+            capture, cv2.CAP_PROP_FPS, 0.0
         )
+        if (self.real_width, self.real_height) != (TARGET_WIDTH, TARGET_HEIGHT):
+            print(
+                "[Camera] Requested sensor mode unavailable; locking the session "
+                f"to negotiated mode {self.real_width}x{self.real_height} "
+                f"instead of {TARGET_WIDTH}x{TARGET_HEIGHT}"
+            )
 
+        self.source_width = self.real_width
+        self.source_height = self.real_height
         self.crop_region = crop_region.load()
+        self.rotation_angle = video_transform.load()["angle"]
+        self.rotation_ms = 0.0
         x, y, right, bottom = crop_region.bounds(
             self.crop_region, self.real_width, self.real_height
         )
@@ -258,7 +315,7 @@ class RestartSafeCameraStream:
         if self.backend_name != "V4L2":
             # OpenCV exposure values use a different scale on Linux V4L2.
             # Writing the Windows-style -6 value can select a multi-second
-            # exposure and reduce a 30 FPS camera to roughly 2 FPS.
+            # exposure and sharply reduce the camera's real delivery rate.
             _safe_set(
                 capture, cv2.CAP_PROP_AUTO_EXPOSURE, 0.25, "AUTO_EXPOSURE"
             )
@@ -293,21 +350,41 @@ class RestartSafeCameraStream:
             return [index for index in ordered if index in present]
         return [self.src]
 
-    def _start_recovery(self):
+    def _start_recovery(self, force=False):
         with self.lock:
             self.ret = False
-        if self._recovering:
-            return
+            if self._recovering:
+                return
+            self._recovering = True
         print(
             f"[Camera] No frame for {CAMERA_STALL_RECOVERY_S:.0f}s; "
             f"rebuilding capture for index {self.src}"
         )
-        self._recovering = True
         self.recovery_attempts = 0
-        with self.capture_lock:
+        acquired = self.capture_lock.acquire(timeout=0.05 if force else -1)
+        if acquired:
+            try:
+                stale = self.cap
+                self.cap = None
+            finally:
+                self.capture_lock.release()
+        else:
+            # Some Windows DirectShow drivers block forever inside read().
+            # Releasing the handle from the watchdog is the only way to wake
+            # that thread and let normal recovery rebuild the capture.
             stale = self.cap
             self.cap = None
-            _safe_release(stale)
+        _safe_release(stale)
+
+    def _watch_capture(self):
+        while not self._stop_event.wait(CAMERA_WATCHDOG_POLL_S):
+            with self.lock:
+                recovering = self._recovering
+                last_success = self.last_success_monotonic
+            if recovering or last_success is None:
+                continue
+            if time.monotonic() - last_success >= CAMERA_STALL_RECOVERY_S:
+                self._start_recovery(force=True)
 
     def _attempt_recovery(self):
         """Try to open a working capture; returns True when adopted."""
@@ -333,7 +410,12 @@ class RestartSafeCameraStream:
             if self._stop_event.is_set() or self._released:
                 _safe_release(capture)
                 return False
-            self._adopt_capture(capture, backend_name, first_frame, source)
+            try:
+                self._adopt_capture(capture, backend_name, first_frame, source)
+            except (cv2.error, OSError, RuntimeError) as error:
+                self.last_recovery_error = str(error)
+                _safe_release(capture)
+                continue
             return True
 
         self.recovery_attempts += 1
@@ -351,6 +433,12 @@ class RestartSafeCameraStream:
             self.cap = capture
             self.backend_name = backend_name
             self._configure_capture()
+            first_frame = _read_fixed_resolution_frame(
+                self.cap,
+                expected_width=self.source_width,
+                expected_height=self.source_height,
+            )
+            first_frame = video_transform.rotate(first_frame, self.rotation_angle)
             _safe_release(previous)
 
         now = time.time()
@@ -362,12 +450,13 @@ class RestartSafeCameraStream:
             self.sequence += 1
             self.last_success_monotonic = now_monotonic
             self.consecutive_failures = 0
-        self.measured_fps = max(1.0, self.reported_fps)
+        self.measured_fps = 0.0
         self._last_ts = now
         self._recovering = False
         print(
             f"[Camera] Recovered with {backend_name} at index {source}: "
-            f"{self.real_width}x{self.real_height}@{self.reported_fps:.1f}"
+            f"{self.real_width}x{self.real_height}; "
+            f"driver_fps={self.reported_fps:.1f}, measured_fps=pending"
         )
 
     @property
@@ -380,6 +469,7 @@ class RestartSafeCameraStream:
         if self._stop_event.is_set():
             raise RuntimeError("camera_stream_cannot_restart")
         self.thread.start()
+        self._watchdog_thread.start()
         return self
 
     def adjust_exposure(self, delta):
@@ -454,13 +544,24 @@ class RestartSafeCameraStream:
             if self._stop_event.is_set():
                 break
 
+            if self._recovering:
+                continue
+
             if ret and frame is not None:
+                transform_started = time.perf_counter()
+                frame = video_transform.rotate(frame, self.rotation_angle)
+                transform_ms = (time.perf_counter() - transform_started) * 1000.0
+                self.rotation_ms = 0.8 * self.rotation_ms + 0.2 * transform_ms
                 now = time.time()
                 now_monotonic = time.monotonic()
                 dt = now - self._last_ts
                 if dt > 0:
                     inst_fps = 1.0 / dt
-                    self.measured_fps = 0.9 * self.measured_fps + 0.1 * inst_fps
+                    self.measured_fps = (
+                        inst_fps
+                        if self.measured_fps <= 0
+                        else 0.9 * self.measured_fps + 0.1 * inst_fps
+                    )
                 self._last_ts = now
                 with self.lock:
                     self.ret = True
@@ -484,9 +585,24 @@ class RestartSafeCameraStream:
             frame = crop_region.crop(self.frame, self.crop_region) if self.frame is not None else None
             return self.ret, frame, self.timestamp
 
-    def snapshot(self):
+    def snapshot(self, copy_frame=True, apply_crop=True):
         with self.lock:
-            frame = crop_region.crop(self.frame, self.crop_region) if self.frame is not None else None
+            if self.frame is None:
+                frame = None
+            else:
+                region = self.crop_region if apply_crop else crop_region.FULL
+                x, y, right, bottom = crop_region.bounds(
+                    region, self.frame.shape[1], self.frame.shape[0]
+                )
+                if copy_frame:
+                    frame = self.frame[y:bottom, x:right].copy()
+                # The capture thread replaces, rather than mutates, each
+                # ndarray. A full-frame reference is therefore safe to read
+                # after releasing the lock and avoids a redundant 6 MB copy.
+                else:
+                    frame = self.frame if (x, y, right, bottom) == (
+                        0, 0, self.frame.shape[1], self.frame.shape[0]
+                    ) else self.frame[y:bottom, x:right].copy()
             last_success = self.last_success_monotonic
             age_s = (
                 float("inf")
@@ -512,6 +628,8 @@ class RestartSafeCameraStream:
 
     def release(self):
         self._stop_event.set()
+        if self._watchdog_thread.is_alive():
+            self._watchdog_thread.join(timeout=1.0)
 
         # Most UVC cameras return from read() quickly. Avoid calling release()
         # concurrently with read() unless the driver actually needs unblocking.

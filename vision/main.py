@@ -7,6 +7,7 @@ camera/network adapters, and persistence remain independently testable.
 from __future__ import annotations
 
 import os
+import threading
 import time
 import traceback
 
@@ -16,11 +17,7 @@ import numpy as np
 from config import (
     CAMERA_STALE_TIMEOUT_S,
     DISPLAY_MAX_FPS,
-    MARKER_BL,
-    MARKER_BR,
     MARKER_PROFILE_PATH,
-    MARKER_TL,
-    MARKER_TR,
     OUTPUT_DIR,
     TABLET_TCP_HOST,
     TABLET_TCP_PORT,
@@ -66,6 +63,10 @@ from ui import (
     create_runtime_state,
 )
 from web_actions import translate_web_action
+
+
+PATH_START_TOLERANCE_M = 0.40
+PATH_AUTO_ANCHOR_MAX_M = 1.00
 
 
 def estimate_motion_heading(points, min_samples=20, min_distance_px=18.0):
@@ -139,12 +140,13 @@ class VisionApplication:
         self._exit_requested = False
         self._stop_latched_reason = None
         self._last_web_metrics_t = 0.0
+        self._frame_publisher_thread = None
         self._forward_calibration = None
         self._turn_calibration_direction = None
         self.processing_enabled = False
         self._heading_calibration_result = {
             "status": "idle", "progress": 0.0, "sampleCount": 0,
-            "message": "等待方向标定",
+            "message": "无需预先标定，启动后按实际位移自动修正方向",
         }
 
     def run(self):
@@ -181,11 +183,56 @@ class VisionApplication:
             elif callable(self.frame_sink):
                 self.frame_sink(image)
 
+    def _publish_camera_frames(self):
+        """Publish capture frames independently from perception throughput.
+
+        Full-resolution perception can run much slower than the camera,
+        especially on an integrated GPU. WebRTC must still receive every
+        fresh capture frame so enabling YOLO does not turn the video stream
+        into a low-frame-rate slideshow that codecs render as blurry motion.
+        """
+        last_sequence = -1
+        while not self._exit_requested:
+            camera = self.cam
+            if camera is None:
+                time.sleep(0.01)
+                continue
+            try:
+                # Publish the uncropped camera frame. WebRTC selects either
+                # the full referee view or the shared effective region per
+                # viewer, while recognition continues to use cropped frames.
+                snapshot = camera.snapshot(copy_frame=False, apply_crop=False)
+            except TypeError:
+                # Keep compatibility with lightweight camera doubles and
+                # older camera adapters that expose snapshot() without the
+                # optional copy_frame argument.
+                snapshot = camera.snapshot()
+            sequence = snapshot.get("sequence", -1)
+            frame = snapshot.get("frame")
+            if snapshot.get("ok") and frame is not None and sequence != last_sequence:
+                last_sequence = sequence
+                self._publish_frame(frame, snapshot.get("timestamp"))
+                continue
+            time.sleep(0.002)
+
+    def _start_frame_publisher(self):
+        if not self.headless or self.frame_sink is None:
+            return
+        self._frame_publisher_thread = threading.Thread(
+            target=self._publish_camera_frames,
+            name="camera-webrtc-publisher",
+            daemon=True,
+        )
+        self._frame_publisher_thread.start()
+
     def _print_startup(self):
         print("\n" + "=" * 60)
         print("Starting YOLO RoboFish tracking and vision control...")
         print(f"Working directory: {WORK_DIR}")
-        print(f"Capture target: {TARGET_WIDTH}x{TARGET_HEIGHT} @ {TARGET_FPS} FPS")
+        print(
+            f"Capture target: {TARGET_WIDTH}x{TARGET_HEIGHT}; "
+            "FPS negotiated by camera and measured from real frames"
+        )
         print(f"Camera stale timeout: {CAMERA_STALE_TIMEOUT_S * 1000:.0f} ms")
         print(f"Tablet TCP: {TABLET_TCP_HOST}:{TABLET_TCP_PORT}")
         print("Fish control: routed through the local Go controller")
@@ -226,6 +273,9 @@ class VisionApplication:
             ),
             compensate_camera_latency,
         )
+        self.pipeline.set_single_fish_mode(
+            self.tracking_mode == TrackingMode.SINGLE_FISH
+        )
 
         self.runtime = create_runtime_state(
             ReferenceSource.INVALID,
@@ -261,6 +311,7 @@ class VisionApplication:
             if startup["frame"] is not None:
                 cv2.imshow(self.WINDOW_NAME, startup["frame"])
                 cv2.waitKey(1)
+        self._start_frame_publisher()
         print("Vision preview started; YOLO processing is disabled by default.")
         return True
 
@@ -303,9 +354,10 @@ class VisionApplication:
                 break
 
             snapshot = self.cam.snapshot()
+            measured_fps = float(getattr(self.cam, "measured_fps", 0.0) or 0.0)
             stale_timeout = max(
                 CAMERA_STALE_TIMEOUT_S,
-                2.0 / max(float(self.cam.reported_fps), 1.0),
+                3.0 / measured_fps if measured_fps > 0 else 3.0,
             )
             if snapshot["age_s"] > stale_timeout:
                 self._safe_stop(
@@ -334,7 +386,8 @@ class VisionApplication:
                     snapshot["frame"], snapshot["timestamp"],
                     camera_fps=self.cam.measured_fps, loop_fps=self._loop_fps,
                 )
-                self._publish_frame(image, snapshot["timestamp"])
+                if self._frame_publisher_thread is None:
+                    self._publish_frame(image, snapshot["timestamp"])
                 self._publish_preview_metrics(snapshot["frame"], snapshot["timestamp"])
                 self._display(image)
                 self._queue_input_actions()
@@ -347,6 +400,14 @@ class VisionApplication:
                 self.runtime.calibration["H"],
             )
             self.last_result = result
+            if self.headless and result.display_pixel is not None:
+                cx, cy = result.display_pixel
+                if not self.runtime.trajectory:
+                    self.runtime.trajectory.append((cx, cy))
+                else:
+                    last_x, last_y = self.runtime.trajectory[-1]
+                    if (cx - last_x) ** 2 + (cy - last_y) ** 2 >= 9.0:
+                        self.runtime.trajectory.append((cx, cy))
             self.runtime.frame["latest"] = result.frame.copy()
             self.runtime.frame["reference_position"] = result.pixel
             self.runtime.frame["reference_source"] = result.reference.source
@@ -354,7 +415,7 @@ class VisionApplication:
                 result.reference.metrics.get("tail_marker_position")
             )
             self._update_loop_fps()
-            self._update_auto_calibration(result)
+            self._update_frame_calibration(result)
             self._collect_turn_sample(result)
             self._update_forward_calibration(result)
             self._handle_tablet_commands()
@@ -378,36 +439,32 @@ class VisionApplication:
         if dt > 0:
             self._loop_fps = 0.9 * self._loop_fps + 0.1 / dt
 
-    def _update_auto_calibration(self, result):
+    def _update_frame_calibration(self, result):
         state = self.runtime.calibration
-        corners = result.corner_pixels
-        if len(corners) == 4 and not state["manual_locked"] and not state["auto_locked"]:
-            points = np.float32([
-                corners[MARKER_TL], corners[MARKER_TR],
-                corners[MARKER_BR], corners[MARKER_BL],
-            ])
-            previous = state["auto_prev_points"]
-            if previous is not None and float(
-                np.max(np.linalg.norm(points - previous, axis=1))
-            ) <= 2.0:
-                state["auto_stable_count"] += 1
-            else:
-                state["auto_stable_count"] = 1
-            state["auto_prev_points"] = points.copy()
-            if state["auto_stable_count"] >= 15:
-                homography, error = build_calibration_homography(
-                    points, self.cam.real_width, self.cam.real_height
-                )
-                if error:
-                    state["auto_stable_count"] = 0
-                    print(f"Automatic calibration not locked: {error}")
-                else:
-                    state["H"] = homography
-                    state["auto_locked"] = True
-                    print("Automatic calibration locked from four stable ArUco corners.")
-        elif len(corners) < 4:
-            state["auto_stable_count"] = 0
-            state["auto_prev_points"] = None
+        if state["is_calibrating"] or state["manual_locked"]:
+            return
+        height, width = result.frame.shape[:2]
+        frame_size = (int(width), int(height))
+        if state.get("frame_size") == frame_size and state["H"] is not None:
+            return
+        points = np.float32([
+            [0.0, 0.0],
+            [float(max(1, width - 1)), 0.0],
+            [float(max(1, width - 1)), float(max(1, height - 1))],
+            [0.0, float(max(1, height - 1))],
+        ])
+        homography, error = build_calibration_homography(points, width, height)
+        if error:
+            state["H"] = None
+            state["auto_locked"] = False
+            state["frame_size"] = None
+            print(f"Effective-frame calibration failed: {error}")
+            return
+        state["H"] = homography
+        state["auto_locked"] = True
+        state["auto_prev_points"] = points.copy()
+        state["frame_size"] = frame_size
+        print(f"Effective-frame calibration ready: {width}x{height}; no ArUco markers required.")
 
     def _collect_turn_sample(self, result):
         if self.turn_session.active and result.direct_marker_world_position is not None:
@@ -436,18 +493,27 @@ class VisionApplication:
             position=result.control_position,
             frame_time=result.frame_time,
             now=time.monotonic(),
-            allow_course_update=result.reference.source == ReferenceSource.MARKER,
+            # YOLO and single-fish positions are real motion observations too;
+            # restricting course updates to the optional tail marker made
+            # automatic direction correction impossible in normal tracking.
+            allow_course_update=result.reference.source in {
+                ReferenceSource.MARKER,
+                ReferenceSource.YOLO,
+                ReferenceSource.RIGID_BODY,
+            },
             speed_mps=result.speed or 0.0,
         )
         self.status = decision.status
         self.runtime.drawn_path["active"] = self.control.active
         self.runtime.drawn_path["segment"] = self.control.segment
-        if decision.guidance and decision.guidance["heading_source"] == "COURSE":
+        if decision.guidance and decision.guidance["heading_source"] in {
+            "COURSE", "COURSE_REVERSED"
+        }:
             heading = self.runtime.heading
             heading["control_heading"] = tuple(
                 float(value) for value in decision.guidance["heading"]
             )
-            heading["control_heading_source"] = "COURSE"
+            heading["control_heading_source"] = decision.guidance["heading_source"]
         if decision.stop_required:
             self._safe_stop(decision.status, force=True)
             if decision.message:
@@ -469,7 +535,7 @@ class VisionApplication:
             exposure=self.cam.exposure_val, tablet_rates=rates, mcu_hz=mcu_hz,
             clahe_enabled=self.pipeline.use_clahe,
         )
-        if not self.headless and self.presentation.overlay_options.get("paths", True):
+        if not self.headless and self.presentation.overlay_options.get("plannedPath", False):
             self._draw_tablet_trajectory(image)
         telemetry = self.presentation.telemetry(
             result,
@@ -486,7 +552,8 @@ class VisionApplication:
             clahe_enabled=self.pipeline.use_clahe,
         )
         self.tablet.send(telemetry)
-        self._publish_frame(image, result.frame_time)
+        if self._frame_publisher_thread is None:
+            self._publish_frame(image, result.frame_time)
         self._publish_web_metrics(result)
         if self.is_recording and self.recorder is not None:
             current = result.current_position
@@ -593,7 +660,7 @@ class VisionApplication:
                     "status": "idle",
                     "progress": 0.0,
                     "sampleCount": 0,
-                    "message": "目标已切换，请重新确认方向",
+                    "message": "目标已切换，启动后按实际位移自动修正方向",
                 }
                 continue
             if action == "EXIT":
@@ -614,13 +681,16 @@ class VisionApplication:
                 self.tracking_mode = TrackingMode(payload)
                 self._safe_stop("TRACKING MODE CHANGED", force=True)
                 self.pipeline.reset_motion()
+                self.pipeline.set_single_fish_mode(
+                    self.tracking_mode == TrackingMode.SINGLE_FISH
+                )
                 if self.tracking_mode == TrackingMode.SINGLE_FISH:
                     self.pipeline.set_target_track(None)
                 self._heading_calibration_result = {
                     "status": "idle",
                     "progress": 0.0,
                     "sampleCount": 0,
-                    "message": "模式已切换，请重新确认方向",
+                    "message": "模式已切换，启动后按实际位移自动修正方向",
                 }
                 print(f"Tracking mode changed to {self.tracking_mode.value}.")
             elif action == "START":
@@ -762,7 +832,7 @@ class VisionApplication:
             stage = "TRACKING"
         elif calibrating_heading:
             stage = "HEADING_CALIBRATING"
-        elif heading_ready and not blockers:
+        elif not blockers:
             stage = "READY"
         elif bool(yolo.get("ready")):
             stage = "PREPARING"
@@ -772,10 +842,20 @@ class VisionApplication:
             "type": "system.metrics",
             "metrics": {
                 "frame": {"width": int(width), "height": int(height)},
+                "cameraFrame": {
+                    "width": int(getattr(self.cam, "source_width", width)),
+                    "height": int(getattr(self.cam, "source_height", height)),
+                },
                 "crop": getattr(self.cam, "crop_region", {"x":0,"y":0,"width":1,"height":1}),
+                "rotationAngle": float(getattr(self.cam, "rotation_angle", 0.0)),
+                "rotationMs": float(getattr(self.cam, "rotation_ms", 0.0)),
                 "frameLatencyMs": max(0.0, (time.time() - result.frame_time) * 1000.0),
                 "yolo": yolo,
                 "overlays": dict(self.presentation.overlay_options),
+                "overlayGeometry": {
+                    "plannedPath": [list(point) for point in self.runtime.drawn_path["pixels"]],
+                    "trajectory": [list(point) for point in self.runtime.trajectory],
+                },
                 "cameraFps": self.cam.measured_fps,
                 "visionFps": self._loop_fps,
                 "exposure": self._exposure_metrics(),
@@ -789,6 +869,12 @@ class VisionApplication:
                     "pathPointCount": len(self.runtime.drawn_path["pixels"]),
                     "positionReady": position_ready,
                     "headingCalibrated": heading_ready,
+                    "headingSource": self.runtime.heading.get("control_heading_source"),
+                    "autoDirectionCorrection": not heading_ready,
+                    "courseDirectionMismatch": bool(
+                        self.last_decision.guidance
+                        and self.last_decision.guidance.get("direction_mismatch")
+                    ),
                     "headingCalibrating": calibrating_heading,
                     "headingCalibration": heading_calibration,
                     "trackingMode": self.tracking_mode.value,
@@ -812,7 +898,13 @@ class VisionApplication:
             "type": "system.metrics",
             "metrics": {
                 "frame": {"width": int(width), "height": int(height)},
+                "cameraFrame": {
+                    "width": int(getattr(self.cam, "source_width", width)),
+                    "height": int(getattr(self.cam, "source_height", height)),
+                },
                 "crop": getattr(self.cam, "crop_region", {"x":0,"y":0,"width":1,"height":1}),
+                "rotationAngle": float(getattr(self.cam, "rotation_angle", 0.0)),
+                "rotationMs": float(getattr(self.cam, "rotation_ms", 0.0)),
                 "frameLatencyMs": max(0.0, (time.time() - frame_time) * 1000.0),
                 "yolo": {
                     "enabled": False,
@@ -826,6 +918,10 @@ class VisionApplication:
                     "detectionCount": 0,
                 },
                 "overlays": dict(self.presentation.overlay_options),
+                "overlayGeometry": {
+                    "plannedPath": [],
+                    "trajectory": [],
+                },
                 "cameraFps": self.cam.measured_fps,
                 "visionFps": self._loop_fps,
                 "exposure": self._exposure_metrics(),
@@ -885,33 +981,64 @@ class VisionApplication:
         if result.control_position is None:
             print("Cannot start: no reliable tail position.")
             return
-        self._promote_pixel_heading(calibration["H"], result.pixel)
-        if heading["world_unit_vector"] is None:
-            print("Cannot start: run automatic direction calibration first.")
-            return
         pixels = np.float32([[[x, y] for x, y in drawn["pixels"]]])
         path_world = cv2.perspectiveTransform(pixels, calibration["H"])[0]
-        startup_heading = (
-            heading["control_heading"] or heading["world_unit_vector"]
-        )
+        current_position = np.asarray(result.control_position, dtype=np.float64)
+        start_distance = float(np.linalg.norm(current_position - path_world[0]))
+        if not np.isfinite(start_distance):
+            reason = "PATH INVALID: 路径起点或当前鱼位置无效"
+            self.control.stop(reason, clear_path=True)
+            self.status = reason
+            print("Path start distance is not finite.")
+            return
+        if start_distance > PATH_AUTO_ANCHOR_MAX_M:
+            reason = (
+                f"PATH INVALID: 起点距离鱼 {start_distance:.2f} m，"
+                f"超过安全接入范围 {PATH_AUTO_ANCHOR_MAX_M:.2f} m；"
+                "请把路径首点画在鱼附近"
+            )
+            self.control.stop(reason, clear_path=True)
+            self.status = reason
+            print(f"Path starts {start_distance:.2f} m from fish; draw closer to the fish.")
+            return
+
+        # A hand-drawn line often starts a little away from the detected fish.
+        # Connect that short gap to the live position instead of rejecting an
+        # otherwise valid route. Long gaps remain an explicit safety error.
+        control_path_world = path_world
+        if start_distance > PATH_START_TOLERANCE_M:
+            control_path_world = np.vstack((current_position, path_world))
+            print(
+                f"Path auto-anchored to fish position ({start_distance:.2f} m gap)."
+            )
+
+        startup_heading = heading["control_heading"] or heading["world_unit_vector"]
+        if startup_heading is None:
+            # The drawn path itself is a safe initial reference.  Real motion
+            # takes over as soon as enough displacement is observed.
+            delta = np.asarray(control_path_world[1], dtype=np.float64) - np.asarray(
+                control_path_world[0], dtype=np.float64
+            )
+            length = float(np.linalg.norm(delta))
+            startup_heading = delta / length if length > 1e-9 else None
+        if startup_heading is None:
+            print("Cannot start: path direction is invalid.")
+            return
         try:
             initial = self.control.prepare(
-                path_world, result.control_position,
+                control_path_world, result.control_position,
                 result.frame_time, startup_heading,
             )
         except (ValueError, RuntimeError) as error:
-            self.control.stop("PATH INVALID", clear_path=True)
+            reason = f"PATH INVALID: {error}"
+            self.control.stop(reason, clear_path=True)
+            self.status = reason
             print(f"Path preparation failed: {error}")
             return
-        start_distance = float(np.linalg.norm(
-            np.asarray(result.control_position) - self.control.path_guidance.path[0]
-        ))
-        if start_distance > 0.40:
-            self.control.stop("PATH INVALID", clear_path=True)
-            print(f"Path starts {start_distance:.2f} m from fish; draw closer to the fish.")
-            return
         if not self.fish_comm.ensure_hybrid_mode():
-            self.control.stop("CONTROL OFFLINE")
+            reason = "CONTROL OFFLINE: 设备控制会话未建立或设备控制权被占用"
+            self.control.stop(reason)
+            self.status = reason
             print("Fish did not acknowledge vision control readiness.")
             return
         self.fish_comm.vision_seq = 0
@@ -1216,6 +1343,7 @@ class VisionApplication:
                 "auto_locked": False,
                 "auto_stable_count": 0,
                 "auto_prev_points": None,
+                "frame_size": None,
             })
             self.pipeline.reset_motion()
             self._reset_heading()
@@ -1231,8 +1359,13 @@ class VisionApplication:
         state["pts_raw"].append([int(point[0]), int(point[1])])
         if len(state["pts_raw"]) < 4:
             return
+        frame = self.runtime.frame.get("latest")
+        frame_height, frame_width = (
+            frame.shape[:2] if frame is not None
+            else (self.cam.real_height, self.cam.real_width)
+        )
         homography, error = build_calibration_homography(
-            state["pts_raw"], self.cam.real_width, self.cam.real_height
+            state["pts_raw"], frame_width, frame_height
         )
         if error:
             print(f"Manual calibration failed: {error}")
@@ -1240,6 +1373,7 @@ class VisionApplication:
             return
         state["H"] = homography
         state["manual_locked"] = True
+        state["frame_size"] = (int(frame_width), int(frame_height))
         state["is_calibrating"] = False
         print("Manual pool calibration completed.")
 
@@ -1287,6 +1421,10 @@ class VisionApplication:
 
     def _close(self):
         print("\nStopping propulsion and releasing vision resources...")
+        self._exit_requested = True
+        publisher = self._frame_publisher_thread
+        if publisher is not None and publisher.is_alive():
+            publisher.join(timeout=1.0)
         if self.fish_comm is not None:
             self.fish_comm.close()
         if self.tablet is not None:

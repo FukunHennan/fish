@@ -10,10 +10,52 @@ import (
 	"testing"
 )
 
+func TestDevelopmentMatchSeedsFourSignedInAccountsAndPersists(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "competition.json")
+	store := newCompetitionStore(path)
+	store.ensureDevelopmentMatch()
+	if store.Match == nil || store.Match.State != matchStateReady {
+		t.Fatalf("开发比赛应默认就绪: %+v", store.Match)
+	}
+	if !store.Match.Blue.allSignedIn() || !store.Match.Red.allSignedIn() {
+		t.Fatalf("开发模式四名选手应默认登录: %+v", store.Match)
+	}
+	if store.Match.Blue.Players[0].Email != "stu-24018@fish.local" || store.Match.Red.Players[1].Name != "赵同学" {
+		t.Fatalf("开发账号名单异常: %+v", store.Match)
+	}
+	reloaded := newCompetitionStore(path)
+	if reloaded.Match == nil || !reloaded.Match.Blue.Players[0].SignedIn {
+		t.Fatalf("开发比赛应写入磁盘并可恢复: %+v", reloaded.Match)
+	}
+}
+
 // 覆盖裁判端完整流程：建赛 -> 签到 -> 计时 -> 记分 -> 结束 -> 记录。
 func TestCompetitionFlow(t *testing.T) {
 	t.Setenv("FISH_COMPETITION_STATE", filepath.Join(t.TempDir(), "competition.json"))
-	handler := NewHandler(hub.New(), testKey())
+	recordingCalls := []string{}
+	vision := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		recordingCalls = append(recordingCalls, r.Method+" "+r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/recordings":
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			_ = json.NewEncoder(w).Encode(map[string]any{"recording": map[string]any{
+				"active": true, "recordingId": body["recordingId"],
+				"startedAt": "2026-09-17T10:00:00-04:00", "width": 712, "height": 410,
+			}})
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/recordings/"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"recording": map[string]any{
+				"active": false, "recordingId": strings.TrimPrefix(r.URL.Path, "/recordings/"),
+				"fileName": "match-test.mp4", "durationMs": 1200, "frameCount": 18,
+				"averageFps": 15.0, "width": 712, "height": 410,
+			}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(vision.Close)
+	handler := NewHandlerWithVision(hub.New(), testKey(), vision.URL, vision.URL)
 
 	call := func(method, path, body string) map[string]any {
 		t.Helper()
@@ -52,6 +94,20 @@ func TestCompetitionFlow(t *testing.T) {
 	match := matchOf(created)
 	if match["matchNo"] != "第 08 场" || match["state"] != matchStateSignup {
 		t.Fatalf("建赛结果异常: %+v", match)
+	}
+
+	// 场地实际尺寸由裁判填写并随比赛持久化，供画面标尺使用。
+	field := call(http.MethodPost, "/api/competition/match/field",
+		`{"fieldWidthCm":314.2,"fieldHeightCm":160}`)
+	match = matchOf(field)
+	if match["fieldWidthCm"].(float64) != 314.2 || match["fieldHeightCm"].(float64) != 160 {
+		t.Fatalf("场地尺寸保存异常: %+v", match)
+	}
+	locked := call(http.MethodPost, "/api/competition/match/field-lock",
+		`{"fieldLocked":true}`)
+	match = matchOf(locked)
+	if match["fieldLocked"] != true {
+		t.Fatalf("场地锁定状态未持久化: %+v", match)
 	}
 
 	// 2. 双方四名队员签到后应进入 ready
@@ -105,6 +161,46 @@ func TestCompetitionFlow(t *testing.T) {
 	if entry["blueName"] != "海洋先锋队" || entry["blueScore"].(float64) != 3 {
 		t.Fatalf("记录内容异常: %+v", entry)
 	}
+	if entry["videoUrl"] != "/api/vision/recordings/files/match-test.mp4" || entry["videoStatus"] != "saved" {
+		t.Fatalf("比赛记录应包含可回放录像: %+v", entry)
+	}
+	if len(recordingCalls) != 2 || recordingCalls[0] != "POST /recordings" || !strings.HasPrefix(recordingCalls[1], "DELETE /recordings/") {
+		t.Fatalf("比赛开始和结束应自动启停录像: %+v", recordingCalls)
+	}
+}
+
+func TestCompetitionDoesNotStartWhenRecordingCannotStart(t *testing.T) {
+	t.Setenv("FISH_COMPETITION_STATE", filepath.Join(t.TempDir(), "competition.json"))
+	vision := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"message":"当前没有可录制的选手视频帧"}`))
+	}))
+	t.Cleanup(vision.Close)
+	handler := NewHandlerWithVision(hub.New(), testKey(), vision.URL, vision.URL)
+
+	created := httptest.NewRecorder()
+	handler.ServeHTTP(created, httptest.NewRequest(
+		http.MethodPut,
+		"/api/competition/match",
+		strings.NewReader(`{"matchNo":"第 02 场"}`),
+	))
+	started := httptest.NewRecorder()
+	handler.ServeHTTP(started, httptest.NewRequest(
+		http.MethodPost,
+		"/api/competition/match/clock",
+		strings.NewReader(`{"action":"start"}`),
+	))
+	if started.Code != http.StatusBadGateway {
+		t.Fatalf("录像未启动时比赛不应开始，实际 %d %s", started.Code, started.Body.String())
+	}
+	current := httptest.NewRecorder()
+	handler.ServeHTTP(current, httptest.NewRequest(http.MethodGet, "/api/competition/match", nil))
+	var payload map[string]any
+	_ = json.Unmarshal(current.Body.Bytes(), &payload)
+	if payload["running"] != false {
+		t.Fatalf("录像失败后计时器不应运行: %+v", payload)
+	}
 }
 
 // 未登录且开启认证时，裁判接口必须拒绝。
@@ -125,9 +221,117 @@ type assignmentTestConn struct{}
 func (assignmentTestConn) WriteJSON(any) error { return nil }
 func (assignmentTestConn) Close() error        { return nil }
 
+func TestCompetitionPlayerReadinessUsesAssignedOnlineDevice(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "competition.json")
+	t.Setenv("FISH_COMPETITION_STATE", statePath)
+	h := hub.New()
+	conn := assignmentTestConn{}
+	h.Register(hub.Device{ID: "fish-ready", Name: "准备测试鱼", Online: true}, conn)
+	handler := NewHandler(h, testKey())
+
+	call := func(method, path, body string) (int, map[string]any) {
+		t.Helper()
+		request := httptest.NewRequest(method, path, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		var payload map[string]any
+		_ = json.Unmarshal(recorder.Body.Bytes(), &payload)
+		return recorder.Code, payload
+	}
+	player := func(payload map[string]any) map[string]any {
+		t.Helper()
+		match := payload["match"].(map[string]any)
+		blue := match["blue"].(map[string]any)
+		return blue["players"].([]any)[0].(map[string]any)
+	}
+
+	if code, _ := call(http.MethodPut, "/api/competition/match", `{"matchNo":"准备状态测试"}`); code != http.StatusOK {
+		t.Fatalf("建赛失败: %d", code)
+	}
+	if code, _ := call(http.MethodPost, "/api/competition/match/assign", `{"side":"blue","slot":"B1","deviceId":"fish-ready"}`); code != http.StatusOK {
+		t.Fatalf("分配在线设备失败: %d", code)
+	}
+	code, ready := call(http.MethodPost, "/api/competition/match/ready", `{"side":"blue","slot":"B1","deviceId":"fish-ready","ready":true}`)
+	if code != http.StatusOK || player(ready)["ready"] != true || player(ready)["readyDeviceId"] != "fish-ready" {
+		t.Fatalf("选手准备状态未保存: %d %+v", code, ready)
+	}
+
+	reloaded := newCompetitionStore(statePath)
+	if reloaded.Match == nil || !reloaded.Match.Blue.Players[0].Ready {
+		t.Fatalf("准备状态应持久化: %+v", reloaded.Match)
+	}
+
+	h.Remove("fish-ready", conn)
+	code, offline := call(http.MethodGet, "/api/competition/match", "")
+	if code != http.StatusOK || player(offline)["ready"] != false {
+		t.Fatalf("设备掉线后准备状态应自动失效: %d %+v", code, offline)
+	}
+
+	code, rejected := call(http.MethodPost, "/api/competition/match/ready", `{"side":"blue","slot":"B1","deviceId":"fish-ready","ready":true}`)
+	if code != http.StatusConflict {
+		t.Fatalf("离线设备不应允许提交准备: %d %+v", code, rejected)
+	}
+}
+
+func TestCompetitionVisionTrackBindingPersistsAndSwaps(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "competition.json")
+	t.Setenv("FISH_COMPETITION_STATE", statePath)
+	handler := NewHandler(hub.New(), testKey())
+
+	call := func(path, body string) (int, map[string]any) {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		var payload map[string]any
+		_ = json.Unmarshal(recorder.Body.Bytes(), &payload)
+		return recorder.Code, payload
+	}
+	trackFor := func(payload map[string]any, slot string) any {
+		t.Helper()
+		match := payload["match"].(map[string]any)
+		players := match["blue"].(map[string]any)["players"].([]any)
+		for _, raw := range players {
+			player := raw.(map[string]any)
+			if player["slot"] == slot {
+				return player["visionTrackId"]
+			}
+		}
+		return nil
+	}
+
+	if code, _ := call("/api/competition/match", `{"matchNo":"视觉绑定测试"}`); code != http.StatusOK {
+		t.Fatalf("建赛失败: %d", code)
+	}
+	code, first := call("/api/competition/match/vision-bind", `{"side":"blue","slot":"B1","targetTrackId":7}`)
+	if code != http.StatusOK || trackFor(first, "B1") != float64(7) {
+		t.Fatalf("B1 视觉绑定失败: %d %+v", code, first)
+	}
+	_, second := call("/api/competition/match/vision-bind", `{"side":"blue","slot":"B2","targetTrackId":9}`)
+	_, swapped := call("/api/competition/match/vision-bind", `{"side":"blue","slot":"B1","targetTrackId":9}`)
+	if trackFor(swapped, "B1") != float64(9) || trackFor(swapped, "B2") != float64(7) {
+		t.Fatalf("重复 Track 应交换席位绑定: %+v", swapped)
+	}
+	if code, _ := call("/api/competition/match/vision-bind", `{"side":"red","slot":"R1","targetTrackId":9}`); code != http.StatusConflict {
+		t.Fatalf("对方队伍不应抢占已绑定 Track，实际 %d", code)
+	}
+
+	reloaded := newCompetitionStore(statePath)
+	if reloaded.Match == nil || reloaded.Match.Blue.Players[0].VisionTrackID == nil || *reloaded.Match.Blue.Players[0].VisionTrackID != 9 {
+		t.Fatalf("视觉绑定应持久化: %+v", reloaded.Match)
+	}
+	code, unbound := call("/api/competition/match/vision-unbind", `{"side":"blue","slot":"B1"}`)
+	if code != http.StatusOK || trackFor(unbound, "B1") != nil || trackFor(second, "B2") != float64(9) {
+		t.Fatalf("解除视觉绑定失败: %d %+v", code, unbound)
+	}
+}
+
 // 覆盖签到环节的机器鱼绑定与归属：列表、分配、冲突、离线、解除。
 func TestCompetitionDeviceAssignment(t *testing.T) {
-	t.Setenv("FISH_COMPETITION_STATE", filepath.Join(t.TempDir(), "competition.json"))
+	statePath := filepath.Join(t.TempDir(), "competition.json")
+	t.Setenv("FISH_COMPETITION_STATE", statePath)
 	h := hub.New()
 	handler := NewHandler(h, testKey())
 	h.Register(hub.Device{ID: "fish-a", Name: "机器鱼A", Online: true, IP: "192.168.1.10", RSSI: -42, BatteryPercent: 86}, assignmentTestConn{})
@@ -239,5 +443,12 @@ func TestCompetitionDeviceAssignment(t *testing.T) {
 	if code, _ := call(http.MethodPost, "/api/competition/match/assign",
 		`{"side":"blue","slot":"B2","deviceId":"fish-a"}`); code != http.StatusOK {
 		t.Fatalf("重新分配失败: %d", code)
+	}
+
+	// 控制器重启后、设备尚未重新连接时，席位归属仍应作为离线设备返回。
+	reloaded := newCompetitionStore(statePath)
+	offline := (&server{hub: hub.New()}).competitionDevicesLocked(reloaded)["devices"].([]map[string]any)
+	if len(offline) != 1 || offline[0]["deviceId"] != "fish-a" || offline[0]["assignedTo"] != "blue/B2" || offline[0]["online"] != false {
+		t.Fatalf("重启后应保留离线设备归属: %+v", offline)
 	}
 }

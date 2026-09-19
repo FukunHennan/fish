@@ -28,6 +28,17 @@ button{cursor:pointer}
 .nav{display:flex;gap:6px}.nav button{border:1px solid rgba(74,184,239,.16);border-radius:8px;padding:8px 12px;background:#081e34;color:#8fb7ce;font-size:9px}.nav button.active{color:#fff;border-color:rgba(57,216,255,.35);background:rgba(27,96,145,.28)}.nav button.done{color:#9effcf}
 .matchbar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:0 18px;border-bottom:1px solid rgba(70,187,248,.10);background:rgba(5,23,42,.78)}
 .matchbar small{display:block;color:var(--muted);font-size:8px}.matchbar strong{font-size:11px}.teams{font-size:11px}.teams b:first-child{color:#42dcff}.teams b:last-child{color:#ff6d82}.teams span{margin:0 8px;color:#6c8da3}.statusTop{justify-self:end;text-align:right}.statusTop b{font-size:10px;color:#9effcf}
+.matchIdentity{min-width:0}
+.matchNameButton{min-width:0;display:flex;align-items:center;gap:6px;padding:2px 0;border:0;background:transparent;color:#fff;font-family:inherit;text-align:left;cursor:pointer}
+.matchNameButton[hidden]{display:none}
+.matchNameButton strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.matchNameButton span{flex:0 0 auto;padding:2px 5px;border:1px solid rgba(57,216,255,.24);border-radius:999px;color:#7ddfff;font-size:7px}
+.matchNameButton:hover span{border-color:#39d8ff;color:#dffaff}
+.matchNameEditor{display:flex;align-items:center;gap:4px;margin-top:2px}
+.matchNameEditor[hidden]{display:none}
+.matchNameEditor input{width:min(260px,28vw);height:25px;padding:3px 7px;border:1px solid rgba(57,216,255,.36);border-radius:5px;background:#06192b;color:#fff;font-family:inherit;font-size:9px}
+.matchNameEditor button{height:25px;padding:3px 7px;border:1px solid rgba(74,184,239,.25);border-radius:5px;background:#0a2946;color:#dff7ff;font-family:inherit;font-size:8px}
+.matchNameEditor .save{border-color:rgba(65,230,162,.42);background:rgba(16,115,80,.72);color:#caffea}
 .main{min-height:0;padding:10px 12px 12px;overflow:hidden}
 .footer{display:flex;justify-content:space-between;align-items:center;padding:0 12px;border-top:1px solid rgba(70,187,248,.10);color:#6f90a4;font-size:8px}
 .panel{background:linear-gradient(180deg,rgba(10,33,56,.95),rgba(6,24,42,.96));border:1px solid rgba(71,176,235,.17);border-radius:10px;box-shadow:0 12px 30px rgba(0,0,0,.11)}
@@ -49,6 +60,8 @@ button{cursor:pointer}
 .signup{height:100%;display:grid;grid-template-columns:1fr 210px 1fr;gap:10px}
 .teamCard{padding:10px;display:grid;grid-template-rows:auto 1fr;min-height:0}.teamHead{display:flex;justify-content:space-between;align-items:end;padding-bottom:8px;border-bottom:1px solid rgba(70,180,235,.10)}.teamHead h2{font-size:13px;margin:0}.teamHead span{font-size:8px;color:#83a9bf}.teamCard.blue .teamHead h2{color:#42dcff}.teamCard.red .teamHead h2{color:#ff6d82}
 .players{display:grid;align-content:start;gap:7px;padding-top:8px}.player{padding:9px;border:1px dashed rgba(70,180,235,.18);border-radius:8px;background:#081e34}.player.done{border-style:solid;border-color:rgba(65,230,162,.24);background:rgba(7,43,46,.72)}
+.deviceState{display:flex;align-items:center;gap:6px;margin-top:8px;padding:6px 8px;border-radius:6px;font-size:9px;font-weight:800;letter-spacing:.02em}.deviceState::before{content:"";width:8px;height:8px;flex:0 0 8px;border-radius:50%;background:currentColor;box-shadow:0 0 0 3px rgba(255,255,255,.08)}.deviceState.online{color:#9effcf;background:rgba(17,115,79,.26);border:1px solid rgba(65,230,162,.38)}.deviceState.offline{color:#ffb477;background:rgba(132,69,24,.30);border:1px solid rgba(255,171,95,.44)}.deviceState.unassigned{color:#a4b8c4;background:rgba(74,95,108,.25);border:1px solid rgba(145,172,185,.25)}.player.device-online{border-left:4px solid #39dca0}.player.device-offline{border-left:4px solid #ff9e5c}.player.device-unassigned{border-left:4px solid #718a99}
+.signupDeviceSummary{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px;color:#8fb5c7;font-size:9px}.signupDeviceSummary span{padding:3px 6px;border-radius:999px;background:#081e34;border:1px solid rgba(96,160,188,.22)}.signupDeviceSummary .online{color:#9effcf;border-color:rgba(65,230,162,.38);background:rgba(17,115,79,.2)}.signupDeviceSummary .offline{color:#ffb477;border-color:rgba(255,171,95,.42);background:rgba(132,69,24,.22)}.signupDeviceSummary .unassigned{color:#b5c6ce}
 .playerTop{display:flex;justify-content:space-between}.playerTop b{font-size:10px}.status{font-size:8px;padding:4px 6px;border-radius:999px;background:#0b2a44;color:#8fb7cc}.done .status{color:#9effcf;background:rgba(18,84,60,.25)}
 .playerMeta{display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-top:7px}.meta{padding:5px 6px;border-radius:6px;background:#06192b}.meta span{display:block;color:#779eb5;font-size:7px}.meta strong{font-size:8px}.playerTime{margin-top:6px;color:#75a4bb;font-size:7px}
 .centerAction{display:grid;place-items:center}.actionBox{width:100%;padding:12px;text-align:center;border:1px solid rgba(73,190,243,.18);border-radius:10px;background:linear-gradient(180deg,rgba(10,37,63,.96),rgba(6,25,44,.96))}
@@ -58,7 +71,7 @@ button{cursor:pointer}
 .modalHead{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.modalHead h2{font-size:14px;margin:0}.close{border:0;background:transparent;color:#8fb6cc;font-size:18px}.selectGrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.selectGroup{padding:8px;border:1px solid rgba(70,180,235,.14);border-radius:8px;background:#081e34}.selectGroup h3{font-size:10px;margin:0 0 6px}.selectGroup.blue h3{color:#42dcff}.selectGroup.red h3{color:#ff6d82}.selectPlayer{width:100%;display:grid;grid-template-columns:1fr auto;align-items:center;text-align:left;padding:8px;margin-top:5px;border:1px solid rgba(70,180,235,.14);border-radius:7px;background:#06192b;color:#fff}.selectPlayer:disabled{opacity:.35}.selectPlayer b{font-size:9px}.selectPlayer small{display:block;color:#7fa7bd;font-size:7px}.confirmCard{display:none}.confirmCard.show{display:block}.identity{display:grid;grid-template-columns:70px 1fr;gap:10px;align-items:center;padding:10px;border-radius:8px;background:#081e34}.avatar{width:60px;height:60px;border-radius:50%;display:grid;place-items:center;background:#0f466e;color:#8cecff;font-size:22px;font-weight:900}.identity h3{font-size:13px;margin:0}.identity p{font-size:8px;color:#83a9bf}.confirmMeta{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:8px}.confirmActions{display:flex;justify-content:flex-end;gap:6px;margin-top:10px}
 
 /* calibration */
-.calibration{height:100%;display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:10px}.viewCard{padding:9px;display:grid;grid-template-rows:38px 1fr 42px;gap:7px;min-height:0}.viewHead,.viewFoot{display:flex;justify-content:space-between;align-items:center}.viewHead h2{font-size:13px;margin:0}.badges{display:flex;gap:5px}.badge{padding:4px 6px;border-radius:5px;background:#081e34;font-size:7px;color:#b9eaff}.axisX,.axisY{position:absolute;background:#65ffd0;z-index:6}.axisX{left:10%;top:11%;width:20%;height:2px}.axisY{left:8.6%;top:14%;height:20%;width:2px}.crop{position:absolute;left:6%;right:6%;top:7%;bottom:7%;border:2px solid #38ddff;box-shadow:0 0 0 100em rgba(2,12,23,.20);z-index:7}.side{display:grid;grid-template-rows:auto auto auto auto 1fr auto;gap:7px}.card{padding:8px}.card h3{font-size:10px;margin:0 0 5px}.formrow{display:grid;grid-template-columns:80px 1fr;gap:6px;align-items:center;margin:5px 0}.formrow label{font-size:8px;color:#9bb9cb}.formrow select,.formrow input[type=number]{width:100%;height:25px;background:#06192b;color:white;border:1px solid rgba(73,176,229,.28);border-radius:5px;font-size:8px;padding:3px 5px}.formrow input[type=range]{width:100%}.statuslist{display:grid;gap:4px}.statusitem{display:flex;justify-content:space-between;padding:6px;border-radius:6px;background:#081e34;font-size:8px}.statusitem b{color:#9effcf}.lockBox{padding:9px;border:1px solid rgba(65,230,162,.24);background:linear-gradient(180deg,rgba(15,74,59,.32),rgba(7,28,42,.90));border-radius:10px}.lockBox h3{font-size:10px;margin:0}.lockBox p{font-size:7px;color:#85aebe}
+.calibration{height:100%;display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:10px}.viewCard{padding:9px;display:grid;grid-template-rows:1fr 42px;gap:7px;min-height:0}.viewHead,.viewFoot{display:flex;justify-content:space-between;align-items:center}.viewHead h2{font-size:13px;margin:0}.badges{display:flex;gap:5px}.badge{padding:4px 6px;border-radius:5px;background:#081e34;font-size:7px;color:#b9eaff}.axisX,.axisY{position:absolute;background:#65ffd0;z-index:6}.axisX{left:10%;top:11%;width:20%;height:2px}.axisY{left:8.6%;top:14%;height:20%;width:2px}.crop{position:absolute;left:6%;right:6%;top:7%;bottom:7%;border:2px solid #38ddff;box-shadow:0 0 0 100em rgba(2,12,23,.20);z-index:7}.side{display:grid;grid-template-rows:auto auto auto auto 1fr auto;gap:7px}.card{padding:8px}.card h3{font-size:10px;margin:0 0 5px}.formrow{display:grid;grid-template-columns:80px 1fr;gap:6px;align-items:center;margin:5px 0}.formrow label{font-size:8px;color:#9bb9cb}.formrow select,.formrow input[type=number]{width:100%;height:25px;background:#06192b;color:white;border:1px solid rgba(73,176,229,.28);border-radius:5px;font-size:8px;padding:3px 5px}.formrow input[type=range]{width:100%}.statuslist{display:grid;gap:4px}.statusitem{display:flex;justify-content:space-between;padding:6px;border-radius:6px;background:#081e34;font-size:8px}.statusitem b{color:#9effcf}.lockBox{padding:9px;border:1px solid rgba(65,230,162,.24);background:linear-gradient(180deg,rgba(15,74,59,.32),rgba(7,28,42,.90));border-radius:10px}.lockBox h3{font-size:10px;margin:0}.lockBox p{font-size:7px;color:#85aebe}
 
 /* match */
 .match{height:100%;display:grid;grid-template-columns:minmax(0,1fr) 360px;grid-template-rows:70px 1fr 58px;gap:8px}.scorebar{grid-column:1/-1;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:8px 12px}.sideScore{display:flex;align-items:center;gap:9px}.sideScore.red{justify-content:flex-end}.sideScore span{font-size:9px;color:#8cafc5}.sideScore b{font-size:34px}.clock{text-align:center}.clock strong{display:block;font-size:26px}.clock small{font-size:8px;color:#83aac1}.arenaCard{padding:8px;display:grid;grid-template-rows:30px 1fr 28px;gap:5px;min-height:0}.arenaHead,.arenaFoot{display:flex;justify-content:space-between;align-items:center}.arenaHead h2{font-size:11px;margin:0}.arenaHead span,.arenaFoot{font-size:8px;color:#8eb4c8}.scoreSidePanel{display:grid;grid-template-rows:auto auto 1fr;gap:6px}.teamQuick{padding:8px}.teamQuickHead{display:flex;justify-content:space-between}.teamQuick h3{font-size:10px;margin:0}.teamQuick b{font-size:22px}.quickBtns{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-top:6px}.quickBtns button{padding:7px 2px;border-radius:6px;border:1px solid rgba(74,184,239,.22);font-size:8px;font-weight:800}.goalBtn{background:#0d568e;color:#fff}.assistBtn{background:#0d654b;color:#fff}.outBtn{background:#6e2030;color:#fff}.events{padding:8px;display:grid;grid-template-rows:auto 1fr;gap:5px;min-height:0}.eventList{display:grid;align-content:start;gap:3px;overflow:auto}.event{display:grid;grid-template-columns:39% 1fr 12%;gap:4px;padding:5px;border-left:3px solid #2ce0ff;border-radius:5px;background:#081e34;font-size:7px}.event.red{border-left-color:#ff6479}.event small{color:#7ca8c0}.event b{text-align:right}.bottom{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:8px}.health{padding:7px;display:grid;grid-template-columns:repeat(4,1fr);gap:5px}.h{padding:6px;border-radius:6px;background:#081e34}.h span{display:block;color:#83a9bf;font-size:7px}.h b{font-size:8px}.controls{padding:7px;display:grid;grid-template-columns:repeat(3,1fr);gap:5px}
@@ -83,7 +96,7 @@ button,.btn,.bigBtn,select,input{font-size:11px}
 .teamCard{min-height:0;overflow:hidden;padding:13px}.players{overflow:auto;padding-right:3px;gap:9px}.teamHead h2{font-size:15px}.teamHead span{font-size:10px}
 .player{padding:12px}.playerTop b{font-size:12px}.status{font-size:10px}.meta span,.playerTime{font-size:9px}.meta strong{font-size:10px}.playerMeta{gap:7px;margin-top:9px}.meta{padding:7px}
 .actionBox{padding:18px}.actionBox h3{font-size:15px}.actionBox p{font-size:10px;margin:8px 0 14px}.bigBtn{min-height:40px;font-size:12px}.nextBtn{min-height:36px}
-.calibration{grid-template-columns:minmax(640px,1fr) 390px;gap:12px;overflow:hidden}.viewCard{grid-template-rows:42px minmax(340px,1fr) 42px;padding:11px}.viewHead h2{font-size:14px}.badge{font-size:9px;padding:5px 7px}
+.calibration{grid-template-columns:minmax(640px,1fr) 390px;gap:12px;overflow:hidden}.viewCard{grid-template-rows:minmax(340px,1fr) 42px;padding:11px}.viewHead h2{font-size:14px}.badge{font-size:9px;padding:5px 7px}
 .side{min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding-right:3px}.card{padding:10px;flex:0 0 auto}.card h3{font-size:12px;margin-bottom:8px}.formrow{grid-template-columns:92px minmax(0,1fr);gap:8px;margin:7px 0}.formrow label{font-size:10px}.formrow select,.formrow input[type=number]{height:32px;font-size:10px;padding:5px 7px}.formrow input[type=range]{min-width:0}.statusitem{padding:8px;font-size:10px}.lockBox{flex:0 0 auto;padding:11px;position:sticky;bottom:0;z-index:4}.lockBox h3{font-size:12px}.lockBox p{font-size:9px;line-height:1.45}.twoBtns{display:grid;grid-template-columns:1fr 1fr;gap:6px}.inlineStatus{display:flex;justify-content:space-between;align-items:center;padding:7px 8px;border-radius:6px;background:#081e34;font-size:10px}.inlineStatus span{color:#86aabe}.inlineStatus b{color:#9effcf}
 .match{grid-template-columns:minmax(640px,1fr) 390px;grid-template-rows:82px minmax(0,1fr) 66px;gap:10px;overflow:hidden}.scorebar{padding:9px 16px}.sideScore b{font-size:38px}.sideScore span{font-size:11px}.clock strong{font-size:30px}.clock small{font-size:10px}.arenaCard{grid-template-rows:34px minmax(320px,1fr) 30px;padding:10px}.arenaHead h2{font-size:13px}.arenaHead span,.arenaFoot{font-size:9px}.scoreSidePanel{min-height:0;overflow-y:auto;grid-template-rows:auto auto minmax(180px,1fr);gap:8px;padding-right:3px}.teamQuick{padding:10px}.teamQuick h3{font-size:12px}.teamQuick b{font-size:24px}.quickBtns{gap:6px}.quickBtns button{min-height:48px;font-size:10px;padding:8px 3px}.events{padding:10px}.events h3{font-size:12px;margin:0}.event{grid-template-columns:38% 1fr 12%;padding:7px;font-size:9px}.health,.controls{padding:9px}.h{padding:8px}.h span{font-size:9px}.h b{font-size:10px}.controls .btn{min-height:42px;font-size:11px}
 .records{grid-template-columns:350px minmax(0,1fr);gap:10px;overflow:hidden}.history{padding:11px;min-height:0}.historyHead h2{font-size:14px}.historyHead span{font-size:10px}.filters{grid-template-columns:minmax(0,1fr) 110px;gap:7px}.filters input,.filters select{height:34px;font-size:10px}.matchList{min-height:0;padding-right:3px}.matchItem{padding:10px}.matchTop b{font-size:11px}.matchTop span{font-size:9px}.matchTeams{font-size:10px;align-items:center}.matchTeams strong{font-size:15px}.detail{grid-template-rows:112px minmax(0,1fr);min-height:0}.hero{padding:12px 16px}.teamInfo h2{font-size:14px}.teamInfo p{font-size:10px}.score b{font-size:44px}.winner{font-size:10px}.detailBody{grid-template-columns:320px minmax(0,1fr);gap:10px;min-height:0;overflow:hidden}.summary{padding:10px;overflow-y:auto}.item{padding:9px}.item span{font-size:9px}.item b{font-size:11px}.teamBreak{padding:9px}.teamBreak h4{font-size:11px}.line{font-size:9px;padding:5px 0}.timeline{padding:10px;overflow:hidden}.table{min-height:0;overflow:auto}.tr{min-width:640px;grid-template-columns:100px 120px 100px minmax(220px,1fr) 70px;padding:8px;font-size:10px}.tr.head{font-size:9px;position:sticky;top:0;z-index:2}
@@ -191,7 +204,7 @@ select,.formrow input[type=number],.filters input,.filters select,.recordPath{he
   gap:10px;
   overflow:hidden;
 }
-.viewCard{grid-template-rows:38px minmax(300px,1fr) 36px;padding:10px}
+.viewCard{grid-template-rows:minmax(300px,1fr) 36px;padding:10px}
 .viewHead h2{font-size:13px}
 .badge{font-size:8px;padding:4px 7px}
 .side{gap:7px;padding-right:2px}
@@ -718,7 +731,7 @@ button,.btn,.bigBtn,select,input{font-size:9px}
 }
 .viewCard{
   min-width:0;
-  grid-template-rows:34px minmax(260px,1fr) 32px;
+  grid-template-rows:minmax(260px,1fr) 32px;
   padding:9px;
 }
 .viewHead{min-width:0;gap:8px}
@@ -746,6 +759,14 @@ button,.btn,.bigBtn,select,input{font-size:9px}
   font-size:8px;
 }
 .formrow input[type=range]{min-width:0}
+.fieldDimensionCard h3{display:flex;align-items:center;justify-content:space-between}
+.fieldDimensionCard .unitBadge{padding:2px 6px;border:1px solid rgba(65,226,201,.24);border-radius:999px;background:rgba(9,75,79,.46);color:#8fffe3;font-size:.78em;font-weight:900;text-transform:none}
+.numberWithUnit{position:relative;min-width:0}
+.numberWithUnit input{padding-right:30px!important}
+.numberWithUnit span{position:absolute;top:50%;right:8px;color:#7ec9d4;font-size:8px;font-weight:900;pointer-events:none;transform:translateY(-50%)}
+.fieldDimensionActions{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center;margin-top:7px}
+.fieldDimensionActions small{min-width:0;overflow:hidden;color:#75a7bd;font-size:7px;white-space:nowrap;text-overflow:ellipsis}
+.fieldDimensionActions .btn{padding:6px 10px;white-space:nowrap}
 .inlineStatus,.statusitem{font-size:8px;padding:6px}
 .twoBtns{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
 .lockBox{padding:9px}
@@ -1853,112 +1874,404 @@ input:focus,select:focus{
 }
 
 
-/* ===== referee v13: player-owned device confirmation ===== */
-.deviceConfirmCard{
-  padding:9px;
+/* ===== referee signup: compact action rail + balanced team columns ===== */
+.signup{
+  grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+  grid-template-rows:78px minmax(0,1fr) !important;
+  gap:8px !important;
+}
+.signup .teamCard.blue{grid-column:1;grid-row:2}
+.signup .teamCard.red{grid-column:2;grid-row:2}
+.signup .centerAction{
+  grid-column:1/-1;
+  grid-row:1;
+  display:block;
+  min-width:0;
+}
+.signup .actionBox{
+  position:relative;
+  height:100%;
+  padding:10px 12px;
   display:grid;
-  gap:7px;
-  border-color:rgba(53,199,255,.24);
+  grid-template-columns:auto minmax(0,1fr) 190px 150px;
+  align-items:center;
+  gap:11px;
+  overflow:hidden;
+  text-align:left;
 }
-.deviceConfirmHead{
-  display:flex;
-  align-items:flex-start;
-  justify-content:space-between;
-  gap:8px;
-}
-.deviceConfirmHead h3{
+.signup .actionIcon{
+  width:42px;
+  height:42px;
   margin:0;
+  font-size:18px;
+  color:#8ff2c9;
+  border-color:rgba(63,226,174,.36);
+  background:rgba(14,101,73,.25);
+}
+.signup .actionCopy{min-width:0}
+.signup .actionCopy h3{font-size:12px;margin:0;color:#ecfbff}
+.signup .actionCopy p{
+  margin:4px 0 0;
+  overflow:hidden;
+  color:#7da9bf;
+  font-size:8px;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.signup .bigBtn,
+.signup .nextBtn{
+  width:100%;
+  min-height:38px;
+  margin:0;
+  padding:7px 10px;
   font-size:10px;
 }
-.deviceConfirmHead p{
-  margin:2px 0 0;
-  color:#73a7c2;
+@media(max-width:900px){
+  .signup{grid-template-rows:66px minmax(0,1fr) !important}
+  .signup .actionBox{
+    padding:7px 8px;
+    grid-template-columns:34px minmax(0,1fr) 146px 112px;
+    gap:7px;
+  }
+  .signup .actionIcon{width:32px;height:32px;font-size:14px}
+  .signup .actionCopy h3{font-size:9px}
+  .signup .actionCopy p{font-size:6px}
+  .signup .bigBtn,
+  .signup .nextBtn{min-height:32px;padding:5px 6px;font-size:8px}
+  .signup .teamCard{padding:8px}
+}
+
+/* ===== referee match: compact video + live device overview ===== */
+.match{
+  grid-template-columns:minmax(190px,220px) minmax(420px,1fr) minmax(290px,324px) !important;
+}
+.match .scorebar,
+.match .recordStrip,
+.match .bottom{
+  grid-column:1/-1;
+}
+.deviceOverview{
+  grid-column:1;
+  grid-row:2;
+  min-width:0;
+  min-height:0;
+  padding:10px;
+  display:grid;
+  grid-template-rows:auto minmax(0,1fr) auto;
+  gap:9px;
+  overflow:hidden;
+}
+.match .arenaCard{
+  grid-column:2;
+  grid-row:2;
+}
+.match .scoreSidePanel{
+  grid-column:3;
+  grid-row:2;
+}
+.deviceOverviewHead{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  padding-bottom:8px;
+  border-bottom:1px solid rgba(71,190,236,.14);
+}
+.deviceOverviewHead span{
+  display:block;
+  color:#4ccfff;
   font-size:7px;
+  font-weight:900;
+  letter-spacing:.13em;
 }
-.deviceConfirmHead>b{
-  padding:4px 7px;
-  border:1px solid rgba(57,216,255,.22);
+.deviceOverviewHead h2{
+  margin:2px 0 0;
+  color:#ecfbff;
+  font-size:12px;
+}
+.deviceOverviewHead>b{
+  padding:4px 8px;
+  border:1px solid rgba(63,226,174,.32);
   border-radius:999px;
-  background:rgba(6,51,82,.65);
-  color:#bdeeff;
+  background:rgba(14,101,73,.28);
+  color:#8ff2c9;
   font-size:8px;
+  white-space:nowrap;
 }
-.deviceConfirmList{
+.deviceOverviewList{
+  min-height:0;
+  display:grid;
+  align-content:start;
+  gap:7px;
+  overflow-y:auto;
+  padding-right:2px;
+}
+.deviceOverviewEmpty{
+  min-height:112px;
+  display:grid;
+  place-content:center;
+  gap:5px;
+  padding:14px;
+  border:1px dashed rgba(91,181,220,.22);
+  border-radius:9px;
+  color:#759db3;
+  text-align:center;
+}
+.deviceOverviewEmpty b{font-size:9px;color:#a9c9d8}
+.deviceOverviewEmpty span{font-size:7px;line-height:1.5}
+.onlineDeviceCard{
+  min-width:0;
+  padding:9px;
+  border:1px solid rgba(53,199,255,.19);
+  border-left:3px solid #36dda9;
+  border-radius:9px;
+  background:linear-gradient(135deg,rgba(8,46,77,.86),rgba(5,27,50,.9));
+  box-shadow:inset 0 0 22px rgba(29,161,219,.04);
+}
+.onlineDeviceIdentity{
+  min-width:0;
+  display:grid;
+  grid-template-columns:auto minmax(0,1fr) auto;
+  align-items:center;
+  gap:7px;
+}
+.onlineDeviceIdentity>i{
+  width:7px;
+  height:7px;
+  border-radius:50%;
+  background:#46edb4;
+  box-shadow:0 0 10px rgba(70,237,180,.72);
+}
+.onlineDeviceIdentity div{min-width:0}
+.onlineDeviceIdentity strong,
+.onlineDeviceIdentity small{
+  display:block;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.onlineDeviceIdentity strong{color:#ecfbff;font-size:9px}
+.onlineDeviceIdentity small{margin-top:2px;color:#6f9eb8;font-size:7px}
+.deviceSlotBadge{
+  min-width:27px;
+  padding:4px 5px;
+  border-radius:5px;
+  background:rgba(19,115,154,.34);
+  color:#82e8ff;
+  font-size:7px;
+  text-align:center;
+}
+.deviceSlotBadge.red{background:rgba(135,38,58,.3);color:#ff9faf}
+.onlineDeviceMetrics{
+  margin-top:8px;
   display:grid;
   grid-template-columns:1fr 1fr;
   gap:5px;
 }
-.deviceConfirmRow{
+.onlineDeviceMetric{
   min-width:0;
-  display:grid;
-  grid-template-columns:31px minmax(0,1fr) auto;
-  align-items:center;
-  gap:5px;
   padding:6px;
-  border:1px solid rgba(72,178,228,.12);
-  border-radius:7px;
-  background:rgba(5,28,52,.68);
+  border-radius:6px;
+  background:rgba(2,20,38,.62);
 }
-.deviceConfirmRow.blue{border-left:3px solid #39cfff}
-.deviceConfirmRow.red{border-left:3px solid #ff6179}
-.deviceSlot{
+.onlineDeviceMetric.controller{grid-column:1/-1}
+.onlineDeviceMetric span{
+  display:block;
+  color:#729eb6;
+  font-size:7px;
+}
+.onlineDeviceMetric b{
+  display:block;
+  margin-top:2px;
+  overflow:hidden;
+  color:#dff8ff;
+  font-size:8px;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.onlineDeviceMetric.good b{color:#8ff2c9}
+.onlineDeviceMetric.warn b{color:#ffd68a}
+.deviceOverview>footer{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  color:#638ca4;
+  font-size:7px;
+}
+.deviceOverview>footer i{
+  width:5px;
+  height:5px;
+  border-radius:50%;
+  background:#36dda9;
+}
+@media(max-width:1280px){
+  .match{
+    grid-template-columns:200px minmax(400px,1fr) 300px !important;
+  }
+  .deviceOverview{padding:8px}
+  .onlineDeviceCard{padding:7px}
+}
+@media(max-width:900px){
+  .match{
+    grid-template-columns:150px minmax(0,1fr) 220px !important;
+  }
+  .deviceOverview{
+    padding:7px;
+    gap:6px;
+  }
+  .deviceOverviewHead{gap:5px;padding-bottom:6px}
+  .deviceOverviewHead span{display:none}
+  .deviceOverviewHead h2{font-size:10px}
+  .deviceOverviewHead>b{padding:3px 6px;font-size:7px}
+  .onlineDeviceCard{padding:6px}
+  .onlineDeviceIdentity{gap:5px}
+  .onlineDeviceIdentity strong{font-size:8px}
+  .onlineDeviceMetrics{grid-template-columns:1fr;gap:3px;margin-top:6px}
+  .onlineDeviceMetric,
+  .onlineDeviceMetric.controller{grid-column:auto;padding:4px 5px}
+  .deviceOverview>footer{font-size:6px}
+  .scoreSidePanel{padding-right:0}
+  .teamQuick{padding:6px}
+  .quickBtns{gap:3px}
+  .quickBtns button{min-height:36px;font-size:7px;padding:4px 1px}
+  .events{padding:7px}
+  .event{font-size:7px;padding:5px}
+}
+
+.arenaSlot{
+  min-width:0;
+  min-height:0;
   display:grid;
   place-items:center;
-  width:29px;
-  height:29px;
-  border-radius:6px;
-  background:#0a3456;
-  color:#8cecff;
-  font-size:8px;
-  font-weight:900;
-}
-.deviceConfirmRow.red .deviceSlot{
-  background:#4a2130;
-  color:#ffb1bd;
-}
-.devicePerson{
-  min-width:0;
-}
-.devicePerson b,
-.devicePerson small{
-  display:block;
   overflow:hidden;
-  white-space:nowrap;
-  text-overflow:ellipsis;
 }
-.devicePerson b{font-size:8px}
-.devicePerson small{margin-top:1px;color:#739fb7;font-size:7px}
-.deviceResult{
+#refereeLiveStage{
+  width:100%;
+  height:100%;
+  max-width:100%;
+  max-height:100%;
+}
+.cropEditor{
+  position:absolute;
+  z-index:8;
+  pointer-events:none;
+}
+.cropSelection{
+  position:absolute;
+  border:2px solid #35f0ff;
+  border-radius:3px;
+  box-shadow:0 0 0 9999px rgba(1,8,16,.42),0 0 18px rgba(53,240,255,.45);
+  pointer-events:none;
+}
+.cropSelection::before{
+  content:"有效区 · 选手画面";
+  position:absolute;
+  left:7px;
+  top:7px;
+  padding:3px 6px;
+  border-radius:4px;
+  background:rgba(2,28,47,.86);
+  color:#dffcff;
+  font-size:9px;
+  font-weight:800;
+  white-space:nowrap;
+}
+.fieldRulerCanvas{position:absolute;inset:0;z-index:1;width:100%;height:100%;pointer-events:none}
+.cropHandle{
+  position:absolute;
+  width:16px;
+  height:16px;
+  border:2px solid #eaffff;
+  border-radius:50%;
+  background:#18cce8;
+  box-shadow:0 0 0 3px rgba(5,28,47,.72),0 0 12px rgba(53,240,255,.7);
+  pointer-events:auto;
+  touch-action:none;
+}
+.cropHandle[data-corner="nw"]{left:0;top:0;translate:-50% -50%;cursor:nwse-resize}
+.cropHandle[data-corner="ne"]{right:0;top:0;translate:50% -50%;cursor:nesw-resize}
+.cropHandle[data-corner="sw"]{left:0;bottom:0;translate:-50% 50%;cursor:nesw-resize}
+.cropHandle[data-corner="se"]{right:0;bottom:0;translate:50% 50%;cursor:nwse-resize}
+.cropHint{margin:0 0 7px;color:#81a9bf;font-size:9px;line-height:1.5}
+.cropActions{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:7px}
+.cropActions .btn{min-width:0;padding-inline:4px}
+.transformDivider{height:1px;margin:10px 0;background:rgba(74,186,224,.2)}
+.rotationHead{display:flex;align-items:center;justify-content:space-between;gap:8px;color:#8eb4c7;font-size:9px}
+.rotationHead b{color:#aefbe3;font-size:10px}
+.rotationFields{display:grid;grid-template-columns:minmax(0,1fr) 72px;gap:6px;align-items:center;margin-top:6px}
+.rotationFields input[type="number"]{width:100%;min-width:0}
+.rotationActions{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:6px}
+.rotationActions .btn{min-width:0;padding-inline:4px}
+.visionFeaturePanel{display:grid;gap:6px;margin-top:8px}
+.visionFeaturePanel>header{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.visionFeaturePanel>header span{color:#84aec5;font-size:8px;font-weight:800;letter-spacing:.06em}
+.visionFeaturePanel>header small{color:#5f8da7;font-size:7px}
+.visionSwitchGrid{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+.visionSwitch{
+  min-width:0;
+  min-height:44px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:6px;
+  padding:7px 8px;
+  border:1px solid rgba(73,180,232,.17);
+  border-radius:7px;
+  background:linear-gradient(180deg,rgba(7,42,72,.78),rgba(4,27,51,.82));
+  color:#c8ebf7;
+  text-align:left;
+  cursor:pointer;
+}
+.visionSwitch:first-child{grid-column:1/-1}
+.visionSwitch>span{min-width:0;display:grid;gap:2px}
+.visionSwitch b{font-size:9px}
+.visionSwitch small{overflow:hidden;color:#6f9db6;font-size:7px;white-space:nowrap;text-overflow:ellipsis}
+.visionSwitch em{
+  flex:0 0 auto;
+  min-width:35px;
   padding:3px 5px;
   border-radius:999px;
-  background:#0a2d49;
-  color:#87abc0;
+  background:rgba(80,115,137,.2);
+  color:#779cb1;
   font-size:7px;
-  white-space:nowrap;
+  font-style:normal;
+  font-weight:900;
+  text-align:center;
 }
-.deviceConfirmRow.testing .deviceResult{
-  color:#ffe19a;
-  background:rgba(105,76,25,.34);
-}
-.deviceConfirmRow.ok{
-  border-color:rgba(65,230,162,.22);
-}
-.deviceConfirmRow.ok .deviceResult{
-  color:#9effcb;
-  background:rgba(20,104,72,.32);
-}
-.deviceConfirmRow.fault{
-  border-color:rgba(255,100,121,.32);
-}
-.deviceConfirmRow.fault .deviceResult{
-  color:#ffb4bf;
-  background:rgba(111,28,45,.38);
-}
-#openDeviceTestBtn{
-  width:100%;
-}
+.visionSwitch.active{border-color:rgba(52,228,181,.34);background:linear-gradient(180deg,rgba(8,78,78,.72),rgba(4,39,62,.84));box-shadow:inset 0 0 16px rgba(38,224,185,.045)}
+.visionSwitch.active b{color:#ddfff4}
+.visionSwitch.active em{background:rgba(33,202,151,.2);color:#82f5cc}
+.visionSwitch:disabled{cursor:not-allowed;opacity:.45}
+.visionOverlayCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:6;pointer-events:none}
+.trackingPathCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:7;pointer-events:none}
+.trackingPathCanvas.active{pointer-events:auto;cursor:crosshair}
+.trackingPanel{display:grid;gap:7px;margin-top:9px;padding-top:9px;border-top:1px solid rgba(74,186,224,.2)}
+.trackingPanel[hidden]{display:none}
+.trackingPanelHead{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.trackingPanelHead strong{color:#dff8ff;font-size:10px}
+.trackingPanelHead small{color:#6f9db6;font-size:8px}
+.trackingGrid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.trackingGrid label{display:grid;gap:3px;color:#84aec5;font-size:8px}
+.trackingGrid select{min-width:0;width:100%}
+.trackingActions{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+.trackingActions .btn{min-width:0;padding-inline:4px}
+.trackingCalibrate{grid-column:1/-1}
+.trackingStatus{margin:0;color:#7fa9bd;font-size:8px;line-height:1.45}
+.trackingStatus.good{color:#82f5cc}.trackingStatus.warn{color:#ffd27a}.trackingStatus.error{color:#ff9f9f}
 .side{
   grid-template-rows:auto auto auto auto auto auto auto !important;
+}
+
+/* Match recording is automatic; the hidden service strip no longer consumes a row. */
+.match{
+  grid-template-rows:58px minmax(180px,1fr) 52px !important;
+}
+.match .bottom{
+  grid-row:3 !important;
+}
+@media (max-height:620px){
+  .match{grid-template-rows:48px minmax(125px,1fr) 44px !important}
+  .match .bottom{height:44px}
 }
 
 </style>
@@ -1968,60 +2281,54 @@ input:focus,select:focus{
 <header class="topbar">
  <div class="brand"><span class="logo"></span><div><b><i>FISH</i> <span>CONTROL</span></b><small>赛事裁判工作台 · REFEREE TERMINAL</small></div></div>
  <nav class="nav">
-  <button class="active" data-page="signup">1 签到</button>
+  <button class="active" data-page="signup">1 选手与设备</button>
   <button data-page="calibration">2 场地调整</button>
   <button data-page="match">3 比赛</button>
   <button data-page="records">4 比赛记录</button>
  </nav>
 </header>
 <section class="matchbar">
- <div><small>当前比赛</small><strong>第 08 场 · 学生组 · A 赛场</strong></div>
- <div class="teams"><b>海洋先锋队</b><span>VS</span><b>深海动力队</b></div>
- <div class="statusTop"><small>当前状态</small><b id="globalState">签到中</b></div>
+ <div class="matchIdentity"><small>当前比赛</small><button class="matchNameButton" id="currentMatchEdit" type="button" aria-label="编辑赛事名称"><strong id="currentMatchSummary">等待读取真实比赛</strong><span>编辑名称</span></button><div class="matchNameEditor" id="matchNameEditor" hidden><input id="matchNameInput" maxlength="80" aria-label="赛事名称"><button class="save" id="matchNameSave" type="button">保存</button><button id="matchNameCancel" type="button">取消</button></div></div>
+ <div class="teams"><b id="currentBlueTeam">蓝队</b><span>VS</span><b id="currentRedTeam">红队</b></div>
+ <div class="statusTop"><small>当前状态</small><b id="globalState">等待服务器</b></div>
 </section>
 
 <main class="main">
  <section id="signup" class="page signup">
-  <section class="teamCard blue panel"><div class="teamHead"><h2>蓝队 · 海洋先锋队</h2><span>B1 / B2</span></div><div class="players" id="bluePlayers"></div></section>
-  <section class="centerAction"><div class="actionBox"><div class="actionIcon">＋</div><h3>选手签到</h3><p>由裁判指定本次签到人员</p><button class="bigBtn" id="openSignup">+ 选手签到</button><button class="btn good nextBtn" id="signupNext" disabled>签到未完成</button></div></section>
-  <section class="teamCard red panel"><div class="teamHead"><h2>红队 · 深海动力队</h2><span>R1 / R2</span></div><div class="players" id="redPlayers"></div></section>
+  <section class="teamCard blue panel"><div class="teamHead"><h2>蓝队 · 等待账号数据</h2><span>B1 / B2</span></div><div class="players" id="bluePlayers"></div></section>
+  <section class="centerAction"><div class="actionBox"><div class="actionIcon">✓</div><div class="actionCopy"><h3>正在读取选手账号</h3><p>账号和机器鱼归属均以服务器数据为准</p><div class="signupDeviceSummary" id="signupDeviceSummary"><span>设备状态读取中</span></div></div><button class="bigBtn" id="openSignup">设备管理</button><button class="btn good nextBtn" id="signupNext" disabled>等待账号数据</button></div></section>
+  <section class="teamCard red panel"><div class="teamHead"><h2>红队 · 等待账号数据</h2><span>R1 / R2</span></div><div class="players" id="redPlayers"></div></section>
  </section>
 
  <section id="calibration" class="page calibration hidden">
-  <section class="viewCard panel"><div class="viewHead"><h2>实时场地画面</h2><div class="badges"><span class="badge">LIVE</span><span class="badge" id="resBadge">1920 × 1080</span><span class="badge" id="fpsBadge">30 FPS</span></div></div>
-   <div class="arena" id="refereeLiveStage" aria-label="原始摄像头画面"></div>
-   <div class="viewFoot"><span class="badge">原始摄像头画面 · 无图像叠加</span><button class="btn" id="snapshotBtn">保存截图</button></div>
+  <section class="viewCard panel">
+   <div class="arenaSlot"><div class="arena" id="refereeLiveStage" aria-label="裁判完整相机画面与有效区"><canvas class="visionOverlayCanvas" id="visionOverlayCanvas" aria-hidden="true"></canvas><canvas class="trackingPathCanvas" id="trackingPathCanvas" aria-hidden="true"></canvas><div class="cropEditor" id="cropEditor" aria-label="选手有效画面区域"><div class="cropSelection" id="cropSelection"><canvas class="fieldRulerCanvas" id="fieldRulerCanvas" aria-hidden="true"></canvas><i class="cropHandle" data-corner="nw" aria-label="拖动左上角"></i><i class="cropHandle" data-corner="ne" aria-label="拖动右上角"></i><i class="cropHandle" data-corner="sw" aria-label="拖动左下角"></i><i class="cropHandle" data-corner="se" aria-label="拖动右下角"></i></div></div></div></div>
+   <div class="viewFoot"><span class="badge">裁判端完整实时画面</span></div>
   </section>
   <aside class="side">
-   <section class="card panel" id="refereeCameraPanel" data-referee-video-controls><h3>摄像头与视觉</h3><div class="formrow"><label>视频设备</label><select data-video-camera><option value="">正在读取真实摄像头…</option></select></div><button class="btn wide good" type="button" data-video-action>启动真实视频</button><button class="btn wide" type="button" data-vision-processing-action>启动视觉识别</button><div class="inlineStatus"><span>识别设备</span><b data-vision-processing-status>严格 CUDA · 未启动</b></div><div class="formrow"><label>分辨率</label><select id="resolution"><option>1280 × 720</option><option selected>1920 × 1080</option><option>2600 × 2160</option></select></div><div class="formrow"><label>帧率</label><select id="fpsSelect"><option>30 FPS</option><option>25 FPS</option><option>20 FPS</option><option>15 FPS</option></select></div><button class="btn wide" id="applyCameraBtn">应用采集参数</button></section>
-   <section class="card panel"><h3>画面</h3><div class="formrow"><label>曝光</label><input id="exposureRange" type="range" min="0" max="100" value="42"></div><div class="inlineStatus"><span>当前曝光</span><b id="exposureValue">42%</b></div></section>
-   <section class="card panel"><h3>裁剪</h3><div class="formrow"><label>边距</label><input id="cropRange" type="range" min="0" max="15" value="6"></div><div class="twoBtns"><button class="btn" id="applyCropBtn">应用裁剪</button><button class="btn" id="resetCropBtn">恢复全画面</button></div></section>
-   <section class="card panel"><h3>场地尺寸</h3><div class="formrow"><label>宽度 X</label><input type="number" value="3.14" step=".01"></div><div class="formrow"><label>高度 Y</label><input type="number" value="1.60" step=".01"></div></section>
-   <section class="card panel"><h3>场地状态</h3><div class="statuslist"><div class="statusitem"><span>Mark</span><b>未标定</b></div><div class="statusitem"><span>坐标</span><b>未建立</b></div><div class="statusitem"><span>目标</span><b>未识别</b></div></div></section>
-   <section class="deviceConfirmCard panel">
-    <div class="deviceConfirmHead"><div><h3>设备确认</h3><p>由选手自己测试并回传结果</p></div><b id="deviceConfirmCount">0 / 4</b></div>
-    <div class="deviceConfirmList" id="deviceConfirmList"></div>
-    <button class="btn" id="openDeviceTestBtn" disabled>先锁定场地</button>
-   </section>
-   <section class="lockBox"><h3>赛前准备</h3><p id="preMatchHint">先锁定场地，再开放选手设备测试。</p><button class="btn good" id="lockCal">✓ 锁定场地调整</button><button class="btn nextBtn" id="calNext" disabled>等待设备确认 0 / 4</button></section>
+   <section class="card panel" id="refereeCameraPanel" data-referee-video-controls><h3>摄像头与视觉</h3><div class="formrow"><label>视频设备</label><select data-video-camera><option value="">正在读取真实摄像头…</option></select></div><button class="btn wide good" type="button" data-video-action>启动真实视频</button><div class="visionFeaturePanel"><header><span>YOLO 与画面叠加</span><small>原始视频保持高帧率</small></header><div class="visionSwitchGrid"><button class="visionSwitch" type="button" data-vision-processing-action aria-pressed="false"><span><b>YOLO 识别</b><small data-vision-processing-status>未启动</small></span><em>关闭</em></button><button class="visionSwitch" type="button" data-vision-overlay="detections" aria-pressed="false"><span><b>识别框</b><small>位置、编号与置信度</small></span><em>关闭</em></button><button class="visionSwitch" type="button" data-vision-overlay="plannedPath" aria-pressed="false"><span><b>规划路径</b><small>紫色目标路线</small></span><em>关闭</em></button><button class="visionSwitch" type="button" data-vision-overlay="trajectory" aria-pressed="false"><span><b>运动轨迹</b><small>黄色真实轨迹</small></span><em>关闭</em></button></div></div><button class="btn wide" type="button" id="trackingEntryBtn" aria-expanded="false">打开循迹控制</button><section class="trackingPanel" id="trackingPanel" hidden><div class="trackingPanelHead"><strong>循迹控制</strong><small>裁判端控制真实设备</small></div><div class="trackingGrid"><label>循迹模式<select id="trackingModeSelect"><option value="single_fish">单鱼循迹</option><option value="yolo">YOLO 目标</option></select></label><label>目标设备<select id="trackingDeviceSelect"><option value="">请选择已分配设备</option></select></label><label id="trackingTrackField">YOLO Track ID<select id="trackingTrackSelect"><option value="">请选择识别目标</option></select></label></div><div class="trackingActions"><button class="btn trackingCalibrate" type="button" id="trackingCalibrateBtn">可选：校准方向</button><button class="btn" type="button" id="trackingDrawBtn">绘制循迹线</button><button class="btn" type="button" id="trackingClearBtn">清除路径</button><button class="btn good" type="button" id="trackingStartBtn">启动循迹</button><button class="btn warn" type="button" id="trackingStopBtn">停止循迹</button></div><p class="trackingStatus" id="trackingStatus" role="status">先启动真实视频和 YOLO，再选择设备。</p></section><div class="inlineStatus"><span>实际分辨率</span><b data-camera-resolution>正在读取…</b></div><div class="inlineStatus"><span>实际帧率</span><b data-camera-fps>正在读取…</b></div></section>
+   <section class="card panel"><h3>曝光</h3><div class="formrow"><label>设置值 <b id="exposureSetpoint">-6</b></label><input id="exposureRange" type="range" min="-13" max="-1" step="1" value="-6"></div><div class="inlineStatus"><span>相机实际值</span><b id="exposureValue">正在读取…</b></div></section>
+   <section class="card panel"><h3>选手有效画面</h3><p class="cropHint">拖动全画面中的四个角自由选择区域；裁判始终查看完整画面，选手端只显示框内内容。</p><div class="inlineStatus"><span>当前有效区</span><b id="cropValue">读取中…</b></div><div class="cropActions"><button class="btn" id="applyCropBtn">应用有效区</button><button class="btn" id="resetCropBtn">全画面</button></div><div class="transformDivider"></div><div class="rotationHead"><span>画面旋转（逆时针为正）</span><b id="rotationValue">0°</b></div><div class="rotationFields"><input id="rotationRange" type="range" min="-180" max="180" step="1" value="0"><input id="rotationNumber" type="number" min="-180" max="180" step="0.1" value="0" aria-label="画面旋转角度"></div><div class="rotationActions"><button class="btn" id="resetRotationBtn">角度归零</button><button class="btn" id="applyRotationBtn">应用旋转</button></div><div class="inlineStatus"><span>旋转处理耗时</span><b id="rotationCost">等待测量</b></div></section>
+   <section class="card panel fieldDimensionCard"><h3>场地尺寸 <span class="unitBadge">单位：cm</span></h3><div class="formrow"><label for="fieldWidthCm">宽度 X</label><div class="numberWithUnit"><input id="fieldWidthCm" type="number" min="1" max="100000" step="0.1" inputmode="decimal" data-unit="cm" placeholder="填写实际宽度" aria-label="场地宽度（厘米）"><span>cm</span></div></div><div class="formrow"><label for="fieldHeightCm">高度 Y</label><div class="numberWithUnit"><input id="fieldHeightCm" type="number" min="1" max="100000" step="0.1" inputmode="decimal" data-unit="cm" placeholder="填写实际高度" aria-label="场地高度（厘米）"><span>cm</span></div></div><div class="fieldDimensionActions"><small id="fieldDimensionStatus">填写后在有效区显示标尺</small><button class="btn good" id="saveFieldDimensions" type="button">保存尺寸</button></div></section>
+   <section class="card panel"><h3>场地状态</h3><div class="statuslist"><div class="statusitem"><span>坐标</span><b id="coordinateStatus">等待有效画面</b></div><div class="statusitem"><span>目标</span><b id="targetStatus">等待读取</b></div></div></section>
+   <section class="lockBox"><h3>赛前准备</h3><p id="preMatchHint">锁定场地后即可进入比赛。</p><button class="btn good" id="lockCal">✓ 锁定场地调整</button><button class="btn nextBtn" id="calNext" disabled>等待场地锁定</button></section>
   </aside>
  </section>
 
  <section id="match" class="page match hidden">
-  <section class="scorebar panel"><div class="sideScore"><span>蓝队</span><b class="blueTxt" id="blueScore">36</b></div><div class="clock"><strong id="clock">01:28</strong><small id="clockState">剩余时间</small></div><div class="sideScore red"><b class="redTxt" id="redScore">24</b><span>红队</span></div></section>
-  <section class="arenaCard panel"><div class="arenaHead"><h2>比赛画面</h2><span>原始视频 · 识别数据独立</span></div><div class="arena" id="refereeMatchStage" aria-label="原始比赛视频"></div><div class="arenaFoot"><span>机器鱼在线状态按真实设备心跳显示</span><span>视觉目标独立统计</span></div></section>
+  <section class="scorebar panel"><div class="sideScore"><span>蓝队</span><b class="blueTxt" id="blueScore">0</b></div><div class="clock"><strong id="clock">00:00</strong><small id="clockState">等待服务器</small></div><div class="sideScore red"><b class="redTxt" id="redScore">0</b><span>红队</span></div></section>
+  <aside class="deviceOverview panel" aria-labelledby="deviceOverviewTitle">
+   <header class="deviceOverviewHead"><div><span>DEVICE STATUS</span><h2 id="deviceOverviewTitle">在线设备</h2></div><b id="onlineDeviceCount">0 台</b></header>
+   <div class="deviceOverviewList" id="deviceOverviewList"><div class="deviceOverviewEmpty"><b>等待设备上线</b><span>电量、WebSocket 往返延迟和控制者将在这里显示</span></div></div>
+   <footer><i></i><span>数据来自设备心跳与控制租约</span></footer>
+  </aside>
+  <section class="arenaCard panel"><div class="arenaHead"><h2>比赛画面</h2><span>原始视频</span></div><div class="arena" id="refereeMatchStage" aria-label="原始比赛视频"></div><div class="arenaFoot"><span>裁判全画面</span><span>视觉独立处理</span></div></section>
   <aside class="scoreSidePanel">
-   <section class="teamQuick panel"><div class="teamQuickHead"><h3 class="blueTxt">蓝队</h3><b id="blueQuick">36</b></div><div class="quickBtns"><button class="goalBtn" data-team="blue" data-score="10">⚽ 进球<br>+10</button><button class="assistBtn" data-team="blue" data-score="2">⇄ 配合<br>+2</button><button class="outBtn" data-team="blue" data-score="-2">⚠ 越界<br>-2</button></div></section>
-   <section class="teamQuick panel"><div class="teamQuickHead"><h3 class="redTxt">红队</h3><b id="redQuick">24</b></div><div class="quickBtns"><button class="goalBtn" data-team="red" data-score="10">⚽ 进球<br>+10</button><button class="assistBtn" data-team="red" data-score="2">⇄ 配合<br>+2</button><button class="outBtn" data-team="red" data-score="-2">⚠ 越界<br>-2</button></div></section>
+   <section class="teamQuick panel"><div class="teamQuickHead"><h3 class="blueTxt">蓝队</h3><b id="blueQuick">0</b></div><div class="quickBtns"><button class="goalBtn" data-team="blue" data-score="10">⚽ 进球<br>+10</button><button class="assistBtn" data-team="blue" data-score="2">⇄ 配合<br>+2</button><button class="outBtn" data-team="blue" data-score="-2">⚠ 越界<br>-2</button></div></section>
+   <section class="teamQuick panel"><div class="teamQuickHead"><h3 class="redTxt">红队</h3><b id="redQuick">0</b></div><div class="quickBtns"><button class="goalBtn" data-team="red" data-score="10">⚽ 进球<br>+10</button><button class="assistBtn" data-team="red" data-score="2">⇄ 配合<br>+2</button><button class="outBtn" data-team="red" data-score="-2">⚠ 越界<br>-2</button></div></section>
    <section class="events panel"><h3>计分记录</h3><div class="eventList" id="eventList"></div></section>
   </aside>
-  <section class="recordStrip panel">
-   <label>录像保存路径</label>
-   <input class="recordPath" id="recordPath" value="/data/fish/matches" spellcheck="false">
-   <span class="recState" id="recState">● 未录制</span>
-   <button class="btn" id="savePathBtn">保存路径</button>
-  </section>
-  <section class="bottom"><section class="health panel"><div class="h"><span>签到</span><b>4 / 4</b></div><div class="h"><span>设备</span><b>4 / 4</b></div><div class="h"><span>场地</span><b>已锁定</b></div><div class="h"><span>同步</span><b>正常</b></div></section><section class="controls panel"><button class="btn good" id="startBtn">开始比赛</button><button class="btn" id="pauseBtn">暂停比赛</button><button class="btn warn" id="endBtn">结束比赛</button></section></section>
+  <section class="bottom"><section class="health panel"><div class="h"><span>签到</span><b id="matchSignupHealth">等待上报</b></div><div class="h"><span>设备</span><b id="matchDeviceHealth">等待上报</b></div><div class="h"><span>场地</span><b id="matchFieldHealth">待确认</b></div><div class="h"><span>同步</span><b id="matchSyncHealth">等待服务器</b></div></section><section class="controls panel"><button class="btn good" id="startBtn">开始比赛</button><button class="btn" id="pauseBtn">暂停比赛</button><button class="btn warn" id="endBtn">结束比赛</button></section></section>
  </section>
 
  <section id="records" class="page records hidden">
@@ -2046,11 +2353,11 @@ input:focus,select:focus{
      <section id="replayPane" class="recordPane replayPanel panel">
       <div class="videoStage">
        <video id="replayVideo" controls preload="metadata"></video>
-       <div class="videoPlaceholder" id="videoPlaceholder"><div><div class="playCircle">▶</div><h3>本场视频回放</h3><p>载入本场录像后，可通过计分事件快速跳转。</p></div></div>
+       <div class="videoPlaceholder" id="videoPlaceholder"><div><div class="playCircle">▶</div><h3>本场视频回放</h3><p>选择已结束比赛后，服务器录像会自动载入。</p></div></div>
       </div>
       <div class="replayTools">
-       <label class="fileLabel">载入录像<input id="videoFile" type="file" accept="video/*"></label>
-       <div class="videoStatus" id="videoFileName">尚未载入录像文件</div>
+       <span class="fileLabel">服务器录像</span><input id="videoFile" type="file" accept="video/*" hidden>
+       <div class="videoStatus" id="videoFileName">选择比赛后自动载入</div>
        <div class="replayClock"><span id="videoElapsed">00:00</span> / <span id="videoDuration">--:--</span></div>
       </div>
       <div class="replayTimeline">
@@ -2075,140 +2382,90 @@ input:focus,select:focus{
 
 <div class="modalWrap" id="modal">
  <div class="modal">
-  <div class="modalHead"><h2 id="modalTitle">选择签到选手</h2><button class="close" id="close">×</button></div>
-  <div id="selectStep"><div class="selectGrid"><section class="selectGroup blue"><h3>蓝队 · 海洋先锋队</h3><div id="blueSelect"></div></section><section class="selectGroup red"><h3>红队 · 深海动力队</h3><div id="redSelect"></div></section></div></div>
-  <div class="confirmCard" id="confirmStep"><div class="identity"><div class="avatar" id="avatar"></div><div><h3 id="confirmName"></h3><p id="confirmTeam"></p></div></div><div class="confirmMeta"><div class="meta"><span>选手编号</span><strong id="confirmId"></strong></div><div class="meta"><span>席位</span><strong id="confirmSlot"></strong></div><div class="meta"><span>机器鱼</span><strong id="confirmFish"></strong></div><div class="meta"><span>状态</span><strong>待确认</strong></div></div><div class="confirmActions"><button class="btn" id="back">返回</button><button class="btn good" id="confirmBtn">确认签到</button></div></div>
+  <div class="modalHead"><h2 id="modalTitle">选择选手与设备</h2><button class="close" id="close">×</button></div>
+  <div id="selectStep"><div class="selectGrid"><section class="selectGroup blue"><h3>蓝队 · 等待账号数据</h3><div id="blueSelect"></div></section><section class="selectGroup red"><h3>红队 · 等待账号数据</h3><div id="redSelect"></div></section></div></div>
+  <div class="confirmCard" id="confirmStep"><div class="identity"><div class="avatar" id="avatar"></div><div><h3 id="confirmName"></h3><p id="confirmTeam"></p></div></div><div class="confirmMeta"><div class="meta"><span>选手编号</span><strong id="confirmId"></strong></div><div class="meta"><span>席位</span><strong id="confirmSlot"></strong></div><div class="meta"><span>机器鱼</span><strong id="confirmFish"></strong></div><div class="meta"><span>账号</span><strong id="confirmAccount">等待数据</strong></div></div><div class="confirmActions"><button class="btn" id="back">返回</button><button class="btn good" id="confirmBtn">保存设备分配</button></div></div>
  </div>
 </div>
 <div class="toast" id="toast"></div>
 
 <script>
 const state={
- page:'signup',calLocked:false,deviceTestOpen:false,deviceConfirmed:{B1:'waiting',B2:'waiting',R1:'waiting',R2:'waiting'},match:'waiting',seconds:88,blue:36,red:24,endTime:null,recording:false,savePath:'/data/fish/matches',currentBase:null,
+ page:'signup',calLocked:false,match:'waiting',seconds:180,blue:0,red:0,endTime:null,recording:false,savePath:'',currentBase:null,
  players:[
-  {slot:'B1',name:'陈同学',id:'STU-24018',team:'蓝队 · 海洋先锋队',fish:'B1-03',side:'blue',done:false,time:null},
-  {slot:'B2',name:'李同学',id:'STU-24027',team:'蓝队 · 海洋先锋队',fish:'B2-07',side:'blue',done:false,time:null},
-  {slot:'R1',name:'王同学',id:'STU-24031',team:'红队 · 深海动力队',fish:'R1-05',side:'red',done:false,time:null},
-  {slot:'R2',name:'赵同学',id:'STU-24039',team:'红队 · 深海动力队',fish:'R2-02',side:'red',done:false,time:null}
+   {slot:'B1',name:'等待账号数据',id:'未读取',team:'蓝队',fish:'未分配',side:'blue',done:false,time:'等待服务器'},
+   {slot:'B2',name:'等待账号数据',id:'未读取',team:'蓝队',fish:'未分配',side:'blue',done:false,time:'等待服务器'},
+   {slot:'R1',name:'等待账号数据',id:'未读取',team:'红队',fish:'未分配',side:'red',done:false,time:'等待服务器'},
+   {slot:'R2',name:'等待账号数据',id:'未读取',team:'红队',fish:'未分配',side:'red',done:false,time:'等待服务器'}
  ],
- stats:{blue:{g:3,a:4,o:1},red:{g:2,a:3,o:1}},
- events:[
-  {matchTime:'01:36',time:'14:32:43',team:'蓝队',text:'B2 完成配合',score:'+2',type:'a'},
-  {matchTime:'01:58',time:'14:31:18',team:'红队',text:'R1 进球',score:'+10',type:'g'}
- ]
+ stats:{blue:{g:0,a:0,o:0},red:{g:0,a:0,o:0}},
+ events:[]
 };
-let selectedPlayer=null,timer=null,historySelected=8,replayObjectUrl=null;
+let selectedPlayer=null,timer=null,historySelected=null,replayObjectUrl=null;
 const MATCH_DURATION=180;
 const $=id=>document.getElementById(id);
 const bluePlayers=$('bluePlayers'), redPlayers=$('redPlayers'), openSignup=$('openSignup'), signupNext=$('signupNext');
 const modal=$('modal'), modalTitle=$('modalTitle'), closeBtn=$('close'), selectStep=$('selectStep'), confirmStep=$('confirmStep');
 const avatar=$('avatar'), confirmName=$('confirmName'), confirmTeam=$('confirmTeam'), confirmId=$('confirmId'), confirmSlot=$('confirmSlot'), confirmFish=$('confirmFish'), back=$('back'), confirmBtn=$('confirmBtn');
-const cropRange=$('cropRange'), crop=$('crop'), lockCal=$('lockCal'), calNext=$('calNext'), openDeviceTestBtn=$('openDeviceTestBtn'), deviceConfirmList=$('deviceConfirmList'), deviceConfirmCount=$('deviceConfirmCount'), preMatchHint=$('preMatchHint');
+const lockCal=$('lockCal'), calNext=$('calNext'), preMatchHint=$('preMatchHint');
 const blueScore=$('blueScore'), blueQuick=$('blueQuick'), redScore=$('redScore'), redQuick=$('redQuick'), clock=$('clock'), clockState=$('clockState'), eventList=$('eventList');
-const recordPath=$('recordPath'), recState=$('recState'), savePathBtn=$('savePathBtn'), startBtn=$('startBtn'), pauseBtn=$('pauseBtn'), endBtn=$('endBtn');
+const startBtn=$('startBtn'), pauseBtn=$('pauseBtn'), endBtn=$('endBtn');
 const historyCount=$('historyCount'), search=$('search'), groupFilter=$('groupFilter'), matchList=$('matchList');
 const histBlueTeam=$('histBlueTeam'), histBluePlayers=$('histBluePlayers'), histBlueScore=$('histBlueScore'), histRedScore=$('histRedScore'), histWinner=$('histWinner'), histRedTeam=$('histRedTeam'), histRedPlayers=$('histRedPlayers');
 const histNo=$('histNo'), histGroup=$('histGroup'), histArena=$('histArena'), histEnd=$('histEnd'), hbg=$('hbg'), hba=$('hba'), hbo=$('hbo'), hrg=$('hrg'), hra=$('hra'), hro=$('hro');
 const histVideoStatus=$('histVideoStatus'), histVideoFile=$('histVideoFile'), histJsonFile=$('histJsonFile'), histSavePath=$('histSavePath');
 const replayPane=$('replayPane'), replayVideo=$('replayVideo'), videoPlaceholder=$('videoPlaceholder'), videoFile=$('videoFile'), videoFileName=$('videoFileName'), videoElapsed=$('videoElapsed'), videoDuration=$('videoDuration'), replayTrack=$('replayTrack'), replayEvents=$('replayEvents'), scorelogPane=$('scorelogPane'), recordTable=$('recordTable');
-const resBadge=$('resBadge'), fpsBadge=$('fpsBadge'), snapshotBtn=$('snapshotBtn'), resolution=$('resolution'), fpsSelect=$('fpsSelect'), applyCameraBtn=$('applyCameraBtn'), exposureRange=$('exposureRange'), exposureValue=$('exposureValue'), applyCropBtn=$('applyCropBtn'), resetCropBtn=$('resetCropBtn');
-const history=[
- {id:8,no:'第 08 场',group:'学生组',arena:'A 赛场',date:'2026-09-14',end:'14:34:12',savePath:'/data/fish/matches',videoFile:'match_008_20260914_143012.mp4',jsonFile:'match_008_20260914_143012.json',blue:{team:'海洋先锋队',players:'B1 陈同学 · B2 李同学',score:36,g:3,a:4,o:1},red:{team:'深海动力队',players:'R1 王同学 · R2 赵同学',score:24,g:2,a:3,o:1},events:[['01:36','14:32:43','蓝队','B2 完成配合','+2'],['01:58','14:31:18','红队','R1 进球','+10']]},
- {id:7,no:'第 07 场',group:'学生组',arena:'A 赛场',date:'2026-09-14',end:'13:58:47',savePath:'/data/fish/matches',videoFile:'match_007_20260914_135547.mp4',jsonFile:'match_007_20260914_135547.json',blue:{team:'未来水手队',players:'B1 周同学 · B2 林同学',score:18,g:1,a:5,o:1},red:{team:'深蓝实验室',players:'R1 孙同学 · R2 郑同学',score:28,g:2,a:5,o:1},events:[['00:42','13:58:05','红队','R2 进球','+10'],['01:09','13:57:38','蓝队','B1 配合','+2']]},
- {id:6,no:'第 06 场',group:'学生组',arena:'B 赛场',date:'2026-09-14',end:'13:22:15',savePath:'/data/fish/matches',videoFile:'match_006_20260914_132215.mp4',jsonFile:'match_006_20260914_132215.json',blue:{team:'海洋先锋队',players:'B1 陈同学 · B2 李同学',score:30,g:3,a:1,o:1},red:{team:'蓝鲸少年队',players:'R1 吴同学 · R2 徐同学',score:30,g:3,a:1,o:1},events:[['00:18','13:21:57','蓝队','B1 进球','+10'],['00:55','13:21:20','红队','R2 进球','+10']]},
- {id:5,no:'第 05 场',group:'公开组',arena:'A 赛场',date:'2026-09-14',end:'12:46:31',savePath:'/data/fish/matches',videoFile:'match_005_20260914_124631.mp4',jsonFile:'match_005_20260914_124631.json',blue:{team:'水动力实验室',players:'B1 A选手 · B2 B选手',score:42,g:4,a:2,o:1},red:{team:'仿生机动队',players:'R1 C选手 · R2 D选手',score:32,g:3,a:2,o:1},events:[['00:26','12:46:05','蓝队','B2 进球','+10'],['01:13','12:45:18','红队','R1 进球','+10']]}
-];
+const exposureRange=$('exposureRange'), exposureValue=$('exposureValue'), applyCropBtn=$('applyCropBtn'), resetCropBtn=$('resetCropBtn');
+const history=[];
 function now(){return new Date().toLocaleTimeString('zh-CN',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})}
 function fmt(s){return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`}
 function toast(t){const el=document.getElementById('toast');el.textContent=t;el.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>el.classList.remove('show'),1300)}
 function show(page){state.page=page;document.querySelectorAll('.page').forEach(x=>x.classList.toggle('hidden',x.id!==page));document.querySelectorAll('.nav button').forEach(x=>x.classList.toggle('active',x.dataset.page===page));document.getElementById('globalState').textContent=page==='signup'?'签到中':page==='calibration'?(state.calLocked?'场地已锁定':'场地调整'):page==='match'?(state.match==='running'?'比赛进行中':state.match==='paused'?'比赛暂停':state.match==='ended'?'比赛已结束':'等待比赛'):'比赛记录'}
 document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>show(b.dataset.page));
 function renderSignup(){
- const card=p=>`<article class="player ${p.done?'done':''}"><div class="playerTop"><b>${p.slot} · ${p.name}</b><span class="status">${p.done?'✓ 已签到':'○ 未签到'}</span></div><div class="playerMeta"><div class="meta"><span>编号</span><strong>${p.id}</strong></div><div class="meta"><span>机器鱼</span><strong>${p.fish}</strong></div><div class="meta"><span>席位</span><strong>${p.slot}</strong></div></div><div class="playerTime">${p.done?'签到时间 '+p.time:'等待裁判签到'}</div></article>`;
+ const card=p=>`<article class="player ${p.done?'done':''} device-unassigned"><div class="playerTop"><b>${p.slot} · ${p.name}</b><span class="status">${p.done?'✓ 已登录':'○ 未登录'}</span></div><div class="playerMeta"><div class="meta"><span>编号</span><strong>${p.id}</strong></div><div class="meta"><span>机器鱼</span><strong>${p.fish}</strong></div><div class="meta"><span>席位</span><strong>${p.slot}</strong></div></div><div class="deviceState unassigned" data-device-state>设备状态：未分配</div><div class="playerTime">${p.done?'开发模式账号已就绪':'等待选手登录'}</div></article>`;
  bluePlayers.innerHTML=state.players.filter(p=>p.side==='blue').map(card).join('');redPlayers.innerHTML=state.players.filter(p=>p.side==='red').map(card).join('');
- const n=state.players.filter(p=>p.done).length;signupNext.disabled=n!==4;signupNext.textContent=n===4?'签到完成 · 进入场地调整':'签到未完成';renderSelect();
+ const n=state.players.filter(p=>p.done).length;signupNext.disabled=n!==4;signupNext.textContent=n===4?'进入场地调整':'等待选手账号';renderSelect();
 }
-function renderSelect(){['blue','red'].forEach(side=>document.getElementById(side+'Select').innerHTML=state.players.filter(p=>p.side===side).map(p=>`<button class="selectPlayer" data-slot="${p.slot}" ${p.done?'disabled':''}><div><b>${p.slot} · ${p.name}</b><small>${p.id} · ${p.fish}</small></div><span>${p.done?'已签到':'选择 →'}</span></button>`).join(''));document.querySelectorAll('.selectPlayer').forEach(b=>b.onclick=()=>openConfirm(b.dataset.slot))}
+function renderSelect(){['blue','red'].forEach(side=>document.getElementById(side+'Select').innerHTML=state.players.filter(p=>p.side===side).map(p=>`<button class="selectPlayer" data-slot="${p.slot}"><div><b>${p.slot} · ${p.name}</b><small>${p.id} · ${p.fish}</small></div><span>调整 →</span></button>`).join(''));document.querySelectorAll('.selectPlayer').forEach(b=>b.onclick=()=>openConfirm(b.dataset.slot))}
 function openConfirm(slot){selectedPlayer=state.players.find(p=>p.slot===slot);selectStep.style.display='none';confirmStep.classList.add('show');modalTitle.textContent='核对签到信息';avatar.textContent=selectedPlayer.slot;confirmName.textContent=selectedPlayer.name;confirmTeam.textContent=selectedPlayer.team;confirmId.textContent=selectedPlayer.id;confirmSlot.textContent=selectedPlayer.slot;confirmFish.textContent=selectedPlayer.fish}
-openSignup.onclick=()=>{selectStep.style.display='block';confirmStep.classList.remove('show');modal.classList.add('show');renderSelect()};closeBtn.onclick=()=>modal.classList.remove('show');back.onclick=()=>{selectStep.style.display='block';confirmStep.classList.remove('show')};confirmBtn.onclick=()=>{selectedPlayer.done=true;selectedPlayer.time=now();modal.classList.remove('show');renderSignup();toast('签到成功')};signupNext.onclick=()=>show('calibration');
-cropRange.oninput=e=>{if(!crop)return;const v=Number(e.target.value);crop.style.left=v+'%';crop.style.right=v+'%';crop.style.top=Math.max(0,v-1)+'%';crop.style.bottom=Math.max(0,v-1)+'%'};lockCal.onclick=()=>{
- state.calLocked=!state.calLocked;
- if(!state.calLocked){
-   state.deviceTestOpen=false;
-   state.deviceConfirmed={B1:'waiting',B2:'waiting',R1:'waiting',R2:'waiting'};
- }
- lockCal.textContent=state.calLocked?'🔒 场地调整已锁定':'✓ 锁定场地调整';
- renderDeviceConfirm();
- renderMatch();
- toast(state.calLocked?'场地调整已锁定，可开放设备测试':'场地调整已解锁');
-};
-openDeviceTestBtn.onclick=()=>{
- if(!state.calLocked||state.deviceTestOpen)return;
- state.deviceTestOpen=true;
- state.deviceConfirmed={B1:'testing',B2:'testing',R1:'testing',R2:'testing'};
- renderDeviceConfirm();
- toast('设备测试已开放 · 等待选手自行确认');
- const sequence=['B1','B2','R1','R2'];
- sequence.forEach((slot,index)=>{
-   setTimeout(()=>{
-     if(!state.deviceTestOpen)return;
-     state.deviceConfirmed[slot]='ok';
-     renderDeviceConfirm();
-     if(index===sequence.length-1)toast('4 / 4 设备已由选手确认正常');
-   },900+index*650);
- });
+openSignup.onclick=()=>{selectStep.style.display='block';confirmStep.classList.remove('show');modal.classList.add('show');renderSelect()};closeBtn.onclick=()=>modal.classList.remove('show');back.onclick=()=>{selectStep.style.display='block';confirmStep.classList.remove('show')};confirmBtn.onclick=()=>{selectedPlayer.done=true;selectedPlayer.time=now();modal.classList.remove('show');renderSignup();toast('选手与机器鱼已更新')};signupNext.onclick=()=>show('calibration');
+lockCal.onclick=()=>{
+ const nextLocked=!state.calLocked;
+ lockCal.disabled=true;
+ const action=typeof window.fishCompetitionSetFieldLocked==='function'
+   ? window.fishCompetitionSetFieldLocked(nextLocked)
+   : Promise.reject(new Error('比赛服务尚未连接'));
+ action.then(()=>{
+   state.calLocked=nextLocked;
+   renderCalibrationLock();
+   renderMatch();
+   toast(state.calLocked?'场地已锁定，选手控制权已开放':'场地已解锁，选手控制权已收回');
+ }).catch(error=>toast(error&&error.message?error.message:'场地锁定失败')).finally(()=>{lockCal.disabled=false});
 };
 calNext.onclick=()=>{
- const ok=Object.values(state.deviceConfirmed).filter(v=>v==='ok').length;
- if(!(state.calLocked&&state.deviceTestOpen&&ok===4)){toast('需等待 4 / 4 选手设备确认');return}
+ if(!state.calLocked){toast('请先锁定场地调整');return}
  show('match');
 };
 
 
-function renderDeviceConfirm(){
- const meta={
-  B1:{name:'陈同学',fish:'B1-03',side:'blue'},
-  B2:{name:'李同学',fish:'B2-07',side:'blue'},
-  R1:{name:'王同学',fish:'R1-05',side:'red'},
-  R2:{name:'赵同学',fish:'R2-02',side:'red'}
- };
- const labels={waiting:'未测试',testing:'测试中',ok:'✓ 已确认正常',fault:'⚠ 设备异常'};
- deviceConfirmList.innerHTML=Object.entries(state.deviceConfirmed).map(([slot,status])=>{
-   const m=meta[slot];
-   return `<div class="deviceConfirmRow ${m.side} ${status}">
-     <span class="deviceSlot">${slot}</span>
-     <span class="devicePerson"><b>${m.name}</b><small>${m.fish}</small></span>
-     <span class="deviceResult">${labels[status]}</span>
-   </div>`;
- }).join('');
- const ok=Object.values(state.deviceConfirmed).filter(v=>v==='ok').length;
- deviceConfirmCount.textContent=`${ok} / 4`;
+function renderCalibrationLock(){
+ lockCal.textContent=state.calLocked?'🔒 场地调整已锁定':'✓ 锁定场地调整';
  if(!state.calLocked){
-   openDeviceTestBtn.disabled=true;
-   openDeviceTestBtn.textContent='先锁定场地';
    calNext.disabled=true;
    calNext.textContent='等待场地锁定';
-   preMatchHint.textContent='先锁定场地，再开放选手设备测试。';
- }else if(!state.deviceTestOpen){
-   openDeviceTestBtn.disabled=false;
-   openDeviceTestBtn.textContent='开放设备测试';
-   calNext.disabled=true;
-   calNext.textContent='等待开放设备测试';
-   preMatchHint.textContent='场地已锁定。开放测试后，选手可受限试动并自行确认设备状态。';
- }else if(ok<4){
-   openDeviceTestBtn.disabled=true;
-   openDeviceTestBtn.textContent='设备测试已开放';
-   calNext.disabled=true;
-   calNext.textContent=`等待设备确认 ${ok} / 4`;
-   preMatchHint.textContent='等待 B1 / B2 / R1 / R2 从选手端回传确认结果。';
+   preMatchHint.textContent='锁定场地后即可进入比赛。';
  }else{
-   openDeviceTestBtn.disabled=true;
-   openDeviceTestBtn.textContent='✓ 设备确认完成';
    calNext.disabled=false;
    calNext.textContent='进入比赛';
-   preMatchHint.textContent='4 / 4 设备均由选手确认正常，可以进入比赛。';
+   preMatchHint.textContent='场地已锁定，可以进入比赛。';
  }
 }
+window.applyCompetitionFieldLock=locked=>{
+ state.calLocked=!!locked;
+ renderCalibrationLock();
+ renderMatch();
+};
 
 function bumpEl(el){
  if(!el)return;
@@ -2224,81 +2481,18 @@ function compactStamp(d=new Date()){
  const p=n=>String(n).padStart(2,'0');
  return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
 }
-function updateRecState(kind,textValue){
- recState.className='recState'+(kind?' '+kind:'');
- recState.textContent=textValue;
-}
-function buildJsonRecord(){
- return {
-  schemaVersion:1,
-  match:{id:8,no:'第 08 场',group:'学生组',arena:'A 赛场'},
-  files:{video:state.currentBase+'.mp4',json:state.currentBase+'.json',directory:state.savePath},
-  blue:{team:'海洋先锋队',players:['B1 陈同学','B2 李同学'],score:state.blue,stats:{...state.stats.blue}},
-  red:{team:'深海动力队',players:['R1 王同学','R2 赵同学'],score:state.red,stats:{...state.stats.red}},
-  timing:{durationSeconds:MATCH_DURATION,endTime:state.endTime},
-  events:state.events.map(e=>({
-    matchTime:e.matchTime,
-    localTime:e.time,
-    team:e.team,
-    event:e.text,
-    score:e.score,
-    videoTimestampSeconds:replayElapsedForEvent(e.matchTime)
-  }))
- };
-}
+function unavailableCompetitionFallback(){toast('真实比赛服务暂不可用')}
+startBtn.onclick=unavailableCompetitionFallback;
+pauseBtn.onclick=unavailableCompetitionFallback;
+endBtn.onclick=unavailableCompetitionFallback;
+document.querySelectorAll('[data-score]').forEach(button=>button.onclick=unavailableCompetitionFallback);
 
-function startTimer(){clearInterval(timer);timer=setInterval(()=>{if(state.match!=='running')return;if(state.seconds>0){state.seconds--;renderMatch()}else finishMatch()},1000)}
-function finishMatch(){
- clearInterval(timer);
- if(state.match==='ended')return;
- state.match='ended';state.endTime=now();state.recording=false;
- if(!state.currentBase)state.currentBase='match_008_'+compactStamp();
- const videoFile=state.currentBase+'.mp4';
- const jsonFile=state.currentBase+'.json';
- updateRecState('saved','✓ 视频 + JSON 已保存');
- const newRecord={
-  id:8,no:'第 08 场',group:'学生组',arena:'A 赛场',
-  date:new Date().toISOString().slice(0,10),end:state.endTime,
-  savePath:state.savePath,videoFile,jsonFile,
-  blue:{team:'海洋先锋队',players:'B1 陈同学 · B2 李同学',score:state.blue,g:state.stats.blue.g,a:state.stats.blue.a,o:state.stats.blue.o},
-  red:{team:'深海动力队',players:'R1 王同学 · R2 赵同学',score:state.red,g:state.stats.red.g,a:state.stats.red.a,o:state.stats.red.o},
-  events:state.events.map(e=>[e.matchTime,e.time,e.team,e.text,e.score]),
-  jsonData:buildJsonRecord()
- };
- const idx=history.findIndex(x=>x.id===8);
- if(idx>=0)history[idx]=newRecord;else history.unshift(newRecord);
- historySelected=8;
- renderMatch();renderHistory();renderHistoryDetail();show('records');
- toast('比赛结束 · 视频与 JSON 已自动归档');
-}
-startBtn.onclick=()=>{
- if(!state.calLocked){toast('请先锁定场地调整');return}
- if(state.match==='ended'){toast('本场比赛已结束');return}
- state.savePath=recordPath.value.trim()||'/data/fish/matches';
- state.currentBase='match_008_'+compactStamp();
- state.recording=true;state.match='running';
- updateRecState('on','● 录像中');
- startTimer();renderMatch();toast('比赛开始 · 录像已启动')
-};
-savePathBtn.onclick=()=>{
- state.savePath=recordPath.value.trim()||'/data/fish/matches';
- recordPath.value=state.savePath;
- toast('录像保存路径已设置');
-};
-pauseBtn.onclick=()=>{if(state.match==='waiting'){toast('比赛尚未开始');return}if(state.match==='ended'){toast('比赛已经结束');return}state.match=state.match==='paused'?'running':'paused';renderMatch();toast(state.match==='paused'?'比赛已暂停':'比赛已继续')};endBtn.onclick=()=>{if(state.match==='waiting'){toast('比赛尚未开始');return}finishMatch()};
-document.querySelectorAll('[data-score]').forEach(b=>b.onclick=()=>{if(state.match==='paused'){toast('比赛暂停中，不能计分');return}if(state.match!=='running'){toast('比赛尚未开始');return}const n=Number(b.dataset.score),side=b.dataset.team,type=n===10?'g':n===2?'a':'o';state[side]+=n;state.stats[side][type]++;state.events.unshift({matchTime:fmt(state.seconds),time:now(),team:side==='blue'?'蓝队':'红队',text:n===10?'进球':n===2?'配合':'越界',score:(n>0?'+':'')+n,type});
-renderMatch();
-bumpEl(side==='blue'?blueScore:redScore);
-bumpEl(side==='blue'?blueQuick:redQuick);
-const firstEvent=eventList.querySelector('.event');
-if(firstEvent){firstEvent.classList.add('eventFlash')}
-});
 function hw(m){return m.blue.score>m.red.score?'蓝队获胜':m.red.score>m.blue.score?'红队获胜':'平局'}
-function renderHistory(){const q=search.value.toLowerCase(),g=groupFilter.value;const list=history.filter(m=>(g==='all'||m.group===g)&&(!q||(m.no+m.blue.team+m.red.team).toLowerCase().includes(q)));historyCount.textContent=list.length+' 场';matchList.innerHTML=list.map(m=>`<button class="matchItem ${m.id===historySelected?'active':''}" data-id="${m.id}"><div class="matchTop"><b>${m.no} · ${m.group}</b><span>${m.date}</span></div><div class="matchTeams"><span class="blue">${m.blue.team}</span><strong>${m.blue.score}:${m.red.score}</strong><span class="red">${m.red.team}</span></div></button>`).join('');document.querySelectorAll('.matchItem').forEach(b=>b.onclick=()=>{
- historySelected=Number(b.dataset.id);
+function renderHistory(){const q=search.value.toLowerCase(),g=groupFilter.value;const list=history.filter(m=>(g==='all'||m.group===g)&&(!q||(m.no+m.blue.team+m.red.team).toLowerCase().includes(q)));historyCount.textContent=list.length+' 场';matchList.innerHTML=list.length?list.map(m=>`<button class="matchItem ${m.id===historySelected?'active':''}" data-id="${m.id}"><div class="matchTop"><b>${m.no} · ${m.group}</b><span>${m.date}</span></div><div class="matchTeams"><span class="blue">${m.blue.team}</span><strong>${m.blue.score}:${m.red.score}</strong><span class="red">${m.red.team}</span></div></button>`).join(''):'<div class="deviceOverviewEmpty"><b>暂无真实比赛记录</b><span>完成并保存比赛后将在此显示</span></div>';document.querySelectorAll('.matchItem').forEach(b=>b.onclick=()=>{
+ historySelected=b.dataset.id;
  if(replayObjectUrl){URL.revokeObjectURL(replayObjectUrl);replayObjectUrl=null}
  replayVideo.removeAttribute('src');replayVideo.load();videoPlaceholder.classList.remove('hidden');
- videoFile.value='';videoFileName.textContent='尚未载入录像文件';videoElapsed.textContent='00:00';videoDuration.textContent='--:--';
+ videoFile.value='';videoFileName.textContent='正在载入服务器录像';videoElapsed.textContent='00:00';videoDuration.textContent='--:--';
  renderHistory();renderHistoryDetail()
 })}
 function remainingToSeconds(t){
@@ -2319,17 +2513,41 @@ function seekReplay(matchTime){
  }
 }
 function renderReplay(m){
- if(!(m.videoFile&&m.jsonFile)) histVideoStatus.textContent=replayVideo.src?'已载入':'缺少配对文件';
+ if(m.videoUrl){
+   if(replayVideo.dataset.recordUrl!==m.videoUrl){
+     replayVideo.dataset.recordUrl=m.videoUrl;
+     replayVideo.src=m.videoUrl;
+     replayVideo.load();
+   }
+   videoPlaceholder.classList.add('hidden');
+   videoFileName.textContent=m.videoFile||'服务器比赛录像';
+   histVideoStatus.textContent='✓ 服务器录像已封存';
+ }else{
+   delete replayVideo.dataset.recordUrl;
+   replayVideo.removeAttribute('src');replayVideo.load();
+   videoPlaceholder.classList.remove('hidden');
+   videoFileName.textContent=m.videoError||'本场没有可播放录像';
+   histVideoStatus.textContent=m.videoError?'录像异常':'无录像';
+ }
  replayTrack.innerHTML=m.events.map(e=>{
    const elapsed=replayElapsedForEvent(e[0]);
    const left=Math.min(100,Math.max(0,elapsed/MATCH_DURATION*100));
    return `<button class="eventMark ${e[2]==='红队'?'red':''}" style="left:${left}%" data-replay-time="${e[0]}" title="${e[0]} ${e[2]} ${e[3]}"></button>`;
  }).join('');
- replayEvents.innerHTML=m.events.map(e=>`<button class="replayEvent ${e[2]==='红队'?'red':''}" data-replay-time="${e[0]}"><small>${e[0]} · ${e[1]}</small>${e[2]} · ${e[3]} · ${e[4]}</button>`).join('');
+ replayEvents.innerHTML=m.events.length?m.events.map(e=>`<button class="replayEvent ${e[2]==='红队'?'red':''}" data-replay-time="${e[0]}"><small>${e[0]} · ${e[1]}</small>${e[2]} · ${e[3]} · ${e[4]}</button>`).join(''):'<span class="videoStatus">本场暂未记录独立计分事件</span>';
  document.querySelectorAll('[data-replay-time]').forEach(b=>b.onclick=()=>seekReplay(b.dataset.replayTime));
 }
 function renderHistoryDetail(){
  const m=history.find(x=>x.id===historySelected)||history[0];
+ if(!m){
+  histBlueTeam.textContent='蓝队';histRedTeam.textContent='红队';histBluePlayers.textContent='—';histRedPlayers.textContent='—';
+  histBlueScore.textContent='—';histRedScore.textContent='—';histWinner.textContent='暂无记录';
+  histNo.textContent='—';histGroup.textContent='—';histArena.textContent='—';histEnd.textContent='—';
+  histVideoFile.textContent='—';histJsonFile.textContent='—';histSavePath.textContent='—';histVideoStatus.textContent='暂无真实记录';
+  [hbg,hba,hbo,hrg,hra,hro].forEach(el=>el.textContent='—');
+  recordTable.innerHTML='<div class="deviceOverviewEmpty"><b>暂无计分记录</b><span>这里只显示真实比赛数据</span></div>';
+  replayTrack.innerHTML='';replayEvents.innerHTML='';return;
+ }
  histBlueTeam.textContent='蓝队 · '+m.blue.team;histRedTeam.textContent='红队 · '+m.red.team;
  histBluePlayers.textContent=m.blue.players;histRedPlayers.textContent=m.red.players;
  histBlueScore.textContent=m.blue.score;histRedScore.textContent=m.red.score;histWinner.textContent=hw(m);
@@ -2337,13 +2555,33 @@ function renderHistoryDetail(){
  histVideoFile.textContent=m.videoFile||'-';
  histJsonFile.textContent=m.jsonFile||'-';
  histSavePath.textContent=m.savePath||'-';
- histVideoStatus.textContent=(m.videoFile&&m.jsonFile)?'✓ 视频 / JSON 已配对':'缺少配对文件';
+ histVideoStatus.textContent=m.videoStatus==='saved'?'✓ 服务器录像已封存':(m.videoError?'录像异常':'无录像');
  hbg.textContent=m.blue.g;hba.textContent=m.blue.a;hbo.textContent=m.blue.o;hrg.textContent=m.red.g;hra.textContent=m.red.a;hro.textContent=m.red.o;
  recordTable.innerHTML=`<div class="tr head"><span>比赛时间</span><span>现场时间</span><span>队伍</span><span>事件</span><span>分值</span></div>`+
  m.events.map(e=>`<div class="tr"><span>${e[0]}</span><span>${e[1]}</span><span class="${e[2]==='蓝队'?'blueTxt':'redTxt'}">${e[2]}</span><button class="btn" data-replay-time="${e[0]}" style="text-align:left;padding:4px 6px">${e[3]}</button><b>${e[4]}</b></div>`).join('');
  renderReplay(m);
  document.querySelectorAll('#recordTable [data-replay-time]').forEach(b=>b.onclick=()=>seekReplay(b.dataset.replayTime));
 }
+window.applyCompetitionRecords=function(records){
+ const mapped=(Array.isArray(records)?records:[]).map((record,index)=>{
+   const finished=record.finishedAt?new Date(record.finishedAt):null;
+   const validDate=finished&&!Number.isNaN(finished.getTime());
+   const fileName=record.videoUrl?decodeURIComponent(String(record.videoUrl).split('/').pop()||''):'';
+   return {
+     id:String(record.id||`${record.matchNo||'match'}-${record.finishedAt||index}`),
+     no:record.matchNo||'未命名比赛',group:record.group||'未设置',arena:record.venue||'未设置',
+     date:validDate?finished.toLocaleDateString('zh-CN'):'未记录',
+     end:validDate?finished.toLocaleString('zh-CN',{hour12:false}):(record.finishedAt||'未记录'),
+     blue:{team:record.blueName||'蓝队',players:'比赛阵容已保存',score:Number(record.blueScore)||0,g:0,a:0,o:0},
+     red:{team:record.redName||'红队',players:'比赛阵容已保存',score:Number(record.redScore)||0,g:0,a:0,o:0},
+     videoUrl:record.videoUrl||'',videoFile:fileName,videoStatus:record.videoStatus||'',videoError:record.videoError||'',
+     jsonFile:'赛事服务',savePath:'服务器录像库',durationMs:Number(record.videoDurationMs)||0,events:[]
+   };
+ });
+ history.splice(0,history.length,...mapped);
+ if(!history.some(item=>item.id===historySelected))historySelected=history[0]?history[0].id:null;
+ renderHistory();renderHistoryDetail();
+};
 search.oninput=renderHistory;groupFilter.onchange=renderHistory;
 
 document.querySelectorAll('[data-record-tab]').forEach(btn=>btn.onclick=()=>{
@@ -2367,20 +2605,17 @@ videoFile.onchange=e=>{
 replayVideo.onloadedmetadata=()=>{
  videoDuration.textContent=fmt(Math.floor(replayVideo.duration||0));
 };
+replayVideo.onerror=()=>{
+ videoPlaceholder.classList.remove('hidden');
+ videoFileName.textContent='服务器录像加载失败';
+ histVideoStatus.textContent='录像不可用';
+};
 replayVideo.ontimeupdate=()=>{
  videoElapsed.textContent=fmt(Math.floor(replayVideo.currentTime||0));
 };
 
-// combined calibration controls
-exposureRange.oninput=e=>exposureValue.textContent=e.target.value+'%';
-applyCameraBtn.onclick=()=>{resBadge.textContent=resolution.value;fpsBadge.textContent=fpsSelect.value;toast('采集参数已应用')};
-applyCropBtn.onclick=()=>toast('裁剪区域已应用');
-resetCropBtn.onclick=()=>{cropRange.value=0;crop.style.left='0%';crop.style.right='0%';crop.style.top='0%';crop.style.bottom='0%';toast('已恢复全画面')};
-snapshotBtn.onclick=()=>toast('已保存当前场地图像');
-
-recordPath.value=state.savePath;updateRecState('','● 未录制');
-renderSignup();renderDeviceConfirm();renderMatch();renderHistory();renderHistoryDetail();show('signup');
+renderSignup();renderCalibrationLock();renderMatch();renderHistory();renderHistoryDetail();show('signup');
 </script>
-<script src="competition-adapter.js?v=20260916-strict-cuda-video"></script>
+<script src="competition-adapter.js?v=20260919-public-refresh-stability"></script>
 </body>
 </html>

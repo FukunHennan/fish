@@ -61,9 +61,17 @@ class WebActionTranslationTests(unittest.TestCase):
         self.assertEqual(
             translate_web_action({
                 "type": "overlay.set",
-                "overlays": {"detections": False, "paths": True},
+                "overlays": {
+                    "detections": False,
+                    "plannedPath": True,
+                    "trajectory": False,
+                },
             }),
-            ("OVERLAY_OPTIONS", {"detections": False, "paths": True}),
+            ("OVERLAY_OPTIONS", {
+                "detections": False,
+                "plannedPath": True,
+                "trajectory": False,
+            }),
         )
         self.assertIsNone(
             translate_web_action({

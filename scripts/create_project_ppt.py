@@ -291,7 +291,7 @@ slide.background.fill.fore_color.rgb = PAPER
 title(slide, "04 / VISION LOOP", "视觉不是“识别完就发命令”，而是一条有身份绑定的闭环",
       "YOLO 负责低频身份确认，标记 / 跟踪负责更高频观测，最终控制量仍回到 Go 的设备队列。")
 nodes = [
-    (0.72, "Camera", "1920×1080\n目标 30 FPS", PALE_BLUE, BLUE),
+    (0.72, "Camera", "960×720 · YUY2 · 4:3\n实测约 15 FPS / 不补帧", PALE_BLUE, BLUE),
     (3.02, "Perception", "YOLO + marker\ntracking", PALE_ORANGE, ORANGE),
     (5.32, "Mapping", "坐标 / 标定\n路径 / 航向", MINT, TEAL),
     (7.62, "Controller", "PID / motion\nfrequency + bias", PALE_CORAL, CORAL),

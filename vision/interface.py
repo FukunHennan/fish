@@ -13,7 +13,7 @@ import time
 
 import cv2
 
-from config import TARGET_FPS, TARGET_HEIGHT, TARGET_WIDTH
+from config import CAPTURE_FOURCC, TARGET_FPS, TARGET_HEIGHT, TARGET_WIDTH
 
 
 @dataclass(frozen=True)
@@ -364,10 +364,11 @@ class CameraStream:
         self.cap = cv2.VideoCapture(src, cv2.CAP_DSHOW)
         self.lock = threading.Lock()
 
-        self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+        self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*CAPTURE_FOURCC))
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, TARGET_WIDTH)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, TARGET_HEIGHT)
-        self.cap.set(cv2.CAP_PROP_FPS, TARGET_FPS)
+        if TARGET_FPS > 0:
+            self.cap.set(cv2.CAP_PROP_FPS, TARGET_FPS)
 
         self.real_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.real_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -392,7 +393,7 @@ class CameraStream:
         self.last_success_monotonic = time.monotonic() if self.ret else None
         self.consecutive_failures = 0
         self.stopped = False
-        self.measured_fps = TARGET_FPS
+        self.measured_fps = 0.0
         self._last_ts = self.timestamp
         self.thread = threading.Thread(target=self.update, daemon=True)
 
@@ -434,7 +435,11 @@ class CameraStream:
                 dt = now - self._last_ts
                 if dt > 0:
                     inst_fps = 1.0 / dt
-                    self.measured_fps = 0.9 * self.measured_fps + 0.1 * inst_fps
+                    self.measured_fps = (
+                        inst_fps
+                        if self.measured_fps <= 0
+                        else 0.9 * self.measured_fps + 0.1 * inst_fps
+                    )
                 self._last_ts = now
                 with self.lock:
                     self.ret = ret
@@ -768,7 +773,7 @@ class MJPEGServer:
             if self._viewer_count <= 0:
                 return
         now = time.time()
-        if now - self.last_update_t < (1.0 / MJPEG_MAX_FPS):
+        if MJPEG_MAX_FPS > 0 and now - self.last_update_t < (1.0 / MJPEG_MAX_FPS):
             return
         self.last_update_t = now
         stream_frame = self._resize_for_stream(frame)

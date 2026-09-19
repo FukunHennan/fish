@@ -6,6 +6,7 @@ from unittest.mock import patch
 import cv2
 
 from camera_stream import RestartSafeCameraStream
+from config import TARGET_HEIGHT, TARGET_WIDTH
 
 
 class FakeFrame:
@@ -40,7 +41,7 @@ class FakeCapture:
         return True
 
     def get(self, key):
-        values = {3: 1280, 4: 720, 5: 60}
+        values = {3: TARGET_WIDTH, 4: TARGET_HEIGHT, 5: 60}
         return values.get(key, 0)
 
     def read(self):
@@ -82,6 +83,15 @@ class RestartSafeCameraStreamTests(unittest.TestCase):
         )
         self.camera_policy.start()
         self.addCleanup(self.camera_policy.stop)
+        # Runtime rotation is persisted for the real camera.  Lifecycle tests
+        # use a lightweight non-ndarray frame and must not depend on the
+        # workstation's current calibration angle.
+        self.video_rotation = patch(
+            "camera_stream.video_transform.load",
+            return_value={"angle": 0.0},
+        )
+        self.video_rotation.start()
+        self.addCleanup(self.video_rotation.stop)
 
     def test_release_waits_for_capture_thread_and_releases_device(self):
         capture = FakeCapture(block_after_first=False)
@@ -96,7 +106,10 @@ class RestartSafeCameraStreamTests(unittest.TestCase):
 
     def test_release_unblocks_a_driver_stuck_in_read(self):
         capture = FakeCapture(block_after_first=True)
-        with patch("camera_stream.cv2.VideoCapture", return_value=capture):
+        with patch("camera_stream.cv2.VideoCapture", return_value=capture), patch(
+            "camera_stream._read_fixed_resolution_frame",
+            return_value=FakeFrame(),
+        ):
             stream = RestartSafeCameraStream(1).start()
             time.sleep(0.02)
             stream.release()
@@ -207,6 +220,45 @@ class RestartSafeCameraStreamTests(unittest.TestCase):
         self.assertTrue(healthy.released)
         self.assertFalse(stream.thread.is_alive())
 
+    def test_watchdog_rebuilds_capture_when_driver_read_blocks(self):
+        blocked = FakeCapture(block_after_first=True)
+        healthy = FakeCapture()
+        opened = []
+
+        def fake_open(source):
+            opened.append(source)
+            if len(opened) == 1:
+                return blocked, "DSHOW", FakeFrame()
+            return healthy, "DSHOW", FakeFrame()
+
+        with patch(
+            "camera_stream._open_working_capture",
+            side_effect=fake_open,
+        ), patch(
+            "camera_stream._read_fixed_resolution_frame",
+            return_value=FakeFrame(),
+        ), patch(
+            "camera_stream.CAMERA_STALL_RECOVERY_S",
+            0.05,
+        ), patch(
+            "camera_stream.CAMERA_WATCHDOG_POLL_S",
+            0.01,
+        ), patch(
+            "camera_stream.CAMERA_RECOVERY_RETRY_S",
+            0.01,
+        ):
+            stream = RestartSafeCameraStream(1).start()
+            self.assertTrue(
+                wait_until(lambda: stream.cap is healthy and not stream._recovering),
+                "watchdog should release a blocked DSHOW read and rebuild capture",
+            )
+            stream.release()
+
+        self.assertTrue(blocked.released)
+        self.assertTrue(healthy.released)
+        self.assertFalse(stream.thread.is_alive())
+        self.assertFalse(stream._watchdog_thread.is_alive())
+
     def test_recovery_finds_same_camera_at_new_v4l2_index(self):
         original = FakeCapture()
         replacement = FakeCapture()
@@ -239,6 +291,9 @@ class RestartSafeCameraStreamTests(unittest.TestCase):
         ), patch(
             "camera_stream._linux_v4l2_present_names",
             side_effect=present_names,
+        ), patch(
+            "camera_stream.sys.platform",
+            "linux",
         ), patch(
             "camera_stream.CAMERA_STALL_RECOVERY_S",
             0.05,

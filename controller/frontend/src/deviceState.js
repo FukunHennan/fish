@@ -43,7 +43,6 @@ export function deviceStateSignature(devices) {
         lastSeen,
         uptimeMs,
         lastControlMs,
-        batterySampleAgeMs,
         rssi,
         visionActive,
         visionSessionId,

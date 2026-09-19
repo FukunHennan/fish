@@ -49,11 +49,73 @@ func TestDeviceStateUpdateKeepsDashboardFields(t *testing.T) {
 		"mode": 1.0, "frequency": 2.8, "amplitude": 31.0, "bias": -6.0,
 		"rssi": -48.0, "ip": "192.168.137.117", "firmwareVersion": "1.1.0",
 		"uptimeMs": 12345.0, "lastControlMs": 12000.0, "stopReason": "",
-		"batteryVoltage": 7.82, "batteryPercent": 76.0, "batterySampleAgeMs": 321.0,
+		"batteryVoltage": 7.82, "batteryPercent": 76.0,
 	})
 	d := h.List()[0]
-	if d.Bias != -6 || d.IP != "192.168.137.117" || d.UptimeMs != 12345 || d.LastControlMs != 12000 || d.BatteryVoltage != 7.82 || d.BatteryPercent != 76 || d.BatterySampleAgeMs != 321 {
+	if d.Bias != -6 || d.IP != "192.168.137.117" || d.UptimeMs != 12345 || d.LastControlMs != 12000 || d.BatteryVoltage != 7.82 || d.BatteryPercent != 76 {
 		t.Fatalf("设备状态字段未完整保存: %+v", d)
+	}
+}
+
+func TestCommandResultIsRetainedAsDeviceAcknowledgement(t *testing.T) {
+	h := New()
+	h.Register(Device{ID: "fish-ack"}, &fakeConn{})
+	h.Update("fish-ack", map[string]any{
+		"type": "command.result", "requestId": "realtime-7",
+		"success": true, "code": "OK", "message": "applied",
+	})
+	device := h.List()[0]
+	if !device.LastCommandAcked || !device.LastCommandSuccess ||
+		device.LastCommandRequestID != "realtime-7" || device.LastCommandCode != "OK" {
+		t.Fatalf("command acknowledgement not retained: %+v", device)
+	}
+}
+
+func TestProtocolV2PartialPacketsMergeWithoutClearingOtherState(t *testing.T) {
+	h := New()
+	h.Register(Device{ID: "fish-v2", ProtocolVersion: 2, BootID: "boot-7"}, &fakeConn{})
+	h.Update("fish-v2", map[string]any{
+		"type": "motion.state", "mode": "left", "frequency": 2.8,
+		"amplitude": 31.0, "bias": -12.0, "controlSource": "manual",
+	})
+	h.Update("fish-v2", map[string]any{
+		"type": "telemetry.battery", "batteryVoltage": 7.62, "batteryPercent": 71.0,
+	})
+	h.Update("fish-v2", map[string]any{
+		"type": "heartbeat", "uptimeMs": 5000.0, "lastControlMs": 4900.0,
+	})
+
+	device := h.List()[0]
+	if device.Mode != 3 || device.Frequency != 2.8 || device.Bias != -12 || device.BatteryPercent != 71 {
+		t.Fatalf("v2 分包没有正确合并: %+v", device)
+	}
+	if device.MotionStateAtMs == 0 || device.BatteryAtMs == 0 || device.HeartbeatAtMs == 0 {
+		t.Fatalf("服务器没有为各数据域独立打戳: %+v", device)
+	}
+}
+
+func TestUnqueuedReceiptDoesNotLeakPendingResult(t *testing.T) {
+	h := New()
+	receipt := h.QueueCommand("offline", "request-offline", map[string]any{"type": "command"}, 0)
+	if receipt.Queued() {
+		t.Fatal("离线设备命令不应入队")
+	}
+	h.mu.RLock()
+	_, leaked := h.pending["request-offline"]
+	h.mu.RUnlock()
+	if leaked {
+		t.Fatal("未入队命令不应残留 pending 回执")
+	}
+}
+
+func TestHeartbeatRTTUsesSmoothedTransportMeasurement(t *testing.T) {
+	h := New()
+	h.Register(Device{ID: "fish-1"}, &fakeConn{})
+	h.UpdateHeartbeatRTT("fish-1", 10*time.Millisecond)
+	h.UpdateHeartbeatRTT("fish-1", 30*time.Millisecond)
+	device := h.List()[0]
+	if device.HeartbeatRTTMs != 16 {
+		t.Fatalf("心跳 RTT 应采用平滑后的真实测量值，实际 %.1f ms", device.HeartbeatRTTMs)
 	}
 }
 
@@ -76,7 +138,7 @@ func TestHubKeepsRegistrationOrderAcrossStateUpdatesAndReconnect(t *testing.T) {
 	h.Register(Device{ID: "fish-b"}, first)
 	h.Register(Device{ID: "fish-a"}, second)
 	h.Update("fish-b", map[string]any{
-		"uptimeMs": 100.0, "lastControlMs": 80.0, "batterySampleAgeMs": 10.0, "rssi": -45.0,
+		"uptimeMs": 100.0, "lastControlMs": 80.0, "rssi": -45.0,
 	})
 	if devices := h.List(); len(devices) != 2 || devices[0].ID != "fish-b" || devices[1].ID != "fish-a" {
 		t.Fatalf("设备状态更新不应改变列表顺序: %+v", devices)
@@ -94,7 +156,7 @@ func TestHeartbeatOnlyUpdateDoesNotNotifyDashboard(t *testing.T) {
 	updates, unsubscribe := h.Subscribe()
 	defer unsubscribe()
 	h.Update("fish-1", map[string]any{
-		"uptimeMs": 100.0, "lastControlMs": 80.0, "batterySampleAgeMs": 10.0, "rssi": -45.0,
+		"uptimeMs": 100.0, "lastControlMs": 80.0, "rssi": -45.0,
 	})
 	select {
 	case <-updates:
@@ -138,6 +200,19 @@ func TestSendAndWaitClosesCommandLoop(t *testing.T) {
 	ack, sent, acknowledged := h.SendAndWait("fish-1", "req-1", map[string]any{"type": "command"}, time.Second)
 	if !sent || !acknowledged || ack["success"] != true {
 		t.Fatalf("command loop did not close: sent=%v acknowledged=%v ack=%#v", sent, acknowledged, ack)
+	}
+}
+
+func TestHeartbeatRTTReturnsSmoothedDeviceLatency(t *testing.T) {
+	h := New()
+	h.Register(Device{ID: "fish-1"}, &fakeConn{})
+	h.UpdateHeartbeatRTT("fish-1", 800*time.Millisecond)
+	rtt, ok := h.HeartbeatRTT("fish-1")
+	if !ok || rtt != 800*time.Millisecond {
+		t.Fatalf("expected measured RTT, got %v (ok=%v)", rtt, ok)
+	}
+	if _, ok := h.HeartbeatRTT("missing"); ok {
+		t.Fatal("missing device must not report an RTT")
 	}
 }
 
@@ -263,8 +338,9 @@ func TestNormalAndRealtimeMessagesShareOneOrderedWriter(t *testing.T) {
 func TestRemoveInactiveDevice(t *testing.T) {
 	h := New()
 	h.Register(Device{ID: "fish-1"}, &fakeConn{})
+	time.Sleep(2 * time.Millisecond)
 
-	removed := h.RemoveInactive(time.Nanosecond)
+	removed := h.RemoveInactive(time.Millisecond)
 	if len(removed) != 1 || removed[0] != "fish-1" {
 		t.Fatalf("过期设备没有被移除: %v", removed)
 	}

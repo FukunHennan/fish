@@ -13,7 +13,7 @@
 
 
 /* Wi-Fi 和控制器配置通过 Fish-Setup-XXXXXX 热点写入 NVS。 */
-#define FIRMWARE_VERSION "1.3.2"
+#define FIRMWARE_VERSION "1.4.5"
 
 /* Allow short Wi-Fi stalls without falsely declaring the controller lost. */
 #define CONTROLLER_HEARTBEAT_TIMEOUT_MS 10000
@@ -26,8 +26,8 @@
 #define CONTROLLER_DISCOVERY_SCAN_TIMEOUT_MS 260
 #define CONTROLLER_DISCOVERY_NEAR_SCAN_RADIUS 96
 
-/* Four WS2812 status LEDs connected to XIAO ESP32-C3 D3 / GPIO5. */
-#define STATUS_LED_PIN   D3
+/* Four WS2812 status LEDs: original XIAO D3 pad maps to Super Mini GPIO8. */
+#define STATUS_LED_PIN   8
 #define STATUS_LED_COUNT 4
 #define STATUS_LED_BRIGHTNESS 32
 
@@ -35,28 +35,22 @@
 #define BOOT_BUTTON_PIN 9
 #define BOOT_LONG_PRESS_MS 3000
 
-/* Battery voltage divider connected to XIAO ESP32-C3 D0 / GPIO2 (ADC). */
-#define BATTERY_SENSE_PIN D0
+/* Super Mini mounted on the original XIAO PCB footprint:
+ * servo: original XIAO D8 -> Super Mini GPIO2
+ * battery divider: original XIAO A0 -> Super Mini GPIO4 (ADC1)
+ */
+#define BATTERY_SENSE_PIN 4
 #define BATTERY_DIVIDER_RATIO 3.0f
-#define BATTERY_EMPTY_VOLTAGE 6.0f
-#define BATTERY_FULL_VOLTAGE 8.39f
+#define BATTERY_EMPTY_VOLTAGE 5.0f
+#define BATTERY_FULL_VOLTAGE 7.4f
 #define BATTERY_SAMPLE_INTERVAL_MS 10000
-
-/* Default XIAO I2C pins are D4/SDA (GPIO6) and D5/SCL (GPIO7). */
-#define AMBIENT_LIGHT_SAMPLE_INTERVAL_MS 5000
-#define AMBIENT_LIGHT_RESCAN_INTERVAL_MS 60000
-
 
 /* ========================================== */
 /*             1. 引脚定义                     */
 /* ========================================== */
 /*  除非更换了接线，否则不用改这一部分          */
 
-#if defined(CONFIG_IDF_TARGET_ESP32S3) || defined(ESP32S3)
-    #define SERVO_PIN   7       // 舵机(尾巴)信号线连接的引脚
-#else
-    #define SERVO_PIN   8
-#endif
+#define SERVO_PIN   2       // 原 XIAO D8 焊盘 / Super Mini GPIO2
 
 
 /* ========================================== */

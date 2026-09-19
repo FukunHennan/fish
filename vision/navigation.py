@@ -166,10 +166,14 @@ class HeadingEstimator:
         )
         self.heading = None
         self.source = "INVALID"
+        self.course = None
+        self.direction_mismatch = False
 
     def reset(self, initial_heading, position=None, timestamp=None):
         self.heading = _unit(initial_heading)
         self.source = "INITIAL"
+        self.course = None
+        self.direction_mismatch = False
         self._last_sample_time = (
             float(timestamp) if timestamp is not None else None
         )
@@ -197,8 +201,15 @@ class HeadingEstimator:
             return self.heading.copy(), self.source
 
         course = velocity / speed
-        # 精确 180° 更像色块跳变；正常急转会经过中间方向，允许快速跟随。
-        if float(np.dot(course, self.heading)) <= -0.95:
+        self.course = course.copy()
+        course_dot = float(np.dot(course, self.heading))
+        # 机器鱼不会倒车：如果实际位移与当前航向相反，说明启动参考
+        # 方向反了或鱼正在掉头。立即采用真实运动方向作为航向，交给
+        # 路径控制器输出连续转向修正，而不是再次要求人工标定。
+        self.direction_mismatch = course_dot < -0.25
+        if self.direction_mismatch:
+            self.heading = course.copy()
+            self.source = "COURSE_REVERSED"
             return self.heading.copy(), self.source
         blended = (1.0 - self.blend) * self.heading + self.blend * course
         self.heading = _unit(blended)
@@ -295,7 +306,7 @@ class PathGuidance:
     def prepared(self):
         return self.path is not None
 
-    def start(self, path_points, position, timestamp, initial_heading):
+    def start(self, path_points, position, timestamp, initial_heading=None):
         self.path = resample_polyline(path_points, self.spacing_m)
         lengths = np.linalg.norm(np.diff(self.path, axis=0), axis=1)
         self.cumulative = np.concatenate(([0.0], np.cumsum(lengths)))
@@ -303,6 +314,10 @@ class PathGuidance:
         self.segment_index = 0
         self._turn_sign = 0.0
         self.last_result = None
+        if initial_heading is None:
+            initial_heading = self._chord_direction(0.0, min(
+                float(self.cumulative[-1]), max(self.spacing_m, 0.12)
+            ))
         self.heading_estimator.reset(initial_heading, position, timestamp)
         return self.update(position, timestamp, allow_course_update=False)
 
@@ -480,6 +495,13 @@ class PathGuidance:
             ),
             "heading": heading.copy(),
             "heading_source": heading_source,
+            "course": (
+                None if self.heading_estimator.course is None
+                else self.heading_estimator.course.copy()
+            ),
+            "direction_mismatch": bool(
+                self.heading_estimator.direction_mismatch
+            ),
             "lookahead_m": active_lookahead_m,
             "lookahead_demand": lookahead_demand,
             "off_path_ratio": off_path_ratio,

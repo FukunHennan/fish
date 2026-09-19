@@ -134,7 +134,7 @@ button {
 
 .competitionHeader {
   display: grid;
-  grid-template-columns: 28% 43% 29%;
+  grid-template-columns: 22% 50% 28%;
   align-items: center;
   min-width: 0;
   padding: 0 1%;
@@ -146,14 +146,14 @@ button {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 2.4%;
+  gap: 3.5%;
 }
 
 .brandBlock h1 {
   margin: 0;
   overflow: hidden;
   color: #f3fbff;
-  font-size: 2.15em;
+  font-size: 1.48em;
   font-style: italic;
   line-height: 1;
   text-overflow: ellipsis;
@@ -174,8 +174,14 @@ button {
 }
 
 .brandBlock p {
-  margin-top: 0.36em;
-  font-size: 0.9em;
+  margin-top: 0.28em;
+  font-size: 0.76em;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+}
+
+.brandBlock > .fishLogo {
+  width: 3.1em;
 }
 
 .fishLogo {
@@ -460,10 +466,10 @@ p {
 }
 
 .spacePanel {
-  display: grid;
-  grid-template-rows: 8% 19% auto auto 9% 1fr;
-  align-items: start;
-  padding: 5% 6%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 5% 6% 6%;
 }
 
 .spacePanel header,
@@ -522,7 +528,177 @@ p {
 }
 
 .spacePanel h3 {
-  font-size: 1.55em;
+  margin: 0.16em 0 0;
+  overflow: hidden;
+  font-size: 1.35em;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.teamAccountIdentity {
+  display: grid;
+  grid-template-columns: 3.7em minmax(0, 1fr);
+  align-items: center;
+  gap: 0.8em;
+  margin-top: 1.25em;
+  padding-bottom: 1.15em;
+  border-bottom: 1px solid rgba(104, 203, 255, 0.18);
+}
+
+.teamAccountIdentity .teamBadge {
+  width: 3.7em;
+  margin: 0;
+}
+
+.teamAccountIdentity span,
+.teamAccountDetails dt {
+  color: #78b9de;
+  font-size: 0.72em;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+}
+
+.teamAccountDetails {
+  display: grid;
+  gap: 0.6em;
+  margin: 0.85em 0 0;
+}
+
+.teamAccountDetails > div {
+  min-width: 0;
+  padding: 0.72em 0.8em;
+  border: 1px solid rgba(85, 190, 248, 0.14);
+  border-radius: 8px;
+  background: rgba(5, 37, 72, 0.5);
+}
+
+.teamAccountDetails dt,
+.teamAccountDetails dd {
+  margin: 0;
+}
+
+.teamAccountDetails dd {
+  margin-top: 0.28em;
+  overflow: hidden;
+  color: #ecfbff;
+  font-size: 0.9em;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.teamRoster {
+  min-height: 0;
+  margin-top: 0.8em;
+}
+
+.teamRoster > header {
+  margin-bottom: 0.5em;
+}
+
+.teamRoster > header span {
+  color: #9dd9f8;
+  font-size: 0.76em;
+  font-weight: 800;
+}
+
+.teamRoster > header b {
+  color: #61e8ff;
+  font-size: 0.72em;
+}
+
+.teamMemberList {
+  display: grid;
+  gap: 0.42em;
+}
+
+.teamMember {
+  display: grid;
+  grid-template-columns: 2.25em minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.55em;
+  min-width: 0;
+  padding: 0.48em 0.58em;
+  border: 1px solid rgba(76, 196, 255, 0.16);
+  border-radius: 7px;
+  background: rgba(5, 36, 68, 0.58);
+}
+
+.teamMemberSlot {
+  display: grid;
+  width: 2.25em;
+  aspect-ratio: 1;
+  place-items: center;
+  border: 1px solid rgba(61, 220, 255, 0.48);
+  border-radius: 50%;
+  color: #78efff;
+  font-size: 0.68em;
+  font-weight: 950;
+}
+
+.teamMember > div {
+  min-width: 0;
+}
+
+.teamMember strong,
+.teamMember small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.teamMember strong {
+  color: #f1fcff;
+  font-size: 0.78em;
+}
+
+.teamMember small {
+  margin-top: 0.14em;
+  color: #75afd0;
+  font-size: 0.61em;
+}
+
+.teamMember em {
+  color: #55e7b0;
+  font-size: 0.62em;
+  font-style: normal;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.teamMember em.offline {
+  color: #ffbf78;
+}
+
+.teamAccountActions {
+  display: grid;
+  margin-top: auto;
+  padding-top: 1em;
+}
+
+.teamLogoutButton {
+  min-height: 2.8em;
+  border: 1px solid rgba(96, 199, 255, 0.42);
+  border-radius: 8px;
+  background: rgba(14, 68, 112, 0.62);
+  color: #dff8ff;
+  font-size: 0.84em;
+  font-weight: 850;
+  transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+}
+
+.teamLogoutButton:hover,
+.teamLogoutButton:focus-visible {
+  border-color: rgba(74, 223, 255, 0.85);
+  background: rgba(18, 99, 157, 0.8);
+  color: #fff;
+}
+
+.teamLogoutButton:disabled {
+  cursor: wait;
+  opacity: 0.65;
 }
 
 .spacePanel p,
@@ -824,79 +1000,99 @@ p {
   padding: 1.3%;
 }
 
-.trainingCards {
-  grid-template-columns: repeat(3, 1fr);
-}
-
-.trainingCard {
-  position: relative;
+.promoCards {
   display: grid;
-  grid-template-columns: 1fr 9%;
-  grid-template-rows: 62% 18% 16%;
+  grid-template-columns: repeat(3, 1fr);
   min-width: 0;
   min-height: 0;
-  padding: 2%;
+  gap: 1.4%;
+}
+
+.developmentBadge {
+  padding: 0.28em 0.68em;
+  border: 1px solid rgba(91, 205, 255, 0.3);
+  border-radius: 999px;
+  color: #8ccbed;
+  font-size: 0.68em;
+  font-weight: 800;
+}
+
+.promoCard {
+  position: relative;
+  display: grid;
+  grid-template-columns: 42% minmax(0, 1fr);
+  align-items: stretch;
+  min-width: 0;
+  min-height: 0;
   overflow: hidden;
   border: 1px solid rgba(52, 195, 255, 0.28);
-  border-radius: 7px;
+  border-radius: 9px;
   background: rgba(7, 42, 79, 0.72);
-  text-align: left;
 }
 
-.trainingImage {
-  grid-column: 1 / -1;
-  display: block;
-  width: 100%;
-  min-height: 0;
-  border-radius: 4px;
-  background:
-    linear-gradient(120deg, rgba(29, 231, 255, 0.15), transparent 44%),
-    radial-gradient(circle at 22% 60%, rgba(54, 226, 255, 0.6), transparent 9%),
-    radial-gradient(circle at 68% 44%, rgba(19, 117, 226, 0.7), transparent 10%),
-    linear-gradient(180deg, rgba(57, 217, 255, 0.4), rgba(6, 67, 116, 0.88));
-}
-
-.trainingImage.t1 {
-  background:
-    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.08) 0 26px, transparent 26px 72px),
-    linear-gradient(180deg, rgba(70, 214, 255, 0.38), rgba(4, 55, 98, 0.86));
-}
-
-.trainingImage.t2 {
-  background:
-    radial-gradient(ellipse at 50% 50%, transparent 22%, rgba(48, 244, 255, 0.95) 23% 25%, transparent 26%),
-    radial-gradient(circle at 22% 46%, rgba(54, 226, 255, 0.64), transparent 9%),
-    radial-gradient(circle at 78% 46%, rgba(40, 156, 255, 0.7), transparent 9%),
-    linear-gradient(180deg, rgba(57, 217, 255, 0.38), rgba(6, 67, 116, 0.86));
-}
-
-.trainingCard strong,
-.trainingCard small {
-  grid-column: 1;
-}
-
-.trainingCard strong {
-  align-self: end;
-  font-size: 1.2em;
-}
-
-.trainingCard small {
-  color: #8dc8e8;
-}
-
-.trainingCard i {
-  grid-column: 2;
-  grid-row: 2 / 4;
-  align-self: center;
-  justify-self: center;
+.promoVisual {
+  position: relative;
   display: grid;
-  width: 2.55em;
-  aspect-ratio: 1;
+  min-height: 0;
+  overflow: hidden;
   place-items: center;
-  border-radius: 999px;
-  background: rgba(50, 161, 230, 0.2);
-  color: #bcedff;
-  font-style: normal;
+  background:
+    radial-gradient(circle at 24% 25%, rgba(77, 236, 255, 0.48), transparent 7%),
+    linear-gradient(145deg, rgba(26, 213, 255, 0.32), rgba(3, 35, 79, 0.94));
+}
+
+.promoVisual::after {
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(90deg, transparent 0 20%, rgba(119, 223, 255, 0.08) 20.5% 21%);
+  content: "";
+}
+
+.promoVisual.collaboration {
+  background:
+    radial-gradient(circle at 32% 44%, rgba(61, 235, 255, 0.65), transparent 11%),
+    radial-gradient(circle at 72% 58%, rgba(125, 93, 255, 0.62), transparent 12%),
+    linear-gradient(145deg, #07527d, #071c51 74%);
+}
+
+.promoVisual.future {
+  background:
+    radial-gradient(ellipse at 55% 76%, rgba(41, 244, 215, 0.42), transparent 24%),
+    linear-gradient(145deg, #103d78, #221358 80%);
+}
+
+.promoVisual .fishLogo {
+  z-index: 1;
+  width: 48%;
+  filter: drop-shadow(0 0 10px rgba(53, 226, 255, 0.7));
+}
+
+.promoCardText {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  padding: 5%;
+}
+
+.promoCardText small {
+  color: #60e5ff;
+  font-size: 0.66em;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.promoCardText strong {
+  margin-top: 0.28em;
+  color: #f2fcff;
+  font-size: 1em;
+}
+
+.promoCardText p {
+  margin-top: 0.35em;
+  color: #8bbfdd;
+  font-size: 0.68em;
+  line-height: 1.4;
 }
 
 .controlScreen {
@@ -3159,14 +3355,13 @@ p {
   box-shadow: inset 0 0 12px rgba(64, 204, 255, .1);
 }
 
+.miniKeyPad button[data-control-action="forward"] {
+  grid-column: 1 / -1;
+}
+
 .playerControl.playerB .miniKeyPad button {
   border-color: rgba(127, 153, 255, .34);
   background: linear-gradient(180deg, rgba(59, 78, 169, .78), rgba(24, 37, 91, .94));
-}
-
-.miniKeyPad button.stopKey {
-  border-color: rgba(255, 83, 101, .48);
-  background: linear-gradient(180deg, rgba(171, 43, 54, .84), rgba(74, 12, 24, .94));
 }
 
 .miniKeyPad .keyGlyph {
@@ -3195,12 +3390,6 @@ p {
 .playerControl.playerB .miniKeyPad button:active {
   border-color: rgba(166, 187, 255, .98);
   box-shadow: 0 0 18px rgba(118, 142, 255, .28), inset 0 0 16px rgba(136, 157, 255, .17);
-}
-
-.miniKeyPad button.stopKey.pressed,
-.miniKeyPad button.stopKey:active {
-  border-color: rgba(255, 108, 126, .98);
-  box-shadow: 0 0 18px rgba(255, 67, 91, .3), inset 0 0 16px rgba(255, 109, 126, .14);
 }
 
 .keyConfigDialog.dualAccountsDialog {
@@ -3428,7 +3617,7 @@ p {
 .v3MatchHud{
   grid-column:1/-1;
   display:grid !important;
-  grid-template-columns:22% 25% 17% 12% 12% 12%;
+  grid-template-columns:22% 30% 18% 14% 16%;
   grid-template-rows:1fr !important;
   align-items:stretch;
   gap:.55%;
@@ -3442,8 +3631,7 @@ p {
 .matchIdentity,
 .matchOpponent,
 .v3Score,
-.hudTimer,
-.hudLiveState{
+.hudTimer{
   min-width:0;
   border:1px solid rgba(72,185,255,.14);
   border-radius:8px;
@@ -3526,16 +3714,6 @@ p {
   line-height:1;
   font-variant-numeric:tabular-nums;
 }
-.hudLiveState{
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  gap:.45em;
-  color:#8effc7;
-  font-size:.9em;
-  font-weight:900;
-}
-.hudLiveState i,
 .playerOnline i,
 .liveBadge i{
   width:.55em;
@@ -3563,7 +3741,7 @@ p {
   min-width:0;
   min-height:0;
   display:grid;
-  grid-template-rows:13% 18% minmax(0,1fr) 10%;
+  grid-template-rows:15% 18% minmax(0,1fr) 16%;
   gap:1.5%;
   padding:4%;
   overflow:hidden;
@@ -3587,22 +3765,47 @@ p {
   gap:.7em;
 }
 .playerSeat{
-  display:grid;
+  display:block;
   flex:0 0 auto;
-  width:2.6em;
-  aspect-ratio:1;
-  place-items:center;
+  width:3.45em;
+  height:2.6em;
+  padding:0 1.05em 0 .35em;
   border:1px solid rgba(60,218,255,.45);
   border-radius:8px;
   background:linear-gradient(145deg,rgba(38,223,255,.28),rgba(21,110,255,.28));
   color:#7feeff;
+  appearance:none;
+  -webkit-appearance:none;
+  cursor:pointer;
   font-size:1.1em;
   font-weight:950;
+  text-align:center;
+  text-align-last:center;
+}
+.playerSeatPicker{
+  position:relative;
+  display:block;
+  flex:0 0 auto;
+}
+.playerSeatPicker::after{
+  position:absolute;
+  top:50%;
+  right:.38em;
+  color:#7feeff;
+  content:'▾';
+  font-size:.66em;
+  pointer-events:none;
+  transform:translateY(-48%);
+}
+.playerSeat:focus-visible{
+  outline:2px solid rgba(100,232,255,.85);
+  outline-offset:2px;
 }
 .playerB .playerSeat{
   border-color:rgba(150,132,255,.40);
   background:linear-gradient(145deg,rgba(89,215,255,.24),rgba(132,91,255,.28));
 }
+.playerB .playerSeatPicker::after{color:#b8aeff}
 .matchPlayerHead h2{
   margin:0;
   font-size:1.05em;
@@ -3625,21 +3828,88 @@ p {
 }
 .matchPlayerMetrics{
   display:grid;
-  grid-template-columns:repeat(3,minmax(0,1fr));
-  gap:2%;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  grid-template-rows:repeat(2,minmax(0,1fr));
+  gap:.42em;
+  min-height:0;
 }
 .matchPlayerMetrics .deviceMetric{
+  display:grid;
+  grid-template-columns:1.15em auto minmax(0,1fr);
+  grid-template-rows:1fr;
   min-width:0;
-  padding:6% 3%;
+  align-items:center;
+  column-gap:.45em;
+  padding:.42em .58em;
+  border-color:rgba(75,194,245,.16);
+  border-radius:8px;
+  background:
+    linear-gradient(90deg,rgba(12,59,96,.58),rgba(4,30,59,.68));
+  box-shadow:inset 0 1px 0 rgba(134,228,255,.035);
 }
-.matchPlayerMetrics .deviceMetric svg{width:1.25em;height:1.25em}
-.matchPlayerMetrics .deviceMetric small{font-size:.66em}
+.matchPlayerMetrics .deviceMetric:last-child{
+  grid-column:1/-1;
+  background:
+    linear-gradient(90deg,rgba(12,64,101,.66),rgba(4,29,57,.52));
+}
+.matchPlayerMetrics .deviceMetric svg{
+  grid-row:auto;
+  width:1.05em;
+  height:1.05em;
+  opacity:.9;
+}
+.matchPlayerMetrics .deviceMetric small{
+  color:#78b9d9;
+  font-size:.64em;
+  letter-spacing:.05em;
+}
 .matchPlayerMetrics .deviceMetric b{
   overflow:hidden;
-  font-size:.85em;
+  justify-self:end;
+  color:#e7faff;
+  font-size:.78em;
+  font-variant-numeric:tabular-nums;
   white-space:nowrap;
   text-overflow:ellipsis;
 }
+.matchPlayerMetrics .deviceMetric:last-child b{
+  justify-self:start;
+  color:#9fddf6;
+}
+.playerVisionRole{
+  width:100%;
+  min-width:0;
+  height:2.15em;
+  padding:0 1.65em 0 .65em;
+  border:1px solid rgba(65,226,201,.28);
+  border-radius:6px;
+  outline:0;
+  background:#07344b;
+  color:#a8fff0;
+  cursor:pointer;
+  font:800 .72em system-ui,'Microsoft YaHei',sans-serif;
+  text-align:left;
+}
+.playerVisionRole:disabled{
+  border-color:rgba(117,170,194,.16);
+  color:#7299ab;
+  cursor:not-allowed;
+  opacity:.78;
+}
+.playerVisionRole:focus-visible{
+  border-color:#54e7ff;
+  box-shadow:0 0 0 2px rgba(84,231,255,.16);
+}
+.playerVisionRole option{background:#08233a;color:#dffaff}
+.matchPlayerMetrics .deviceMetric.good{
+  border-color:rgba(61,230,172,.2);
+  background:linear-gradient(90deg,rgba(12,85,80,.5),rgba(4,35,60,.58));
+}
+.matchPlayerMetrics .deviceMetric.warn{
+  border-color:rgba(255,183,77,.2);
+}
+.matchPlayerMetrics .deviceMetric.warn svg{stroke:#ffc068}
+.matchPlayerMetrics .deviceMetric.warn b{color:#ffd497}
 .playerControlBlock{
   min-height:0;
   display:grid;
@@ -3700,13 +3970,42 @@ p {
   color:#6f9cb6;
   font-size:.64em;
 }
+.playerHeadActions{display:flex;flex-direction:column;align-items:flex-end;justify-content:center;gap:.35em}
+.playerHeaderReady{
+  min-width:6.8em;
+  padding:.38em .65em;
+  border:1px solid rgba(69,218,255,.35);
+  border-radius:6px;
+  background:rgba(8,64,98,.78);
+  color:#bdefff;
+  font-size:.67em;
+  font-weight:850;
+  cursor:pointer;
+}
+.playerHeaderReady:disabled{cursor:not-allowed;opacity:.5}
+.playerHeaderReady.ready{border-color:rgba(70,232,166,.48);background:rgba(8,106,75,.76);color:#baffdf}
+.playerMotionTuning{
+  display:grid;
+  grid-template-rows:repeat(2,minmax(0,1fr));
+  gap:.25em;
+  padding:2.5% 4%;
+  border-left:3px solid #26dfff;
+  border-radius:6px;
+  background:rgba(8,50,82,.56);
+}
+.playerB .playerMotionTuning{border-left-color:#8c79ff}
+.playerMotionTuning label{display:grid;grid-template-columns:3.8em minmax(0,1fr) 4.2em;align-items:center;gap:.45em;min-width:0}
+.playerMotionTuning span{color:#9dd4eb;font-size:.66em;font-weight:800}
+.playerMotionTuning input{width:100%;min-width:0;margin:0;accent-color:#26dfff}
+.playerB .playerMotionTuning input{accent-color:#8c79ff}
+.playerMotionTuning output{color:#e7fbff;font-size:.68em;font-weight:850;text-align:right;white-space:nowrap}
 
 /* center field is the visual focus */
 .v3FieldPanel{
   min-width:0;
   min-height:0;
   display:grid !important;
-  grid-template-rows:9% minmax(0,1fr) 7% !important;
+  grid-template-rows:minmax(0,1fr) !important;
   padding:.8% !important;
   overflow:hidden;
   border-color:rgba(54,205,255,.30);
@@ -4252,8 +4551,10 @@ p {
 .deviceTestDialog footer{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:14px;padding-top:12px;border-top:1px solid rgba(126,194,220,.16)}
 .deviceTestDone{padding:8px 18px;border:1px solid rgba(77,231,177,.44);border-radius:8px;background:#0b654d;color:#eaffff;font-weight:800;cursor:pointer}
 .deviceTestDone:disabled{cursor:not-allowed;opacity:.5;background:#173b46}
-.poolStage.matchPool{background:#02070c!important}
+.poolStage.matchPool{background:radial-gradient(circle at 50% 45%,#123247 0%,#071722 58%,#02070c 100%)!important}
 .poolStage.matchPool::before,.poolStage.matchPool::after{display:none!important}
+.poolStage.matchPool video[data-fish-video-backdrop]{opacity:1}
+.poolStage.matchPool video[data-fish-video]{filter:drop-shadow(0 0 14px rgba(34,203,255,.16))}
 @media (max-width:700px){.deviceTestGrid{grid-template-columns:1fr}.deviceTestSummary{display:grid}.deviceTestSummary small{margin-left:0}.deviceTestDialog{padding:14px}}
 .controlPreflight{
   display:grid !important;
@@ -4745,6 +5046,17 @@ p {
 
 .studentReplayStats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.65%}.studentReplayStats article{display:grid;align-content:center;padding:0 8%}.studentReplayStats span{color:#6f9fb7;font-size:.58em}.studentReplayStats b{margin:.12em 0;color:#eafaff;font-size:1.05em}.studentReplayStats small{color:#78a9c0;font-size:.56em}
 
+.studentReplayField video{display:block;width:100%;height:100%;object-fit:contain;background:#01070d}
+.studentReplayEmpty{display:grid;height:100%;place-items:center;padding:8%;color:#78a9c0;text-align:center}
+.studentReplayEmpty b{display:block;margin-bottom:.45em;color:#dff7ff;font-size:1em}.studentReplayEmpty span{font-size:.65em;line-height:1.6}
+.studentReplayStatus{display:flex;align-items:center;justify-content:space-between;gap:1em;padding-top:.6%;color:#78a9c0;font-size:.58em}
+.studentReplayStatus b{max-width:72%;overflow:hidden;color:#bfeeff;white-space:nowrap;text-overflow:ellipsis}
+.studentReviewDetails{min-height:0;overflow-y:auto;padding-top:4%}
+.studentReviewDetails article{margin-bottom:.6em;padding:.75em;border:1px solid rgba(70,180,230,.12);border-radius:8px;background:rgba(5,29,52,.62)}
+.studentReviewDetails span,.studentReviewDetails small{display:block;color:#6f9fb8;font-size:.57em}.studentReviewDetails b{display:block;margin:.2em 0;color:#dff7ff;font-size:.72em}
+.studentReviewScore{display:grid!important;grid-template-columns:1fr auto 1fr;align-items:center;text-align:center}.studentReviewScore strong{color:#fff;font-size:1.35em}.studentReviewScore em{padding:0 .5em;color:#6f9fb8;font-style:normal}.studentReviewScore .blue{color:#46ddff}.studentReviewScore .red{color:#ff7388}
+.studentReplayNotice{align-self:end;padding:.8em;border:1px solid rgba(65,204,255,.16);border-radius:7px;background:rgba(8,58,84,.3);color:#8bc8df;font-size:.58em;line-height:1.55}
+
 .studentReviewPanel{display:grid;grid-template-rows:7% minmax(0,1fr) 8%;gap:1%}
 .studentReviewTabs{display:grid;grid-template-columns:1fr 1fr;padding:.3em;border:1px solid rgba(70,180,230,.12);border-radius:7px;background:#061f38}.studentReviewTabs button{border:0;border-radius:5px;background:transparent;color:#76a4bb;font-size:.65em;font-weight:900}.studentReviewTabs button.active{background:#0d5c88;color:#dff8ff}
 .reviewPane{min-height:0;display:none;overflow:hidden}.reviewPane.active{display:grid;grid-template-rows:10% minmax(0,1fr)}.reviewPane>header{display:flex;align-items:center}.reviewPane h2{font-size:.95em}.reviewPane header p{margin-top:.12em;color:#6e9db5;font-size:.58em}
@@ -4845,70 +5157,103 @@ p {
 .simpleBlockPanel{
   min-height:0;
   display:grid;
-  grid-template-rows:9% minmax(0,1fr) 17%;
-  gap:2%;
-  padding:5%;
+  grid-template-rows:auto minmax(0,1fr) auto;
+  gap:1em;
+  padding:1.05em;
   overflow:hidden;
 }
+.simpleBlockPanel>header{display:flex;align-items:flex-start;justify-content:space-between;gap:.6em}
 .simpleBlockPanel h2{font-size:1em}
 .simpleBlockPanel header p{
   margin-top:.15em;
   color:#6f9db6;
   font-size:.62em;
 }
+.simpleBlockPanel>header>span{
+  flex:0 0 auto;
+  padding:.28em .55em;
+  border:1px solid rgba(72,210,255,.2);
+  border-radius:999px;
+  background:rgba(13,75,108,.34);
+  color:#76e8ff;
+  font-size:.53em;
+  font-weight:900;
+}
 .simpleBlockList{
   min-height:0;
-  display:flex;
-  flex-direction:column;
-  gap:.48em;
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  align-content:start;
+  gap:.65em;
   overflow-y:auto;
   padding-right:2%;
 }
 .simplePaletteBlock{
-  flex:0 0 auto;
+  position:relative;
   display:grid;
-  grid-template-columns:2.2em minmax(0,1fr) auto;
+  grid-template-columns:2.55em minmax(0,1fr);
+  grid-template-rows:auto auto;
   align-items:center;
-  gap:.5em;
-  min-height:3.3em;
-  padding:.4em .65em;
-  border:1px solid rgba(255,255,255,.08);
-  border-radius:7px 14px 14px 7px;
+  gap:.15em .55em;
+  min-height:5.8em;
+  padding:.72em .62em;
+  overflow:hidden;
+  border:1px solid rgba(255,255,255,.1);
+  border-radius:11px;
   color:#fff;
   text-align:left;
-  font-size:.7em;
+  font-size:.68em;
   font-weight:900;
   cursor:pointer;
+  box-shadow:inset 0 1px rgba(255,255,255,.08),0 7px 16px rgba(0,0,0,.12);
+  transition:transform .16s ease,filter .16s ease,border-color .16s ease;
 }
 .simplePaletteBlock i{
+  grid-row:1/3;
   display:grid;
   place-items:center;
-  width:1.9em;
+  width:2.5em;
   aspect-ratio:1;
-  border-radius:5px;
+  border-radius:9px;
   background:rgba(255,255,255,.12);
+  box-shadow:inset 0 1px rgba(255,255,255,.13);
   font-style:normal;
+  font-size:1.3em;
 }
+.simplePaletteBlock span{align-self:end;line-height:1.15}
+.simplePaletteBlock small{align-self:start;color:rgba(224,246,255,.62);font-size:.72em;font-weight:750}
 .simplePaletteBlock em{
+  position:absolute;
+  right:.48em;
+  top:.42em;
+  display:grid;
+  place-items:center;
+  width:1.55em;
+  aspect-ratio:1;
+  border-radius:50%;
+  background:rgba(255,255,255,.14);
   font-style:normal;
-  font-size:1.15em;
-  opacity:.72;
+  font-size:1em;
 }
-.simplePaletteBlock.motion{background:#147dcc}
-.simplePaletteBlock.control{background:#c47b24}
+.simplePaletteBlock.motion{background:linear-gradient(145deg,#126eb8,#0d4f8e)}
+.simplePaletteBlock.control{background:linear-gradient(145deg,#b66c1d,#7b4415)}
 .simplePaletteBlock.formation{background:#6259c6}
 .simplePaletteBlock:hover{
   filter:brightness(1.12);
-  transform:translateX(2px);
+  transform:translateY(-2px);
+  border-color:rgba(150,239,255,.32);
 }
 .simpleBlockTip{
-  display:grid;
-  align-content:center;
-  padding:.7em;
+  display:flex;
+  align-items:flex-start;
+  gap:.55em;
+  padding:.68em .72em;
   border:1px solid rgba(71,186,232,.11);
-  border-radius:7px;
+  border-radius:9px;
   background:rgba(5,27,49,.58);
 }
+.simpleBlockTip i{display:grid;place-items:center;flex:0 0 1.65em;aspect-ratio:1;border-radius:50%;background:rgba(65,209,255,.12);color:#59ddff;font-style:normal;font-size:.7em}
+.simpleBlockTip div{display:grid;min-width:0}
 .simpleBlockTip b{
   color:#bfeaff;
   font-size:.65em;
@@ -4924,7 +5269,7 @@ p {
   min-width:0;
   min-height:0;
   display:grid;
-  grid-template-rows:8% 7% minmax(0,1fr) 6%;
+  grid-template-rows:8% 34% minmax(0,1fr) 6%;
   padding:2%;
   overflow:hidden;
   border-color:rgba(55,205,255,.25);
@@ -4949,39 +5294,99 @@ p {
   color:#bce7f8;
   font-size:.62em;
 }
-.simpleStartBlock{
-  align-self:center;
-  width:54%;
-  padding:.65em .85em;
-  border-radius:15px 15px 6px 6px;
-  background:#7046b4;
-  color:white;
-  font-size:.72em;
-  font-weight:900;
-  box-shadow:0 5px 12px rgba(0,0,0,.13);
-}
 .simpleWorkspaceCanvas{
   min-height:0;
-  padding:1.4% 2.5% 3%!important;
+  padding:.75em 1em 1em 3.65em!important;
   overflow-y:auto;
-  border:1px dashed rgba(67,203,251,.18)!important;
-  border-radius:8px!important;
+  border:1px solid rgba(67,203,251,.16)!important;
+  border-radius:10px!important;
   background:
-    linear-gradient(rgba(255,255,255,.013) 1px,transparent 1px),
-    linear-gradient(90deg,rgba(255,255,255,.013) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(43,195,242,.07) 1px,transparent 1px),
     rgba(4,22,41,.55)!important;
-  background-size:26px 26px!important;
+  background-size:3.1em 100%!important;
 }
 .simpleWorkspaceCanvas .workspaceBlock{
-  width:76%!important;
-  margin:.35em 0!important;
+  width:100%!important;
+  max-width:100%!important;
+  margin:0 0 .62em!important;
 }
 .simpleWorkspaceCanvas .workspaceBlock .workspaceGrip{
-  display:none;
+  display:grid;
 }
 .simpleWorkspaceCanvas .workspaceBlock.containerBlock{
-  width:76%!important;
+  width:100%!important;
 }
+.simpleWorkspaceCanvas .mindBlock{filter:none}
+.simpleWorkspaceCanvas .mindBlockBody{
+  display:grid;
+  grid-template-columns:2.4em 2.25em minmax(0,1fr) auto;
+  min-height:3.75em;
+  padding:.48em .55em .48em .42em;
+  border:1px solid rgba(255,255,255,.11);
+  border-radius:10px!important;
+  box-shadow:0 6px 14px rgba(0,0,0,.13),inset 0 1px rgba(255,255,255,.08);
+}
+.simpleWorkspaceCanvas .mindBlock:not(.hatBlock) .mindBlockBody:before,
+.simpleWorkspaceCanvas .mindBlock:not(.containerBlock) .mindBlockBody:after{display:none}
+.simpleWorkspaceCanvas .mindBlock.motion>.mindBlockBody{background:linear-gradient(90deg,#1269ad,#0c477d)}
+.simpleWorkspaceCanvas .mindBlock.control>.mindBlockBody{background:linear-gradient(90deg,#a9621c,#693b16)}
+.simpleWorkspaceCanvas .sequenceStep{
+  position:absolute;
+  left:-3.65em;
+  top:50%;
+  z-index:3;
+  display:grid;
+  place-items:center;
+  width:2.25em;
+  aspect-ratio:1;
+  transform:translateY(-50%);
+  border:1px solid rgba(72,215,255,.33);
+  border-radius:50%;
+  background:#082b49;
+  color:#8cecff;
+  font-size:.66em;
+  font-weight:950;
+  box-shadow:0 0 0 4px #061a2f;
+}
+.simpleWorkspaceCanvas .mindBlock:not(:last-child):after{
+  content:"";
+  position:absolute;
+  left:-2.55em;
+  top:calc(50% + 1.25em);
+  bottom:-1.2em;
+  width:1px;
+  background:linear-gradient(#35caed,rgba(53,202,237,.16));
+}
+.simpleWorkspaceCanvas .workspaceGrip{width:2.05em;height:2.05em;place-items:center;border-radius:7px;background:rgba(0,0,0,.14);color:rgba(255,255,255,.63);font-size:.85em;touch-action:none;user-select:none}
+.simpleWorkspaceCanvas .workspaceBlock.isDragging .mindBlockBody{opacity:.58;outline:1px solid rgba(109,235,255,.5);box-shadow:0 10px 26px rgba(0,0,0,.24)}
+.simpleWorkspaceCanvas .mindBlockBody>i{display:grid;place-items:center;width:2em;aspect-ratio:1;border-radius:7px;background:rgba(255,255,255,.12);font-size:1em}
+.simpleWorkspaceCanvas .mindBlockSentence{display:flex;align-items:center;gap:.45em;font-size:.72em}
+.simpleWorkspaceCanvas .mindBlockSentence b{font-size:1em}
+.sequenceBlockActions{display:flex;align-items:center;gap:.3em}
+.sequenceBlockActions button{display:grid;place-items:center;width:2em!important;height:2em!important;margin:0!important;border:1px solid rgba(255,255,255,.12)!important;border-radius:7px!important;background:rgba(0,0,0,.13)!important;color:#fff!important;font-size:.85em!important;opacity:.72!important;cursor:pointer}
+.sequenceBlockActions button:hover{opacity:1!important;background:rgba(0,0,0,.26)!important}
+.sequenceBlockActions .blockDelete{font-size:1.15em!important}
+.simpleWorkspaceCanvas .parameterLabel{color:rgba(232,249,255,.76);font-size:.86em;font-weight:800;white-space:nowrap}
+.simpleWorkspaceCanvas .blockParam{display:inline-grid!important;grid-template-columns:1.75em 3.5em 1.75em auto;align-items:center;gap:.18em;min-height:2.2em;padding:.14em .3em;border:1px solid rgba(133,230,255,.28);border-radius:8px;background:rgba(3,35,61,.72)!important;color:#eafaff!important;box-shadow:inset 0 1px rgba(255,255,255,.07),0 2px 7px rgba(0,0,0,.12)}
+.simpleWorkspaceCanvas .blockParam button{display:grid!important;place-items:center;width:1.75em!important;height:1.75em!important;min-width:0!important;margin:0!important;padding:0!important;border:1px solid rgba(151,235,255,.18)!important;border-radius:6px!important;background:rgba(68,190,232,.14)!important;color:#c9f6ff!important;opacity:1!important;font:950 1em/1 sans-serif!important;cursor:pointer!important}
+.simpleWorkspaceCanvas .blockParam button:hover{background:rgba(72,215,255,.26)!important;color:#fff!important}
+.simpleWorkspaceCanvas .blockParam input{display:block!important;width:3.5em!important;min-width:3.5em;height:1.8em;margin:0;padding:0 .15em;border:1px solid rgba(125,221,250,.18)!important;border-radius:5px!important;outline:0;background:rgba(1,18,33,.58)!important;color:#f1fcff!important;-webkit-text-fill-color:#f1fcff!important;caret-color:#55ddff;opacity:1!important;font:950 1em/1.2 ui-monospace,SFMono-Regular,Consolas,monospace!important;text-align:center;font-variant-numeric:tabular-nums;-moz-appearance:textfield;appearance:textfield}
+.simpleWorkspaceCanvas .blockParam input:focus{border-color:#63e4ff!important;box-shadow:0 0 0 2px rgba(71,218,255,.14)}
+.simpleWorkspaceCanvas .blockParam input::-webkit-inner-spin-button,.simpleWorkspaceCanvas .blockParam input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+.simpleWorkspaceCanvas .blockParam small{padding:0 .12em;color:#a8d6e8!important;font-size:.78em;font-weight:950}
+.workspaceBlock.dragBefore .mindBlockBody{box-shadow:0 -3px 0 #6eeaff,0 6px 14px rgba(0,0,0,.13)}
+.workspaceBlock.dragAfter .mindBlockBody{box-shadow:0 3px 0 #6eeaff,0 6px 14px rgba(0,0,0,.13)}
+.workspaceEmpty{height:100%;min-height:11em;display:grid;place-content:center;justify-items:center;color:#6c9ab2;text-align:center}
+.workspaceEmptyIcon{display:grid;place-items:center;width:3.4em;aspect-ratio:1;border:1px solid rgba(76,214,255,.2);border-radius:13px;background:rgba(28,113,151,.13);color:#58ddff;font-size:1.35em!important}
+.workspaceEmpty b{margin:.65em 0 .18em;color:#d8f6ff;font-size:.82em}
+.workspaceEmpty>span{font-size:.62em}
+.programPresetList{display:flex;flex-wrap:wrap;justify-content:center;gap:.45em;margin-top:.9em}
+.workspaceEmpty .programPresetList{font-size:1em}
+.programPresetList button{padding:.48em .72em;border:1px solid rgba(76,201,246,.19);border-radius:7px;background:#082d4c;color:#bfeeff;font-size:.58em;font-weight:850;cursor:pointer}
+.programPresetList button:hover{border-color:#49dafa;background:#0b4168}
+.programFlowHead{display:flex;align-items:center;justify-content:space-between;margin:0 0 .6em -2.9em;padding:.35em .55em .35em .4em;border-radius:8px;background:rgba(105,67,171,.23);color:#d8c9ff;font-size:.62em;font-weight:850}
+.programFlowHead span:first-child{display:flex;align-items:center;gap:.45em}.programFlowHead i{display:grid;place-items:center;width:1.75em;aspect-ratio:1;border-radius:50%;background:#7046b4;color:#fff;font-style:normal}
+.programFlowHead em{color:#967ed0;font-style:normal;font-size:.9em}
 .simpleWorkspace>footer{
   display:flex;
   align-items:center;
@@ -5045,6 +5450,61 @@ p {
   height:auto!important;
   min-height:0;
 }
+.advancedProgramVideo{
+  display:grid;
+  grid-template-rows:1.7em minmax(0,1fr);
+  min-width:0;
+  min-height:0;
+  margin:.3em 0 .45em;
+  overflow:hidden;
+  border:1px solid rgba(63,205,255,.2);
+  border-radius:8px;
+  background:#020b13;
+}
+.advancedProgramVideo>header{
+  z-index:5;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:0 .75em;
+  border-bottom:1px solid rgba(74,198,247,.14);
+  background:#061f36;
+}
+.advancedProgramVideo>header b{color:#dff8ff;font-size:.62em}
+.advancedProgramVideo>header span{color:#65dfff;font-size:.52em;font-weight:800}
+.advancedProgramVideo .poolStage.matchPool{
+  height:100%!important;
+  border:0;
+  border-radius:0;
+  box-shadow:none;
+}
+.advancedDeviceTarget{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  align-content:center;
+  gap:.55em;
+  min-height:0;
+  padding:5%;
+  border:1px solid rgba(255,176,80,.24);
+  border-radius:9px;
+  background:linear-gradient(145deg,rgba(86,48,13,.38),rgba(5,28,49,.82));
+}
+.advancedDeviceTarget.online{
+  border-color:rgba(65,230,162,.34);
+  background:linear-gradient(145deg,rgba(10,88,66,.42),rgba(5,31,51,.84));
+}
+.advancedDeviceTarget>header,
+.advancedDeviceTarget>footer{grid-column:1/-1}
+.advancedDeviceTarget>header{display:flex;align-items:center;justify-content:space-between;gap:.7em}
+.advancedDeviceTarget>header span{color:#dff8ff;font-size:.76em;font-weight:900}
+.advancedDeviceTarget>header b{display:flex;align-items:center;gap:.42em;color:#ffc978;font-size:.65em}
+.advancedDeviceTarget.online>header b{color:#7dffc1}
+.advancedDeviceTarget>header i{width:.55em;aspect-ratio:1;border-radius:50%;background:currentColor;box-shadow:0 0 9px currentColor}
+.advancedDeviceTarget>div{min-width:0;padding:.62em .72em;border:1px solid rgba(87,184,226,.12);border-radius:7px;background:rgba(4,27,48,.58)}
+.advancedDeviceTarget small,.advancedDeviceTarget strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.advancedDeviceTarget small{color:#6e9db5;font-size:.54em}
+.advancedDeviceTarget strong{margin-top:.25em;color:#e8faff;font-size:.7em}
+.advancedDeviceTarget>footer{color:#75a9c1;font-size:.54em;line-height:1.45}
 .simpleSimButtons{
   display:grid;
   grid-template-columns:.75fr .75fr 1.5fr;
@@ -5063,6 +5523,7 @@ p {
   background:linear-gradient(180deg,#25ce8e,#16855e);
   color:#03271a;
 }
+.simpleSimButtons button:disabled{cursor:not-allowed;filter:saturate(.45);opacity:.5}
 .simpleSimStatus{
   display:grid;
   grid-template-columns:1fr 1fr;
@@ -5147,17 +5608,17 @@ p {
         </div>
         <div class="teamConfirmCard" id="teamConfirmCard" hidden>
           <h3>确认参赛队员</h3><p>本场使用同一台电脑，两名队员分别控制 B1 与 B2。</p>
-          <div class="teamConfirmSummary"><div><small>战队</small><br><strong>海洋先锋队</strong></div><span>TEAM OCEAN-017</span></div>
+          <div class="teamConfirmSummary"><div><small>战队</small><br><strong>等待读取</strong></div><span>账号信息待读取</span></div>
           <div class="playerConfirmList">
-            <article class="playerConfirm"><span class="playerAvatar">A</span><div><b>陈同学 · 一号位</b><small>B1 · 资源采集手 · WASD + Space</small></div><span class="playerReady">● 已就绪</span></article>
-            <article class="playerConfirm playerB"><span class="playerAvatar">B</span><div><b>李同学 · 二号位</b><small>B2 · 生态修复协作 · 方向键 + Enter</small></div><span class="playerReady">● 已就绪</span></article>
+            <article class="playerConfirm"><span class="playerAvatar">A</span><div><b>等待账号数据</b><small>B1 · 等待裁判分配机器鱼</small></div><span class="playerReady">● 等待上报</span></article>
+            <article class="playerConfirm playerB"><span class="playerAvatar">B</span><div><b>等待账号数据</b><small>B2 · 等待裁判分配机器鱼</small></div><span class="playerReady">● 等待上报</span></article>
           </div>
           <div class="teamConfirmActions"><button class="teamAuthSecondary" type="button" id="teamConfirmBack">返回</button><button class="teamAuthPrimary" type="button" id="teamEnterTerminal">进入比赛终端</button></div>
           <div class="teamAuthHint">等待读取裁判分配的真实机器鱼状态</div>
         </div>
       </section>
     </main>
-    <footer class="teamAuthFooter"><span>FISH CONTROL · TEAM COMPETITION ACCESS</span><span>边界保护正常 · 延迟 12ms · 丢包 0%</span></footer>
+    <footer class="teamAuthFooter"><span>FISH CONTROL · TEAM COMPETITION ACCESS</span><span>设备状态将在登录后读取真实上报</span></footer>
   </div>
 </section>
 
@@ -5166,42 +5627,41 @@ p {
   const pages = [
     { id: "lobby", label: "赛事中心", icon: "home", ratio: "1685 / 934", ratioValue: 1.8041 },
     { id: "control", label: "比赛操控", icon: "pad", ratio: "1672 / 940", ratioValue: 1.7787 },
-    { id: "missions", label: "自主挑战", icon: "flag", ratio: "1682 / 935", ratioValue: 1.7989 },
+    { id: "missions", label: "进阶控制", icon: "flag", ratio: "1682 / 935", ratioValue: 1.7989 },
     { id: "records", label: "成绩回放", icon: "chart", ratio: "1674 / 940", ratioValue: 1.7809 },
   ];
-  const resources = [
-    ["资源 #1", "blue", 38, 41], ["资源 #2", "yellow", 58, 36], ["资源 #3", "green", 31, 61],
-    ["资源 #4", "purple", 66, 59], ["资源 #5", "red-dot", 42, 75], ["资源 #6", "black", 62, 74],
-  ];
+  const resources = [];
   const taskList = [
     ["智能走迷宫", "在复杂水下迷宫中自主规划路径", "maze"],
     ["定点巡航", "按顺序到达多个指定点位完成巡航任务", "pin"],
     ["多鱼跟随 · 8字形", "三条机器鱼协同跟随完成轨迹运动", "fish"],
     ["自主水上足球", "自主识别目标，制定进攻策略并实现协同", "ball"],
   ];
-  const records = [
-    ["机器鱼水球 2v2", "2026-09-14 14:30", "36 : 24", "2v2 对抗"],
-    ["多鱼跟随（8字形）", "2025-05-18 10:12", "95 分", "技术挑战"],
-    ["智能走迷宫", "2025-05-17 16:20", "78 分", "自主任务"],
-    ["生态资源应急修复对抗", "2025-05-16 15:08", "112 分", "2v2 对抗"],
-    ["多鱼跟随（8字形）", "2025-05-15 11:26", "88 分", "技术挑战"],
-    ["智能走迷宫", "2025-05-14 09:42", "67 分", "自主任务"],
-  ];
   const validPageIds = new Set(pages.map((item) => item.id));
   const root = document.getElementById("competition-root");
   const DEFAULT_KEY_BINDINGS = {
-    b1: { forward: 'w', left: 'a', right: 'd', stop: ' ' },
-    b2: { forward: 'ArrowUp', left: 'ArrowLeft', right: 'ArrowRight', stop: 'Enter' },
+    b1: { forward: 'w', left: 'a', right: 'd' },
+    b2: { forward: 'ArrowUp', left: 'ArrowLeft', right: 'ArrowRight' },
   };
   const PLAYER_LABELS = { b1: '账号 A · B1', b2: '账号 B · B2' };
   let keyBindings = loadKeyBindings();
   let pendingBinding = null;
   let keyboardListenersReady = false;
+  const activeControlKeys = new Set();
   const deviceTestState = {
-    opened: true,
     b1: 'pending',
     b2: 'pending'
   };
+  const deviceAvailability = {
+    b1: { healthy: false, deviceId: '' },
+    b2: { healthy: false, deviceId: '' }
+  };
+  const readyDevice = { b1: '', b2: '' };
+  const playerMotionSettings = loadPlayerMotionSettings();
+  let studentCompetitionRecords = [];
+  let studentRecordsLoaded = false;
+  let studentRecordsSignature = '';
+  let selectedStudentRecordKey = '';
   let autonomousIdSeed = 80;
   const newBlockId = () => 'ab' + (++autonomousIdSeed);
   const autonomousState = {
@@ -5212,23 +5672,22 @@ p {
     runToken: 0,
     manualFish: 'B1',
     autoFish: 'B2',
-    blocks: [
-      {id:'ab71', type:'motion', op:'speed', label:'设置速度', icon:'≋', params:{speed:60}},
-      {id:'ab72', type:'motion', op:'forward', label:'前进', icon:'↑', params:{seconds:1}},
-      {id:'ab73', type:'control', op:'wait', label:'等待', icon:'◷', params:{seconds:0.5}},
-      {id:'ab74', type:'motion', op:'left', label:'左转', icon:'↶', params:{angle:30}},
-      {id:'ab75', type:'motion', op:'forward', label:'前进', icon:'↑', params:{seconds:1}},
-      {id:'ab76', type:'motion', op:'stop', label:'停止程序鱼', icon:'■', params:{}}
-    ]
+    blocks: []
   };
+  const activeProgramControls = new Map();
+  let renderedPage = '';
 
 
   function loadKeyBindings() {
     try {
       const saved = JSON.parse(localStorage.getItem('fish-control-dual-key-bindings') || '{}');
+      const clean = (player) => Object.fromEntries(['forward','left','right'].map((action) => [
+        action,
+        saved[player] && saved[player][action] ? saved[player][action] : DEFAULT_KEY_BINDINGS[player][action],
+      ]));
       return {
-        b1: { ...DEFAULT_KEY_BINDINGS.b1, ...(saved.b1 || {}) },
-        b2: { ...DEFAULT_KEY_BINDINGS.b2, ...(saved.b2 || {}) },
+        b1: clean('b1'),
+        b2: clean('b2'),
       };
     } catch (_) {
       return JSON.parse(JSON.stringify(DEFAULT_KEY_BINDINGS));
@@ -5237,6 +5696,31 @@ p {
 
   function saveKeyBindings() {
     try { localStorage.setItem('fish-control-dual-key-bindings', JSON.stringify(keyBindings)); } catch (_) {}
+  }
+
+  function loadPlayerMotionSettings() {
+    const defaults = { b1: { frequency: 2.5, amplitudePercent: 60 }, b2: { frequency: 2.5, amplitudePercent: 60 } };
+    try {
+      const saved = JSON.parse(localStorage.getItem('fish-player-motion-settings') || '{}');
+      ['b1','b2'].forEach((player) => {
+        const value = saved[player] || {};
+        const frequency = Number(value.frequency);
+        const amplitudePercent = Number(value.amplitudePercent);
+        if (Number.isFinite(frequency)) defaults[player].frequency = Math.max(.3, Math.min(5, frequency));
+        if (Number.isFinite(amplitudePercent)) defaults[player].amplitudePercent = Math.max(0, Math.min(100, amplitudePercent));
+      });
+    } catch (_) {}
+    return defaults;
+  }
+
+  function savePlayerMotionSettings() {
+    try { localStorage.setItem('fish-player-motion-settings', JSON.stringify(playerMotionSettings)); } catch (_) {}
+  }
+
+  function dispatchMotionTuning(player) {
+    document.dispatchEvent(new CustomEvent('fish-control-tuning', {
+      detail: { player, ...playerMotionSettings[player] },
+    }));
   }
 
   function keyLabel(key) {
@@ -5267,12 +5751,11 @@ p {
       ['forward', '↑', '前进', '向前推进'],
       ['left', '↶', '左转', '向左调整航向'],
       ['right', '↷', '右转', '向右调整航向'],
-      ['stop', '■', '紧急停止', '立即停止运动'],
     ].map(([action, icon, title, desc]) => '<div class="bindingRow"><span class="bindingIcon">' + icon + '</span><span class="bindingText"><b>' + title + '</b><small>' + desc + '</small></span><button type="button" class="bindingKey" data-bind-player="' + player + '" data-bind-action="' + action + '">' + keyLabel(keyBindings[player][action]) + '</button></div>').join('');
   }
 
   function keyConfigModal() {
-    return '<section class="keyConfigModal" aria-hidden="true"><div class="keyConfigDialog dualAccountsDialog" role="dialog" aria-modal="true" aria-label="双账号按键设置"><header class="keyConfigHeader"><div><h3>双账号独立按键</h3><p>一台电脑同时控制两条鱼。两套按键不能重复，修改后会自动保存。</p></div><button type="button" class="keyConfigClose" aria-label="关闭">×</button></header><div class="accountBindingColumns"><section class="accountBindingGroup"><header><b>账号 A · B1</b><span>默认 WASD + Space</span></header><div class="bindingList">' + bindingRows('b1') + '</div></section><section class="accountBindingGroup playerB"><header><b>账号 B · B2</b><span>默认方向键 + Enter</span></header><div class="bindingList">' + bindingRows('b2') + '</div></section></div><footer class="keyConfigFooter"><span class="keyConfigHint">两名队员可以同时按键控制，不需要切换设备</span><div class="keyConfigActions"><button type="button" class="keyReset">恢复默认</button><button type="button" class="keyDone">完成</button></div></footer></div></section>';
+    return '<section class="keyConfigModal" aria-hidden="true"><div class="keyConfigDialog dualAccountsDialog" role="dialog" aria-modal="true" aria-label="双账号按键设置"><header class="keyConfigHeader"><div><h3>双账号独立按键</h3><p>一台电脑同时控制两条鱼。两套按键不能重复，修改后会自动保存。</p></div><button type="button" class="keyConfigClose" aria-label="关闭">×</button></header><div class="accountBindingColumns"><section class="accountBindingGroup"><header><b>账号 A · B1</b><span>默认 W / A / D</span></header><div class="bindingList">' + bindingRows('b1') + '</div></section><section class="accountBindingGroup playerB"><header><b>账号 B · B2</b><span>默认 ↑ / ← / →</span></header><div class="bindingList">' + bindingRows('b2') + '</div></section></div><footer class="keyConfigFooter"><span class="keyConfigHint">两名队员可以同时按键控制，不需要切换设备</span><div class="keyConfigActions"><button type="button" class="keyReset">恢复默认</button><button type="button" class="keyDone">完成</button></div></footer></div></section>';
   }
 
   function pageFromHash() {
@@ -5303,27 +5786,27 @@ p {
   }
 
   function header(page) {
-    return '<header class="competitionHeader"><section class="brandBlock">' + fishLogo() + '<div><h1>FISH <span>CONTROL</span> 学生赛事端</h1><p>水下机器鱼 2v2 竞技平台</p></div></section>' + nav(page) + '<p class="headerSlogan">' + (page === 'control' ? '双人协作 · 稳定操控 · 实时比赛' : '科技 · 协作 · 挑战 · 成长') + '</p></header>';
+    return '<header class="competitionHeader"><section class="brandBlock">' + fishLogo() + '<div><h1>FISH <span>CONTROL</span></h1><p>学生赛事端</p></div></section>' + nav(page) + '<p class="headerSlogan">' + (page === 'control' ? '双人协作 · 稳定操控 · 实时比赛' : '科技 · 协作 · 挑战 · 成长') + '</p></header>';
   }
 
   function deviceTestCard(player, seat, student, device, playerClass = '') {
     const state = deviceTestState[player];
-    const stateText = state === 'ok' ? '已确认正常' : state === 'fault' ? '设备异常' : '等待确认';
+    const stateText = state === 'ok' ? '已提交正常' : state === 'fault' ? '已提交异常' : '等待测试';
     const stateClass = state === 'ok' ? 'ok' : state === 'fault' ? 'fault' : 'pending';
-    const subtitle = player === 'b1' ? 'W / A / D / Space' : '方向键 / Enter';
+    const subtitle = player === 'b1' ? 'W / A / D' : '↑ / ← / →';
     return '<article class="preflightDeviceCard ' + playerClass + ' ' + stateClass + '">' +
       '<header><div><span class="preflightSeat">' + seat + '</span><div><h3>' + student + '</h3><p>' + device + '</p></div></div><b class="preflightState">' + stateText + '</b></header>' +
       '<div class="preflightMetrics">' +
-        '<span><small>连接</small><b>在线</b></span>' +
-        '<span><small>电量</small><b>' + (player === 'b1' ? '78%' : '82%') + '</b></span>' +
-        '<span><small>延迟</small><b>' + (player === 'b1' ? '12 ms' : '16 ms') + '</b></span>' +
+        '<span><small>连接</small><b>等待上报</b></span>' +
+        '<span><small>电量</small><b>未上报</b></span>' +
+        '<span><small>延迟</small><b>测量中</b></span>' +
       '</div>' +
       '<section class="preflightControls"><header><b>设备测试</b><span>' + subtitle + '</span></header>' +
         playerControlPanel(player, seat, player === 'b1' ? '账号 A' : '账号 B', playerClass) +
       '</section>' +
       '<div class="preflightConfirm">' +
         '<button type="button" class="deviceFaultBtn" data-device-test="' + player + '" data-device-result="fault">设备异常</button>' +
-        '<button type="button" class="deviceOkBtn" data-device-test="' + player + '" data-device-result="ok">✓ 设备正常</button>' +
+        '<button type="button" class="deviceOkBtn" data-device-test="' + player + '" data-device-result="ok">✓ 提交正常</button>' +
       '</div>' +
       '</article>';
   }
@@ -5334,58 +5817,44 @@ p {
   }
 
   function lobbyPage() {
-    const training = [
-      ['iconRoute','操控练习','熟悉前进、转向与急停','约 8 分钟'],
-      ['iconMulti','双鱼协作','练习 B1 / B2 同时配合','约 10 分钟'],
-      ['iconTarget','进攻训练','练习推进、传球与射门','约 12 分钟']
-    ].map((x) => '<article class="trainingCard hoverCard"><span class="' + x[0] + '"></span><div><h3>' + x[1] + '</h3><p>' + x[2] + '</p><small>' + x[3] + '</small></div><button type="button" data-page="control">开始</button></article>').join('');
+    const promos = [
+      ['arena','水下竞技','展示机器鱼 2v2 赛事与场地科技'],
+      ['collaboration','智能协作','记录队员配合与机器鱼协同瞬间'],
+      ['future','探索未来','用于后续赛事招募与成果展示']
+    ].map((item) => '<article class="promoCard"><div class="promoVisual ' + item[0] + '">' + fishLogo() + '</div><div class="promoCardText"><small>宣传素材 · 待开发</small><strong>' + item[1] + '</strong><p>' + item[2] + '</p></div></article>').join('');
 
     const progress = preflightProgress();
-    const hasFault = ['b1','b2'].some(p => deviceTestState[p] === 'fault');
-    const hasTesting = ['b1','b2'].some(p => deviceTestState[p] === 'testing');
     let deviceCardClass = 'deviceCheckPending';
-    let deviceTitle = '设备检查';
-    let deviceDesc = '检查 B1 / B2 机器鱼、网络和控制状态';
-    let deviceSummary = '等待选手确认';
-    let deviceButton = '<button type="button" data-page="control">开始检查</button>';
-    let deviceTile = statusTile('设备检查', '待检查', 'orange');
+    let deviceTitle = '选手准备';
+    let deviceDesc = '设备在线后，两位选手分别确认准备完毕';
+    let deviceSummary = progress.ok + ' / 2 已准备';
+    let deviceButton = '<button type="button" data-page="control">进入比赛操控</button>';
+    let deviceTile = statusTile('选手准备', progress.ok + ' / 2', 'orange');
 
     if (progress.complete) {
       deviceCardClass = 'deviceCheckDone';
-      deviceDesc = 'B1 / B2 均已完成试动并确认设备正常';
-      deviceSummary = '✓ 2 / 2 检查完成';
-      deviceButton = '<button type="button" class="deviceDoneButton" disabled>✓ 检查完成</button>';
-      deviceTile = statusTile('设备检查', '2 / 2 检查完成', 'green');
-    } else if (hasFault) {
-      deviceCardClass = 'deviceCheckFault';
-      deviceDesc = '检测到设备异常，请进入比赛操控处理并重新确认';
-      deviceSummary = '⚠ 存在设备异常';
-      deviceButton = '<button type="button" data-page="control">处理异常</button>';
-      deviceTile = statusTile('设备检查', '存在异常', 'orange');
-    } else if (hasTesting) {
-      deviceCardClass = 'deviceCheckTesting';
-      deviceDesc = 'B1 / B2 正在进行受限试动与设备确认';
-      deviceSummary = progress.ok + ' / 2 已确认正常';
-      deviceButton = '<button type="button" data-page="control">继续检查</button>';
-      deviceTile = statusTile('设备检查', progress.ok + ' / 2 检查中', 'orange');
+      deviceDesc = 'B1 / B2 的已分配设备均在线，选手已确认准备';
+      deviceSummary = '✓ 2 / 2 已准备';
+      deviceButton = '<button type="button" data-page="control">进入比赛操控</button>';
+      deviceTile = statusTile('选手准备', '2 / 2 已准备', 'green');
     }
 
     return '<section class="screen lobbyScreen">' +
       '<aside class="spacePanel glassCard hoverCard">' +
-        '<header><h2>我的战队</h2><button type="button">›</button></header>' +
-        '<div class="teamBadge">' + fishLogo() + '</div>' +
-        '<h3>海洋先锋队</h3>' +
-        '<p>探索 · 协作 · 创新<br>用科技让海洋更美好</p>' +
-        '<div class="deviceStatus"><i></i>设备在线状态独立读取 · 视觉独立接入</div>' +
-        '<button class="outlineButton" type="button">管理我的设备</button>' +
-        '<small>更聪明的鱼<br>守护更美的海</small>' +
+        '<header><h2>我的战队</h2></header>' +
+        '<section class="teamAccountIdentity"><div class="teamBadge">' + fishLogo() + '</div><div><span>当前战队</span><h3 data-live-current-team>等待读取战队</h3></div></section>' +
+        '<dl class="teamAccountDetails">' +
+          '<div><dt>战队账号</dt><dd data-current-account>等待读取战队账号</dd></div>' +
+        '</dl>' +
+        '<section class="teamRoster"><header><span>战队成员</span><b data-team-member-count>等待读取</b></header><div class="teamMemberList" data-team-members><article class="teamMember"><span class="teamMemberSlot">--</span><div><strong>正在读取成员</strong><small>以服务器战队数据为准</small></div></article></div></section>' +
+        '<div class="teamAccountActions"><button class="teamLogoutButton" type="button" data-team-logout>切换战队账号</button></div>' +
       '</aside>' +
 
       '<main class="lobbyHero glassCard hoverCard">' +
         '<div class="waterBeam"></div><h2>准备开始比赛</h2><p>确认队员、设备与比赛状态，然后进入本场赛事</p>' +
         '<div class="heroCards">' +
-          '<article class="heroCard hoverCard"><span class="heroIcon trophy"></span><h3>当前比赛</h3><p>查看本场比赛与参赛状态</p><b>第 08 场 · 等待开始</b><button type="button" data-page="control">进入比赛</button></article>' +
-          '<article class="heroCard hoverCard"><span class="heroIcon compass"></span><h3>操控训练</h3><p>练习双人按键、转向和急停配合</p><button type="button" data-page="control">开始训练</button></article>' +
+          '<article class="heroCard hoverCard"><span class="heroIcon trophy"></span><h3>当前比赛</h3><p>查看本场比赛与参赛状态</p><b data-live-match-title>等待服务器</b><button type="button" data-page="control">进入比赛</button></article>' +
+          '<article class="heroCard hoverCard"><span class="heroIcon compass"></span><h3>操控训练</h3><p>练习双人按键与转向配合</p><button type="button" data-page="control">开始训练</button></article>' +
           '<article class="heroCard hoverCard deviceCheckCard ' + deviceCardClass + '">' +
             '<span class="heroIcon link"></span><h3>' + deviceTitle + '</h3><p>' + deviceDesc + '</p><b>' + deviceSummary + '</b>' + deviceButton +
           '</article>' +
@@ -5394,28 +5863,24 @@ p {
 
       '<aside class="lobbyStatus">' +
         '<section class="glassCard hoverCard"><h2>赛前状态</h2><div class="statusList">' +
-          statusTile('当前场次', '第 08 场', 'orange') +
-          statusTile('队员确认', '2 / 2 已确认') +
+          statusTile('当前场次', '等待读取', 'orange') +
+          statusTile('队员确认', '等待读取') +
           deviceTile +
-          statusTile('比赛网络', '正常', 'green') +
+          statusTile('比赛网络', '未测得') +
         '</div></section>' +
         '<section class="continuePanel glassCard hoverCard"><h2>继续训练</h2><div><span class="docIcon"></span><p><strong>双人操控训练</strong><small>继续上次键位与控制配置</small></p><button type="button" data-page="control">继续</button></div></section>' +
       '</aside>' +
 
-      '<section class="quickPanel glassCard hoverCard"><header><h2>训练项目</h2><button type="button">查看全部 ›</button></header><div class="trainingCards">' + training + '</div></section>' +
+      '<section class="quickPanel glassCard hoverCard"><header><h2>赛事宣传</h2><span class="developmentBadge">待开发区域</span></header><div class="promoCards">' + promos + '</div></section>' +
       '</section>';
   }
 
   function matchHud() {
-    const progress = preflightProgress();
-    const testLabel = progress.complete ? '✓ 设备检查完成' : '设备检查 ' + progress.ok + ' / 2';
     return '<section class="matchHud v3MatchHud">' +
-      '<div class="matchIdentity"><span>当前比赛</span><h2>机器鱼水球 · 2v2</h2><p>第 08 场 · 学生组 · A 赛场</p></div>' +
-      '<div class="matchOpponent"><span>我方</span><b>海洋先锋队</b><em>VS</em><b class="enemy">深海动力队</b></div>' +
-      '<div class="hudScore v3Score"><small>实时比分</small><b class="blue">36</b><em>:</em><b class="red">24</b></div>' +
-      '<div class="hudTimer"><small>剩余时间</small><strong>01:28</strong></div>' +
-      '<div class="hudLiveState"><i></i><span>比赛进行中</span></div>' +
-      '<button type="button" class="deviceTestOpen v3DeviceTestOpen ' + (progress.complete ? 'complete' : '') + '" data-device-test-open>' + controllerIcon() + '<span>' + testLabel + '</span></button>' +
+      '<div class="matchIdentity"><span>当前比赛</span><h2 data-live-match-title>等待服务器</h2><p data-live-match-meta>暂无真实比赛数据</p></div>' +
+      '<div class="matchOpponent"><span>我方</span><b data-live-blue-team>蓝队</b><em>VS</em><b class="enemy" data-live-red-team>红队</b></div>' +
+      '<div class="hudScore v3Score"><small>实时比分</small><b class="blue" data-live-blue-score>0</b><em>:</em><b class="red" data-live-red-score>0</b></div>' +
+      '<div class="hudTimer"><small>比赛计时</small><strong data-live-match-clock>00:00</strong></div>' +
       '<button type="button" class="keyConfigOpen v3KeyConfig">' + keyboardIcon() + '<span>按键设置</span></button>' +
       '</section>';
   }
@@ -5424,13 +5889,13 @@ p {
     const progress = preflightProgress();
     return '<section class="deviceTestModal" data-device-test-modal hidden>' +
       '<div class="deviceTestDialog" role="dialog" aria-modal="true" aria-label="设备测试">' +
-        '<header><div><span>比赛操控 · 快速检查</span><h2>设备测试</h2><p>在当前比赛界面完成受限试动与设备确认。</p></div><button type="button" class="deviceTestClose" data-device-test-close aria-label="关闭">×</button></header>' +
-        '<div class="deviceTestSummary"><b>' + progress.ok + ' / 2</b><span>队伍设备已确认</span><small>设备测试不计时、不计分，视觉与手动操控独立。</small></div>' +
+        '<header><div><span>比赛操控 · 快速检查</span><h2>设备测试</h2><p>完成受限试动并提交结果，等待裁判确认。</p></div><button type="button" class="deviceTestClose" data-device-test-close aria-label="关闭">×</button></header>' +
+        '<div class="deviceTestSummary"><b>' + progress.ok + ' / 2</b><span>队伍测试已提交</span><small>设备测试不计时、不计分，最终由裁判确认。</small></div>' +
         '<section class="deviceTestGrid">' +
-          deviceTestCard('b1', 'B1', '陈同学', 'Fish-B1-03', 'playerA') +
-          deviceTestCard('b2', 'B2', '李同学', 'Fish-B2-07', 'playerB') +
+          deviceTestCard('b1', 'B1', '等待账号数据', '等待裁判分配机器鱼', 'playerA') +
+          deviceTestCard('b2', 'B2', '等待账号数据', '等待裁判分配机器鱼', 'playerB') +
         '</section>' +
-        '<footer><span>' + (progress.complete ? '两台设备均已确认，可以继续比赛' : '请分别确认 B1 / B2 设备状态') + '</span><button type="button" class="deviceTestDone" data-device-test-close ' + (progress.complete ? '' : 'disabled') + '>' + (progress.complete ? '✓ 设备检查完成' : '等待设备确认') + '</button></footer>' +
+        '<footer><span>' + (progress.complete ? '两台设备均已提交，等待裁判确认' : '请分别提交 B1 / B2 测试结果') + '</span><button type="button" class="deviceTestDone" data-device-test-close ' + (progress.complete ? '' : 'disabled') + '>' + (progress.complete ? '✓ 测试结果已提交' : '等待测试提交') + '</button></footer>' +
       '</div>' +
     '</section>';
   }
@@ -5461,11 +5926,11 @@ p {
 
   function deviceCard(id, player, role, state, metrics, playerClass = '') {
     const accountLabel = player === 'b1' ? '选手账号 A' : '选手账号 B';
-    return '<article class="dualDeviceCard ' + playerClass + '"><span class="fishChip"></span><div class="deviceCardTitle"><h3>' + id + ' <small>机器鱼</small></h3><div class="accountIdentity"><span class="accountIcon">' + accountUserIcon() + '</span><strong>' + accountLabel + '</strong><small>已登录</small></div><p>' + role + '</p></div><b class="deviceRoleBadge">' + controllerIcon() + state + '</b><div class="deviceMetricGrid">' + metrics + '</div></article>';
+    return '<article class="dualDeviceCard ' + playerClass + '"><span class="fishChip"></span><div class="deviceCardTitle"><h3>' + id + ' <small>机器鱼</small></h3><div class="accountIdentity"><span class="accountIcon">' + accountUserIcon() + '</span><strong>' + accountLabel + '</strong><small>状态待读取</small></div><p>' + role + '</p></div><b class="deviceRoleBadge">' + controllerIcon() + state + '</b><div class="deviceMetricGrid">' + metrics + '</div></article>';
   }
 
   function playerControlPanel(player, fishId, subtitle, playerClass = '') {
-    return '<section class="playerControl ' + playerClass + '"><header><b>' + fishId + '</b><span>' + keyboardIcon() + subtitle + '</span></header><div class="miniKeyPad">' + controlButton(player, 'forward', '前进') + controlButton(player, 'left', '左转') + controlButton(player, 'right', '右转') + controlButton(player, 'stop', '急停', 'stopKey') + '</div></section>';
+    return '<section class="playerControl ' + playerClass + '"><header><b>' + fishId + '</b><span>' + keyboardIcon() + subtitle + '</span></header><div class="miniKeyPad">' + controlButton(player, 'forward', '前进') + controlButton(player, 'left', '左转') + controlButton(player, 'right', '右转') + '</div></section>';
   }
 
   function matchPool() {
@@ -5474,22 +5939,33 @@ p {
 
   function matchPlayerCard(player, fishId, student, device, metrics, playerClass = '') {
     const account = player === 'b1' ? '账号 A' : '账号 B';
-    const subtitle = player === 'b1' ? 'W / A / D / Space' : '方向键 / Enter';
+    const subtitle = player === 'b1' ? 'W / A / D' : '↑ / ← / →';
+    const ready = deviceTestState[player] === 'ok';
+    const available = deviceAvailability[player] && deviceAvailability[player].healthy;
+    const readyText = ready ? '✓ 已准备' : (available ? '准备完成' : '设备未就绪');
     return '<aside class="matchPlayerCard glassCard ' + playerClass + '">' +
-      '<header class="matchPlayerHead"><div><span class="playerSeat">' + fishId + '</span><div><h2>' + student + '</h2><p>' + device + ' · ' + account + '</p></div></div><b class="playerOnline"><i></i>在线</b></header>' +
+      '<header class="matchPlayerHead"><div><label class="playerSeatPicker"><select class="playerSeat" data-player-seat="' + player + '" aria-label="选择控制席位"><option value="1"' + (fishId.endsWith('1') ? ' selected' : '') + '>B1</option><option value="2"' + (fishId.endsWith('2') ? ' selected' : '') + '>B2</option></select></label><div><h2>' + student + '</h2><p>' + device + ' · ' + account + '</p></div></div><div class="playerHeadActions"><b class="playerOnline"><i></i>等待上报</b><button type="button" class="playerHeaderReady ' + (ready ? 'ready' : '') + '" data-player-ready="' + player + '" data-ready="' + (ready ? 'true' : 'false') + '" ' + ((!available && !ready) ? 'disabled' : '') + '><span>' + readyText + '</span></button></div></header>' +
       '<section class="matchPlayerMetrics">' + metrics + '</section>' +
       '<section class="playerControlBlock"><header><h3>控制按键</h3><span>' + subtitle + '</span></header>' +
       playerControlPanel(player, fishId, account, playerClass) +
       '</section>' +
-      '<div class="playerRuleHint"><b>比赛控制</b><span>前进 · 左转 · 右转 · 急停</span><small>不支持后退</small></div>' +
+      playerMotionTuning(player) +
       '</aside>';
+  }
+
+  function playerMotionTuning(player) {
+    const settings = playerMotionSettings[player];
+    return '<section class="playerMotionTuning" aria-label="运动参数">' +
+      '<label><span>频率</span><input type="range" min="0.3" max="5" step="0.1" value="' + settings.frequency + '" data-motion-player="' + player + '" data-motion-setting="frequency"><output data-motion-output="frequency">' + Number(settings.frequency).toFixed(1) + ' Hz</output></label>' +
+      '<label><span>幅度</span><input type="range" min="0" max="100" step="1" value="' + settings.amplitudePercent + '" data-motion-player="' + player + '" data-motion-setting="amplitudePercent"><output data-motion-output="amplitudePercent">' + Math.round(settings.amplitudePercent) + '%</output></label>' +
+      '</section>';
   }
 
   function preMatchControlPage() {
     const progress = preflightProgress();
     return '<section class="screen controlScreen controlPreflight">' +
       '<section class="controlPreflightHeader glassCard">' +
-        '<div><span>比赛操控 · 赛前准备</span><h2>第 08 场 · 机器鱼水球 2v2</h2><p>海洋先锋队 VS 深海动力队 · A 赛场</p></div>' +
+        '<div><span>比赛操控 · 赛前准备</span><h2 data-live-match-title>等待服务器</h2><p data-live-match-meta>暂无真实比赛数据</p></div>' +
         '<div class="controlPreflightSteps">' +
           '<span class="done"><i>1</i><b>签到</b><small>完成</small></span>' +
           '<span class="done"><i>2</i><b>场地</b><small>完成</small></span>' +
@@ -5498,16 +5974,16 @@ p {
         '</div>' +
         '<div class="controlPreflightState"><i></i><div><span>裁判状态</span><b>已开放设备测试</b><small>当前仅允许受限试动</small></div></div>' +
       '</section>' +
-      '<section class="controlPreflightTitle"><div><h2>设备测试</h2><p>两名选手分别测试自己绑定的机器鱼，并提交确认结果。</p></div><b>' + progress.ok + ' / 2 已确认正常</b></section>' +
+      '<section class="controlPreflightTitle"><div><h2>设备测试</h2><p>两名选手分别测试自己的机器鱼并提交结果，最终由裁判确认。</p></div><b>' + progress.ok + ' / 2 已提交</b></section>' +
       '<section class="controlPreflightDevices">' +
-        deviceTestCard('b1', 'B1', '陈同学', 'Fish-B1-03', 'playerA') +
-        deviceTestCard('b2', 'B2', '李同学', 'Fish-B2-07', 'playerB') +
+        deviceTestCard('b1', 'B1', '等待账号数据', '等待裁判分配机器鱼', 'playerA') +
+        deviceTestCard('b2', 'B2', '等待账号数据', '等待裁判分配机器鱼', 'playerB') +
       '</section>' +
       '<section class="controlPreflightFooter glassCard">' +
         '<div><span>当前阶段</span><b>设备测试</b><small>不计时 · 不计分</small></div>' +
-        '<div><span>通过条件</span><b>B1 / B2 均确认正常</b><small>完成后进入等待开始</small></div>' +
+        '<div><span>提交条件</span><b>B1 / B2 均提交测试结果</b><small>提交后等待裁判确认</small></div>' +
         '<button type="button" class="enterMatchBtn ' + (progress.complete ? 'ready' : '') + '" ' + (progress.complete ? '' : 'disabled') + ' data-enter-live-match>' +
-          (progress.complete ? '设备确认完成 · 进入等待比赛' : '请先完成设备确认') +
+          (progress.complete ? '测试结果已提交 · 等待裁判确认' : '请先完成设备测试') +
         '</button>' +
       '</section>' +
       '</section>' + keyConfigModal();
@@ -5515,48 +5991,43 @@ p {
 
   function controlPage() {
     const b1Metrics =
-      deviceMetric('battery', '电量', '78%', 'good') +
-      deviceMetric('wifi', '延迟', '12 ms', 'good') +
-      deviceMetric('eye', '视觉', '独立接入', 'good');
+      deviceMetric('battery', '电量', '未上报') +
+      deviceMetric('wifi', '延迟', '测量中') +
+      deviceMetric('eye', '视觉', '等待视频');
     const b2Metrics =
-      deviceMetric('battery', '电量', '82%', 'good') +
-      deviceMetric('wifi', '延迟', '16 ms', 'good') +
-      deviceMetric('eye', '视觉', '独立接入', 'good');
+      deviceMetric('battery', '电量', '未上报') +
+      deviceMetric('wifi', '延迟', '测量中') +
+      deviceMetric('eye', '视觉', '等待视频');
 
     return '<section class="screen controlScreen v3ControlScreen">' +
       matchHud() +
-      matchPlayerCard('b1', 'B1', '陈同学', 'Fish-B1-03', b1Metrics, 'playerA') +
+      matchPlayerCard('b1', 'B1', '等待账号数据', '等待裁判分配机器鱼', b1Metrics, 'playerA') +
       '<main class="fieldPanel v3FieldPanel glassCard">' +
-        '<header><div><h2>实时赛场</h2><p>原始摄像头画面 · 无模拟覆盖</p></div><span class="liveBadge"><i></i>视觉独立接入</span></header>' +
         matchPool() +
-        '<footer><span>原始视频</span><b>识别结果由裁判端独立处理</b><span>手动控制不受视觉影响</span></footer>' +
       '</main>' +
-      matchPlayerCard('b2', 'B2', '李同学', 'Fish-B2-07', b2Metrics, 'playerB') +
+      matchPlayerCard('b2', 'B2', '等待账号数据', '等待裁判分配机器鱼', b2Metrics, 'playerB') +
       '<section class="matchStatusBar glassCard">' +
-        '<div><span>比赛状态</span><b class="greenState">进行中</b></div>' +
-        '<div><span>队伍设备</span><b>2 / 2 在线</b></div>' +
-        '<div><span>视觉状态</span><b>独立于手动操控</b></div>' +
-        '<div><span>边界保护</span><b class="greenState">正常</b></div>' +
+        '<div><span>比赛状态</span><b data-live-summary-state>等待服务器</b></div>' +
+        '<div><span>队伍设备</span><b data-live-summary-devices>等待上报</b></div>' +
+        '<div><span>视觉状态</span><b data-live-summary-vision>等待真实视频</b></div>' +
+        '<div><span>边界保护</span><b>未上报</b></div>' +
         '<div><span>控制模式</span><b>双人独立控制</b></div>' +
       '</section>' +
-      '</section>' + keyConfigModal() + deviceTestDialog();
+      '</section>' + keyConfigModal();
   }
 
 
   const blockLibrary = [
     {category:'基础积木', key:'basic', blocks:[
-      {type:'motion',op:'speed',label:'设置速度',icon:'≋',params:{speed:60}},
-      {type:'motion',op:'forward',label:'前进',icon:'↑',params:{seconds:1}},
-      {type:'motion',op:'left',label:'左转',icon:'↶',params:{angle:30}},
-      {type:'motion',op:'right',label:'右转',icon:'↷',params:{angle:30}},
-      {type:'control',op:'wait',label:'等待',icon:'◷',params:{seconds:0.5}},
-      {type:'formation',op:'follow',label:'跟随手动鱼',icon:'⇢',params:{distance:0.35,seconds:3}},
-      {type:'motion',op:'stop',label:'停止程序鱼',icon:'■',params:{}}
+      {type:'motion',op:'forward',label:'前进多少秒',icon:'↑',params:{seconds:1}},
+      {type:'motion',op:'left',label:'左转多少秒',icon:'↶',params:{seconds:0.5}},
+      {type:'motion',op:'right',label:'右转多少秒',icon:'↷',params:{seconds:0.5}},
+      {type:'control',op:'wait',label:'等待多少秒',icon:'◷',params:{seconds:0.5}}
     ]}
   ];
 
   const challengeOptions = {
-    basic:{name:'基础编程练习',desc:'用最基本的积木控制程序鱼；另一条鱼可以用键盘手动控制。',limit:'不限时',goal:'让程序鱼按积木顺序正确运动'}
+    basic:{name:'手动控制进阶模式',desc:'把手动按键动作预先编排，再由设备按顺序执行。',limit:'不限时',goal:'让编程鱼按照预先编排的按键顺序运动'}
   };
 
   function clonePaletteBlock(def){
@@ -5584,7 +6055,7 @@ p {
   }
 
   function paramInput(path,param,value,min,max,step,suffix=''){
-    return '<span class="blockParam"><input type="number" value="'+escapeAttr(value)+'" min="'+min+'" max="'+max+'" step="'+step+'" data-block-param-path="'+path+'" data-block-param="'+param+'"><small>'+suffix+'</small></span>';
+    return '<span class="blockParam" data-param-editor><button type="button" data-param-step="-1" aria-label="减少参数">−</button><input type="number" value="'+escapeAttr(value)+'" min="'+min+'" max="'+max+'" step="'+step+'" data-block-param-path="'+path+'" data-block-param="'+param+'"><button type="button" data-param-step="1" aria-label="增加参数">＋</button><small>'+suffix+'</small></span>';
   }
   function paramSelect(path,param,value,options){
     return '<select class="blockSelect" data-block-param-path="'+path+'" data-block-param="'+param+'">'+options.map(o=>'<option value="'+o+'" '+(String(value)===String(o)?'selected':'')+'>'+o+'</option>').join('')+'</select>';
@@ -5596,13 +6067,13 @@ p {
       case 'start': return '<b>当挑战开始</b>';
       case 'ballFound': return '<b>当发现比赛球</b>';
       case 'nearBoundary': return '<b>当接近边界</b>';
-      case 'forward': return '<b>前进</b>'+paramInput(path,'seconds',p.seconds??1,0.1,10,0.1,'秒');
-      case 'left': return '<b>左转</b>'+paramInput(path,'angle',p.angle??30,1,180,1,'°');
-      case 'right': return '<b>右转</b>'+paramInput(path,'angle',p.angle??30,1,180,1,'°');
+      case 'forward': return '<b>前进</b><span class="parameterLabel">持续</span>'+paramInput(path,'seconds',p.seconds??1,0.1,30,0.1,'秒');
+      case 'left': return '<b>左转</b><span class="parameterLabel">持续</span>'+paramInput(path,'seconds',p.seconds??0.5,0.1,30,0.1,'秒');
+      case 'right': return '<b>右转</b><span class="parameterLabel">持续</span>'+paramInput(path,'seconds',p.seconds??0.5,0.1,30,0.1,'秒');
       case 'speed': return '<b>设置速度为</b>'+paramInput(path,'speed',p.speed??60,10,100,5,'%');
       case 'figure8': return '<b>沿 8 字轨迹运动</b>'+paramInput(path,'laps',p.laps??1,0.5,5,0.5,'圈');
       case 'stop': return '<b>停止程序鱼</b>';
-      case 'wait': return '<b>等待</b>'+paramInput(path,'seconds',p.seconds??0.5,0.1,10,0.1,'秒');
+      case 'wait': return '<b>等待</b><span class="parameterLabel">持续</span>'+paramInput(path,'seconds',p.seconds??0.5,0.1,30,0.1,'秒');
       case 'repeat': return '<b>重复执行</b>'+paramInput(path,'count',p.count??2,1,10,1,'次');
       case 'ifBoundary': return '<b>如果边界距离小于</b>'+paramInput(path,'distance',p.distance??0.2,0.05,1,0.05,'m')+'<b>那么</b>';
       case 'parallel': return '<b>并行执行</b>';
@@ -5643,12 +6114,55 @@ p {
     arr.splice(parts[parts.length-1],1);
   }
 
+  function refreshBlockIds(block){
+    block.id=newBlockId();
+    if(Array.isArray(block.children))block.children.forEach(refreshBlockIds);
+    return block;
+  }
+
+  function duplicateBlockAtPath(path){
+    const parts=String(path).split('.').filter(Boolean).map(Number);
+    const source=blockAtPath(path);
+    if(!source||!parts.length)return;
+    let arr=autonomousState.blocks;
+    for(let i=0;i<parts.length-1;i++)arr=arr[parts[i]].children;
+    const copy=refreshBlockIds(JSON.parse(JSON.stringify(source)));
+    arr.splice(parts[parts.length-1]+1,0,copy);
+  }
+
+  function moveTopLevelBlock(fromIndex,toIndex){
+    if(!Number.isInteger(fromIndex)||fromIndex<0||fromIndex>=autonomousState.blocks.length)return;
+    const bounded=Math.max(0,Math.min(Number(toIndex)||0,autonomousState.blocks.length));
+    const moved=autonomousState.blocks.splice(fromIndex,1)[0];
+    const adjusted=fromIndex<bounded?bounded-1:bounded;
+    autonomousState.blocks.splice(Math.max(0,adjusted),0,moved);
+  }
+
+  function applyProgramPreset(name){
+    const presets={
+      straight:[['motion','forward',2]],
+      turnLeft:[['motion','left',0.5],['motion','forward',2]],
+      turnRight:[['motion','right',0.5],['motion','forward',2]]
+    };
+    const selected=presets[name];
+    if(!selected)return;
+    autonomousState.blocks=selected.map(([type,op,seconds])=>{
+      const block=clonePaletteBlock(findPaletteDef(type,op));
+      block.params.seconds=seconds;
+      return block;
+    });
+    stopAutoSimulation();
+    refreshProgramEditor();
+  }
+
   function renderOneWorkspaceBlock(b,path,depth=0){
     const container=Array.isArray(b.children);
     const cls='workspaceBlock mindBlock '+b.type+' '+(container?'containerBlock ':'')+(b.op==='start'?'hatBlock ':'')+(b.type==='sense'?'reporterBlock ':'');
-    let html='<div class="'+cls+'" data-block-id="'+b.id+'" data-block-path="'+path+'" style="--depth:'+depth+'">' +
-      '<div class="mindBlockBody"><span class="workspaceGrip" title="拖动积木">⋮⋮</span><i>'+b.icon+'</i><div class="mindBlockSentence">'+blockSentence(b,path)+'</div>' +
-      '<button type="button" class="blockDelete" data-remove-block="'+path+'" title="删除这块积木">×</button></div>';
+    const topLevel=depth===0;
+    const step=topLevel?'<span class="sequenceStep">'+String(Number(path)+1).padStart(2,'0')+'</span>':'';
+    let html='<div class="'+cls+'" data-block-id="'+b.id+'" data-block-path="'+path+'" '+(topLevel?'data-sortable-step="true"':'')+' style="--depth:'+depth+'">' + step +
+      '<div class="mindBlockBody"><span class="workspaceGrip" title="拖动调整顺序">⠿</span><i>'+b.icon+'</i><div class="mindBlockSentence">'+blockSentence(b,path)+'</div>' +
+      '<span class="sequenceBlockActions"><button type="button" data-duplicate-block="'+path+'" title="复制这一步">⧉</button><button type="button" class="blockDelete" data-remove-block="'+path+'" title="删除这一步">×</button></span></div>';
     if(container){
       html+='<div class="containerMouth"><div class="nestedBlocks">'+(b.children.length?b.children.map((c,i)=>renderOneWorkspaceBlock(c,path+'.'+i,depth+1)).join(''):'<div class="nestedEmpty">把积木拖到这里</div>')+'</div>' +
         '<div class="nestedDropZone" data-nested-drop="'+path+'">＋ 拖入这里</div></div><div class="containerFoot"></div>';
@@ -5659,65 +6173,66 @@ p {
 
   function renderWorkspaceBlocks(){
     if(!autonomousState.blocks.length){
-      return '<div class="workspaceEmpty"><div>＋</div><b>从左侧添加积木</b><span>程序会从上到下执行</span></div>';
+      return '<div class="workspaceEmpty"><div class="workspaceEmptyIcon">＋</div><b>创建第一段动作</b><span>点击左侧动作，或直接选用一个起步组合</span><div class="programPresetList"><button type="button" data-program-preset="straight">直行 2 秒</button><button type="button" data-program-preset="turnLeft">左转后前进</button><button type="button" data-program-preset="turnRight">右转后前进</button></div></div>';
     }
-    return autonomousState.blocks.map((b,index)=>renderOneWorkspaceBlock(b,String(index),0)).join('');
-  }
-
-  function simFish(){
-    const b1Role = autonomousState.manualFish === 'B1' ? 'manual' : 'auto';
-    const b2Role = autonomousState.manualFish === 'B2' ? 'manual' : 'auto';
-    return '<div class="autoSimField" id="autoSimField">' +
-      '<div class="simPoolLine center"></div><div class="simLoop loopA"></div><div class="simLoop loopB"></div>' +
-      '<span class="simMark m1">1</span><span class="simMark m2">2</span><span class="simMark m3">3</span><span class="simMark m4">4</span>' +
-      '<span class="simFish simB1 '+b1Role+'" id="simB1"><b>B1</b><em>'+b1Role.toUpperCase()+'</em></span>' +
-      '<span class="simFish simB2 '+b2Role+'" id="simB2"><b>B2</b><em>'+b2Role.toUpperCase()+'</em></span>' +
-      '<span class="simTarget"></span>' +
-      '<svg class="simTrail" viewBox="0 0 1000 560" preserveAspectRatio="none"><path d="M250 280 C250 120 480 120 500 280 C520 440 750 440 750 280 C750 120 520 120 500 280 C480 440 250 440 250 280" /></svg>' +
-      '</div>';
+    return '<div class="programFlowHead"><span><i>▶</i>点击启动后，按顺序执行</span><em>拖动步骤可排序</em></div>'+autonomousState.blocks.map((b,index)=>renderOneWorkspaceBlock(b,String(index),0)).join('');
   }
 
   function missionsPage() {
     const simpleBlocks = blockLibrary[0].blocks.map((b)=>
       '<button type="button" draggable="true" class="simplePaletteBlock '+b.type+'" data-palette-type="'+b.type+'" data-palette-op="'+b.op+'">' +
-        '<i>'+b.icon+'</i><span>'+b.label+'</span><em>＋</em>' +
+        '<i>'+b.icon+'</i><span>'+b.label.replace('多少秒','')+'</span><small>'+(b.op==='wait'?'流程暂停':'运动动作')+' · 默认 '+Number(b.params.seconds).toFixed(1)+' 秒</small><em>＋</em>' +
       '</button>'
     ).join('');
+    const targetPlayer=autonomousState.autoFish.toLowerCase();
+    const targetDevice=deviceAvailability[targetPlayer];
+    const targetOnline=!!(targetDevice&&targetDevice.healthy);
+    const targetDeviceId=targetDevice&&targetDevice.deviceId?targetDevice.deviceId:'裁判尚未分配设备';
+    const runLabel=autonomousState.running
+      ? (autonomousState.paused?'▶ 继续执行':'执行中')
+      : (targetOnline?'▶ 启动真实设备':'真实设备未连接');
 
     return '<section class="screen missionScreen simpleProgrammingScreen">' +
       '<section class="simpleProgramTop glassCard">' +
-        '<div><span>自主挑战</span><h2>基础图形编程</h2><p>添加积木 → 修改参数 → 点击运行。程序会从上到下依次执行。</p></div>' +
-        '<div class="simpleRoleSummary"><span><small>手动鱼</small><b>'+autonomousState.manualFish+'</b><em>W / A / D / Space</em></span><i>＋</i><span><small>程序鱼</small><b>'+autonomousState.autoFish+'</b><em>由积木控制</em></span></div>' +
+        '<div><span>进阶模式</span><h2>编程控制</h2><p>它与手动操控相互独立；把运动动作提前编排，再由服务器按顺序发送。</p></div>' +
+        '<div class="simpleRoleSummary"><span><small>编程目标</small><b>'+autonomousState.autoFish+'</b><em>仅点击启动后发送控制</em></span></div>' +
         '<div class="simpleProgramState"><small>当前状态</small><b>'+(autonomousState.running?(autonomousState.paused?'已暂停':'正在运行'):'等待运行')+'</b></div>' +
       '</section>' +
 
       '<aside class="simpleBlockPanel glassCard">' +
-        '<header><h2>基础积木</h2><p>点击积木即可加入程序</p></header>' +
+        '<header><div><h2>动作工具箱</h2><p>点击加入，也可拖入程序</p></div><span>4 个动作</span></header>' +
         '<div class="simpleBlockList">'+simpleBlocks+'</div>' +
-        '<div class="simpleBlockTip"><b>先从这几个积木开始</b><span>速度、前进、转向、等待、跟随和停止已经足够完成基础练习。</span></div>' +
+        '<div class="simpleBlockTip"><i>i</i><div><b>真实控制规则</b><span>每个动作会保持设定时间；结束后仅释放按键，不重复发送停止。</span></div></div>' +
       '</aside>' +
 
       '<main class="simpleWorkspace glassCard">' +
         '<header><div><h2>我的程序</h2><p>执行顺序：从上到下</p></div><button type="button" data-clear-program>清空</button></header>' +
-        '<div class="simpleStartBlock">▶ 当点击“运行程序”</div>' +
+        '<section class="advancedProgramVideo"><header><b>实时视频</b><span>裁判视频源 · 有效区 · YOLO 识别框</span></header>'+matchPool()+'</section>' +
         '<div class="workspaceCanvas simpleWorkspaceCanvas" id="workspaceCanvas">'+renderWorkspaceBlocks()+'</div>' +
-        '<footer><span>积木数量 <b>'+autonomousState.blocks.length+'</b></span><span>参数可以直接修改</span></footer>' +
+        '<footer><span>积木数量 <b data-program-count>'+autonomousState.blocks.length+'</b></span><span>参数可以直接修改</span></footer>' +
       '</main>' +
 
       '<aside class="simpleSimulation glassCard">' +
-        '<header><div><h2>仿真</h2><p>一边手动控制，一边运行积木程序</p></div><button type="button" data-swap-fish>⇄ 交换</button></header>' +
+        '<header><div><h2>程序执行</h2><p>服务器在积木持续时间内保持对应运动指令</p></div><button type="button" data-swap-fish>目标 '+autonomousState.autoFish+' · 切换</button></header>' +
         '<div class="simpleRoles">' +
-          '<span class="manual"><small>手动</small><b>'+autonomousState.manualFish+'</b></span>' +
-          '<span class="auto"><small>程序</small><b>'+autonomousState.autoFish+'</b></span>' +
+          '<span class="auto"><small>编程控制目标</small><b>'+autonomousState.autoFish+'</b></span>' +
+          '<span class="'+(targetOnline?'auto':'manual')+'"><small>真实设备状态</small><b>'+(targetOnline?'已连接':'未连接')+'</b></span>' +
         '</div>' +
-        simFish() +
+        '<section class="advancedDeviceTarget '+(targetOnline?'online':'offline')+'">' +
+          '<header><span>真实设备连接</span><b><i></i>'+(targetOnline?'在线可控':'等待设备')+'</b></header>' +
+          '<div><small>控制席位</small><strong>'+autonomousState.autoFish+'</strong></div>' +
+          '<div><small>设备 ID</small><strong>'+escapeAttr(targetDeviceId)+'</strong></div>' +
+          '<div><small>控制链路</small><strong>Go 服务器 → ESP32</strong></div>' +
+          '<div><small>安全机制</small><strong>2000ms Deadman</strong></div>' +
+          '<footer>'+(targetOnline?'积木启动后，服务器会在设定秒数内持续向该真实设备发送运动信号。':'需要裁判先分配机器鱼，并等待设备心跳与控制租约就绪。')+'</footer>' +
+        '</section>' +
         '<div class="simpleSimButtons">' +
           '<button type="button" data-sim-reset>复位</button>' +
-          '<button type="button" data-sim-pause>暂停</button>' +
-          '<button type="button" class="run" data-sim-run>▶ 运行程序</button>' +
+          '<button type="button" data-sim-pause '+(!autonomousState.running?'disabled':'')+'>'+(autonomousState.paused?'继续':'暂停')+'</button>' +
+          '<button type="button" class="run" data-sim-run '+(!targetOnline?'disabled':'')+'>'+runLabel+'</button>' +
         '</div>' +
         '<div class="simpleSimStatus">' +
-          '<span><small>程序鱼速度</small><b id="simpleSpeedValue">'+simState.speed+'%</b></span>' +
+          '<span><small>幅度 / 频率</small><b id="simpleSpeedValue">'+playerMotionSettings[autonomousState.autoFish.toLowerCase()].amplitudePercent+'% · '+playerMotionSettings[autonomousState.autoFish.toLowerCase()].frequency.toFixed(1)+'Hz</b></span>' +
           '<span><small>运行时间</small><b id="simTime">0.0s</b></span>' +
         '</div>' +
         '<section class="simpleLog"><header><b>运行提示</b></header><div id="simLog"><p><span>READY</span>等待运行程序</p></div></section>' +
@@ -5725,85 +6240,103 @@ p {
       '</section>';
   }
 
+  function studentRecordDuration(milliseconds) {
+    const seconds = Math.max(0, Math.round((Number(milliseconds) || 0) / 1000));
+    return String(Math.floor(seconds / 60)).padStart(2, '0') + ':' + String(seconds % 60).padStart(2, '0');
+  }
+
+  function studentRecordDate(value) {
+    const date = value ? new Date(value) : null;
+    return date && !Number.isNaN(date.getTime())
+      ? date.toLocaleString('zh-CN', { hour12: false })
+      : '未记录';
+  }
+
+  function studentRecordResult(record) {
+    if (record.blueScore === record.redScore) return { label: '平局', tone: 'draw' };
+    return record.blueScore > record.redScore
+      ? { label: '蓝胜', tone: 'win' }
+      : { label: '红胜', tone: 'lose' };
+  }
+
+  function studentRecordVideoName(record) {
+    if (!record || !record.videoUrl) return '无录像文件';
+    try { return decodeURIComponent(String(record.videoUrl).split('/').pop() || '服务器录像'); }
+    catch (_) { return '服务器录像'; }
+  }
+
+  window.applyPlayerCompetitionRecords = function (records) {
+    const raw = Array.isArray(records) ? records : [];
+    const signature = JSON.stringify(raw);
+    if (studentRecordsLoaded && signature === studentRecordsSignature) return;
+    studentRecordsLoaded = true;
+    studentRecordsSignature = signature;
+    studentCompetitionRecords = raw.map((record, index) => {
+      const videoUrl = String(record.videoUrl || '');
+      return {
+        key: String(record.id || record.matchNo || 'match') + '|' + String(record.finishedAt || index),
+        id: String(record.id || ''),
+        matchNo: String(record.matchNo || '未命名比赛'),
+        group: String(record.group || '未设置'),
+        venue: String(record.venue || '未设置'),
+        blueName: String(record.blueName || '蓝队'),
+        redName: String(record.redName || '红队'),
+        blueScore: Number(record.blueScore) || 0,
+        redScore: Number(record.redScore) || 0,
+        elapsedMs: Number(record.elapsedMs) || 0,
+        finishedAt: String(record.finishedAt || ''),
+        videoUrl: videoUrl.startsWith('/api/vision/recordings/files/') ? videoUrl : '',
+        videoStatus: String(record.videoStatus || ''),
+        videoDurationMs: Number(record.videoDurationMs) || 0,
+        videoFrameCount: Number(record.videoFrameCount) || 0,
+        videoDroppedFrames: Number(record.videoDroppedFrames) || 0,
+        videoAverageFps: Number(record.videoAverageFps) || 0,
+        videoWidth: Number(record.videoWidth) || 0,
+        videoHeight: Number(record.videoHeight) || 0,
+        videoError: String(record.videoError || ''),
+      };
+    });
+    if (!studentCompetitionRecords.some((record) => record.key === selectedStudentRecordKey)) {
+      selectedStudentRecordKey = studentCompetitionRecords[0] ? studentCompetitionRecords[0].key : '';
+    }
+    if (pageFromHash() === 'records') render();
+  };
+
   function recordsPage() {
-    const items = [
-      {id:'08',title:'机器鱼水球 2v2',date:'2026-09-14 · 14:30',arena:'A 赛场',score:'36 : 24',result:'胜利',enemy:'深海动力队'},
-      {id:'05',title:'机器鱼水球 2v2',date:'2026-09-13 · 10:20',arena:'B 赛场',score:'22 : 26',result:'惜败',enemy:'蓝鲸少年队'},
-      {id:'03',title:'机器鱼水球 2v2',date:'2026-09-12 · 15:40',arena:'A 赛场',score:'30 : 18',result:'胜利',enemy:'海风实验队'},
-      {id:'01',title:'机器鱼水球 2v2',date:'2026-09-12 · 09:10',arena:'C 赛场',score:'20 : 20',result:'平局',enemy:'潮汐动力队'}
-    ];
-    const recordItems = items.map((r,index)=>'<button type="button" class="studentRecordItem '+(index===0?'active':'')+'" data-student-record="'+index+'">' +
-      '<span class="recordResult '+(r.result==='胜利'?'win':r.result==='惜败'?'lose':'draw')+'">'+r.result+'</span>' +
-      '<div><b>第 '+r.id+' 场 · '+r.title+'</b><small>'+r.date+' · '+r.arena+'</small><em>VS '+r.enemy+'</em></div>' +
-      '<strong>'+r.score+'</strong>' +
-      '</button>').join('');
+    const selected = studentCompetitionRecords.find((record) => record.key === selectedStudentRecordKey) || studentCompetitionRecords[0] || null;
+    const recordItems = studentCompetitionRecords.map((record) => {
+      const result = studentRecordResult(record);
+      return '<button type="button" class="studentRecordItem ' + (selected && selected.key === record.key ? 'active' : '') + '" data-student-record="' + escapeAttr(record.key) + '">' +
+        '<span class="recordResult ' + result.tone + '">' + result.label + '</span>' +
+        '<div><b>' + escapeAttr(record.matchNo) + ' · ' + escapeAttr(record.group) + '</b><small>' + escapeAttr(record.blueName) + ' vs ' + escapeAttr(record.redName) + '</small><em>' + escapeAttr(studentRecordDate(record.finishedAt)) + '</em></div>' +
+        '<strong>' + record.blueScore + ' : ' + record.redScore + '</strong></button>';
+    }).join('');
+    const historyBody = recordItems || '<div class="studentReplayEmpty"><div><b>' + (studentRecordsLoaded ? '暂无已保存比赛' : '正在读取比赛记录') + '</b><span>' + (studentRecordsLoaded ? '裁判结束并归档比赛后，录像会同步出现在这里。' : '正在连接赛事服务，请稍候。') + '</span></div></div>';
+
+    const videoAvailable = !!(selected && selected.videoUrl && selected.videoStatus === 'saved');
+    const videoStage = videoAvailable
+      ? '<video id="studentReplayVideo" controls preload="metadata" src="' + escapeAttr(selected.videoUrl) + '"></video>'
+      : '<div class="studentReplayEmpty"><div><b>' + (selected ? '本场暂无可播放录像' : '请选择比赛') + '</b><span>' + escapeAttr(selected && selected.videoError ? selected.videoError : '这里只播放裁判端封存的真实选手画面。') + '</span></div></div>';
+    const title = selected ? escapeAttr(selected.matchNo) : (studentRecordsLoaded ? '暂无已保存比赛' : '正在读取比赛记录');
+    const matchup = selected ? escapeAttr(selected.blueName) + ' <b>' + selected.blueScore + ' : ' + selected.redScore + '</b> ' + escapeAttr(selected.redName) : '等待真实赛事归档';
+    const fileName = selected ? studentRecordVideoName(selected) : '未选择录像';
+    const statusText = videoAvailable ? '裁判端封存录像 · 可直接播放' : '录像不可用';
+    const resolution = selected && selected.videoWidth && selected.videoHeight ? selected.videoWidth + ' × ' + selected.videoHeight : '未记录';
+    const fps = selected && selected.videoAverageFps ? selected.videoAverageFps.toFixed(1) + ' FPS' : '未记录';
 
     return '<section class="screen recordsScreen studentRecordsV2">' +
-      '<aside class="studentHistory glassCard">' +
-        '<header><div><h2>我的比赛</h2><p>查看历史成绩与比赛回放</p></div><button type="button">全部比赛</button></header>' +
-        '<div class="studentRecordList">'+recordItems+'</div>' +
-      '</aside>' +
-
+      '<aside class="studentHistory glassCard"><header><div><h2>比赛记录</h2><p>与裁判端使用同一归档</p></div><button type="button" disabled>' + studentCompetitionRecords.length + ' 场</button></header><div class="studentRecordList">' + historyBody + '</div></aside>' +
       '<main class="studentReplayArea">' +
-        '<section class="studentReplayHeader glassCard">' +
-          '<div><span>第 08 场 · 学生组 · A 赛场</span><h2>海洋先锋队 <b>36 : 24</b> 深海动力队</h2><p>2026-09-14 14:30 · 比赛时长 03:00</p></div>' +
-          '<div class="studentResultBadge"><i>✓</i><span>本场结果</span><b>胜利</b></div>' +
-        '</section>' +
-
-        '<section class="studentReplayPlayer glassCard">' +
-          '<header><div><h2>比赛回放</h2><p>俯视视角 · 本队机器鱼高亮</p></div><span class="replayFile">match_008_20260914_143012.mp4</span></header>' +
-          '<div class="studentReplayField" id="studentReplayField">' +
-            '<div class="replayWater"></div><div class="replayMidline"></div><div class="replayCircle"></div>' +
-            '<div class="replayGoal blue"></div><div class="replayGoal red"></div>' +
-            '<span class="replayFish blue b1" data-label="B1"><b>B1</b></span>' +
-            '<span class="replayFish blue b2" data-label="B2"><b>B2</b></span>' +
-            '<span class="replayFish red r1" data-label="R1"><b>R1</b></span>' +
-            '<span class="replayFish red r2" data-label="R2"><b>R2</b></span>' +
-            '<span class="replayBall"></span>' +
-            '<div class="replayEventToast" id="replayEventToast">00:42 · B1 进球 +10</div>' +
-          '</div>' +
-          '<footer class="studentReplayControls">' +
-            '<button type="button" class="studentPlayButton" data-student-play>▶</button>' +
-            '<span id="studentReplayTime">00:00</span>' +
-            '<input type="range" id="studentReplayRange" min="0" max="180" value="0" step="1">' +
-            '<span>03:00</span>' +
-            '<select id="studentReplaySpeed"><option value="1">1×</option><option value="0.5">0.5×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>' +
-          '</footer>' +
-        '</section>' +
-
-        '<section class="studentReplayStats">' +
-          '<article class="glassCard"><span>我的席位</span><b>B1</b><small>陈同学 · Fish-B1-03</small></article>' +
-          '<article class="glassCard"><span>本队进球</span><b>3</b><small>B1 2 球 · B2 1 球</small></article>' +
-          '<article class="glassCard"><span>配合得分</span><b>4 次</b><small>有效协作 78%</small></article>' +
-          '<article class="glassCard"><span>越界</span><b>1 次</b><small>扣分 -2</small></article>' +
-        '</section>' +
+        '<section class="studentReplayHeader glassCard"><div><span>真实比赛回放</span><h2>' + matchup + '</h2><p>' + title + (selected ? ' · ' + escapeAttr(selected.venue) : '') + '</p></div><div class="studentResultBadge"><i>▶</i><span>录像状态</span><b>' + (videoAvailable ? '可以播放' : '暂无录像') + '</b></div></section>' +
+        '<section class="studentReplayPlayer glassCard"><header><div><h2>选手比赛画面</h2><p>包含裁剪与旋转后的最终效果</p></div><span class="replayFile">' + escapeAttr(fileName) + '</span></header><div class="studentReplayField">' + videoStage + '</div><div class="studentReplayStatus"><b id="studentReplayStatus">' + statusText + '</b><span>' + (selected ? escapeAttr(studentRecordDate(selected.finishedAt)) : '等待比赛') + '</span></div></section>' +
+        '<section class="studentReplayStats"><article class="glassCard"><span>录像时长</span><b>' + (selected ? studentRecordDuration(selected.videoDurationMs) : '--:--') + '</b><small>服务器真实记录</small></article><article class="glassCard"><span>画面规格</span><b>' + resolution + '</b><small>选手有效画面</small></article><article class="glassCard"><span>平均帧率</span><b>' + fps + '</b><small>录像实际统计</small></article><article class="glassCard"><span>录像帧数</span><b>' + (selected ? selected.videoFrameCount : 0) + '</b><small>丢帧 ' + (selected ? selected.videoDroppedFrames : 0) + '</small></article></section>' +
       '</main>' +
-
-      '<aside class="studentReviewPanel glassCard">' +
-        '<div class="studentReviewTabs"><button type="button" class="active" data-review-tab="events">关键事件</button><button type="button" data-review-tab="personal">我的表现</button></div>' +
-        '<section class="reviewPane active" data-review-pane="events">' +
-          '<header><div><h2>关键事件</h2><p>点击事件可跳转到对应回放时间</p></div></header>' +
-          '<div class="studentEventList">' +
-            '<button type="button" data-replay-seek="42"><span>00:42</span><i class="blue">+10</i><div><b>B1 进球</b><small>蓝队首次得分</small></div></button>' +
-            '<button type="button" data-replay-seek="78"><span>01:18</span><i class="red">+10</i><div><b>R1 进球</b><small>红队追平比分</small></div></button>' +
-            '<button type="button" data-replay-seek="116"><span>01:56</span><i class="blue">+10</i><div><b>B2 进球</b><small>队友完成推进</small></div></button>' +
-            '<button type="button" data-replay-seek="143"><span>02:23</span><i class="green">+2</i><div><b>协作得分</b><small>B1 / B2 完成有效配合</small></div></button>' +
-            '<button type="button" data-replay-seek="161"><span>02:41</span><i class="orange">-2</i><div><b>B1 越界</b><small>发生一次边界违规</small></div></button>' +
-            '<button type="button" data-replay-seek="180"><span>03:00</span><i>-</i><div><b>比赛结束</b><small>最终比分 36 : 24</small></div></button>' +
-          '</div>' +
-        '</section>' +
-        '<section class="reviewPane" data-review-pane="personal">' +
-          '<header><div><h2>我的表现 · B1</h2><p>用于赛后复盘，不作为裁判评分依据</p></div></header>' +
-          '<div class="personalPerformance">' +
-            '<div><span>控球参与</span><b>64%</b><i style="--w:64%"></i></div>' +
-            '<div><span>有效推进</span><b>7 次</b><i style="--w:74%"></i></div>' +
-            '<div><span>转向平稳度</span><b>86%</b><i style="--w:86%"></i></div>' +
-            '<div><span>急停使用</span><b>3 次</b><i style="--w:36%"></i></div>' +
-          '</div>' +
-          '<section class="reviewTip"><b>本场提示</b><p>中后段推进较稳定；02:41 出现一次越界，可以回看该时间点。</p><button type="button" data-replay-seek="161">回看 02:41</button></section>' +
-        '</section>' +
-        '<button type="button" class="backCenterButton" data-page="lobby">返回赛事中心</button>' +
-      '</aside>' +
+      '<aside class="studentReviewPanel glassCard"><header><div><h2>赛事信息</h2><p>裁判端同步数据</p></div></header><div class="studentReviewDetails">' +
+        '<article class="studentReviewScore"><strong class="blue">' + (selected ? selected.blueScore : '—') + '</strong><em>:</em><strong class="red">' + (selected ? selected.redScore : '—') + '</strong></article>' +
+        '<article><span>蓝队</span><b>' + escapeAttr(selected ? selected.blueName : '未选择') + '</b><small>对阵红队：' + escapeAttr(selected ? selected.redName : '未选择') + '</small></article>' +
+        '<article><span>场次</span><b>' + title + '</b><small>' + escapeAttr(selected ? selected.group + ' · ' + selected.venue : '暂无赛事信息') + '</small></article>' +
+        '<article><span>比赛用时</span><b>' + (selected ? studentRecordDuration(selected.elapsedMs) : '--:--') + '</b><small>结束时间：' + escapeAttr(selected ? studentRecordDate(selected.finishedAt) : '未记录') + '</small></article>' +
+      '</div><div class="studentReplayNotice">录像与裁判端完全共用同一服务器文件，不生成模拟回放，也不在选手电脑重复处理视频。</div></aside>' +
       '</section>';
   }
 
@@ -5811,7 +6344,8 @@ p {
     const page = pageFromHash();
     const pageConfig = pages.find((item) => item.id === page) || pages[0];
     const content = page === 'lobby' ? lobbyPage() : page === 'control' ? controlPage() : page === 'missions' ? missionsPage() : recordsPage();
-    root.innerHTML = '<main class="competitionApp page-' + page + '" style="--page-ratio:' + pageConfig.ratio + ';--ratio-value:' + pageConfig.ratioValue + '"><div class="designShell">' + header(page) + content + '<footer class="competitionFooter"><span>边界保护：正常　队内通信：正常　延迟：12ms　丢包：0%</span><span>FISH CONTROL · STUDENT COMPETITION PLATFORM</span></footer></div></main>';
+    root.innerHTML = '<main class="competitionApp page-' + page + '" style="--page-ratio:' + pageConfig.ratio + ';--ratio-value:' + pageConfig.ratioValue + '"><div class="designShell">' + header(page) + content + '<footer class="competitionFooter"><span>设备、延迟与安全状态均来自实时上报</span><span>FISH CONTROL · STUDENT COMPETITION PLATFORM</span></footer></div></main>';
+    renderedPage = page;
     bindInteractions();
   }
 
@@ -5858,6 +6392,18 @@ p {
     return null;
   }
 
+  function releaseAllActiveControlKeys(){
+    Array.from(activeControlKeys).forEach((key)=>{
+      const binding=bindingForKey(key);
+      if(!binding)return;
+      document.dispatchEvent(new CustomEvent('fish-control-key',{
+        detail:{player:binding.player,action:binding.action,phase:'end',key}
+      }));
+    });
+    activeControlKeys.clear();
+    root.querySelectorAll('[data-control-player][data-control-action].pressed').forEach((button)=>button.classList.remove('pressed'));
+  }
+
   function setupGlobalKeyboardListeners() {
     if (keyboardListenersReady) return;
     keyboardListenersReady = true;
@@ -5891,47 +6437,48 @@ p {
         return;
       }
 
-      if(pageFromHash()==='missions'){
-        if(root.querySelector('input:focus,select:focus,textarea:focus'))return;
-        const mk=event.key===' ' ? ' ' : String(event.key||'').toLowerCase();
-        if(['w','a','d',' '].includes(mk)){
-          event.preventDefault();
-          manualControlKeys.add(mk);
-          startManualControlTimer();
-          const fish=root.querySelector('#sim'+autonomousState.manualFish);
-          if(fish)fish.classList.add('manualActive');
-          if(mk===' ')simLog('MANUAL',autonomousState.manualFish+' 急停');
-        }
-        return;
-      }
-
       if (pageFromHash() !== 'control') return;
       if (root.querySelector('.keyConfigModal.open')) return;
+      if (event.target && event.target.matches && event.target.matches('input,select,textarea')) return;
       const key = normalizeKey(event);
       const binding = bindingForKey(key);
       if (!binding) return;
       if (key === ' ' || key.startsWith('Arrow')) event.preventDefault();
+      if (activeControlKeys.has(key)) return;
+      activeControlKeys.add(key);
+      document.dispatchEvent(new CustomEvent('fish-control-key', {
+        detail: {
+          player: binding.player,
+          action: binding.action,
+          phase: 'start',
+          key,
+        },
+      }));
       const button = root.querySelector('[data-control-player="' + binding.player + '"][data-control-action="' + binding.action + '"]');
       if (button) button.classList.add('pressed');
     });
 
     document.addEventListener('keyup', (event) => {
-      if(pageFromHash()==='missions'){
-        const mk=event.key===' ' ? ' ' : String(event.key||'').toLowerCase();
-        if(['w','a','d',' '].includes(mk)){
-          manualControlKeys.delete(mk);
-          stopManualControlTimerIfIdle();
-          const fish=root.querySelector('#sim'+autonomousState.manualFish);
-          if(fish)fish.classList.remove('manualActive');
-        }
-        return;
-      }
       if (pageFromHash() !== 'control') return;
       const key = normalizeKey(event);
       const binding = bindingForKey(key);
       if (!binding) return;
+      activeControlKeys.delete(key);
+      document.dispatchEvent(new CustomEvent('fish-control-key', {
+        detail: {
+          player: binding.player,
+          action: binding.action,
+          phase: 'end',
+          key,
+        },
+      }));
       const button = root.querySelector('[data-control-player="' + binding.player + '"][data-control-action="' + binding.action + '"]');
       if (button) button.classList.remove('pressed');
+    });
+
+    window.addEventListener('blur', () => {
+      activeControlKeys.clear();
+      root.querySelectorAll('[data-control-player][data-control-action].pressed').forEach((button)=>button.classList.remove('pressed'));
     });
   }
 
@@ -5943,10 +6490,7 @@ p {
     speed:60,manualSpeed:58,
     followDistance:0.35,elapsed:0,figurePhase:0,stopped:false
   };
-  const manualControlKeys = new Set();
-  let manualControlTimer = null;
-
-  function addAutonomousBlock(type,op,targetPath=null){
+  function addAutonomousBlock(type,op,targetPath=null,insertIndex=null){
     const def=findPaletteDef(type,op);
     if(!def)return;
     const block=clonePaletteBlock(def);
@@ -5954,18 +6498,19 @@ p {
       const parent=blockAtPath(targetPath);
       if(parent&&Array.isArray(parent.children)) parent.children.push(block);
       else autonomousState.blocks.push(block);
-    }else autonomousState.blocks.push(block);
-    render();
+    }else if(Number.isInteger(insertIndex))autonomousState.blocks.splice(Math.max(0,Math.min(insertIndex,autonomousState.blocks.length)),0,block);
+    else autonomousState.blocks.push(block);
+    stopAutoSimulation();
+    refreshProgramEditor();
   }
 
   function generatedProgramText(){
-    const lines=['// FISH CONTROL · 图形程序预览'];
+    const lines=['// FISH CONTROL · 虚拟按键程序预览'];
     const walk=(blocks,indent='')=>blocks.forEach(b=>{
       const p=b.params||{};
       if(b.op==='start')lines.push(indent+'当挑战开始 {');
-      else if(b.op==='speed')lines.push(indent+'设置速度('+p.speed+'%);');
       else if(b.op==='forward')lines.push(indent+'前进('+p.seconds+'秒);');
-      else if(b.op==='left'||b.op==='right')lines.push(indent+(b.op==='left'?'左转':'右转')+'('+p.angle+'°);');
+      else if(b.op==='left'||b.op==='right')lines.push(indent+(b.op==='left'?'左转':'右转')+'('+p.seconds+'秒);');
       else if(b.op==='figure8')lines.push(indent+'8字轨迹('+p.laps+'圈);');
       else if(b.op==='follow')lines.push(indent+'程序鱼跟随(手动鱼, '+p.distance+'m, '+(p.seconds||3)+'秒);');
       else if(b.op==='wait')lines.push(indent+'等待('+p.seconds+'秒);');
@@ -6020,47 +6565,60 @@ p {
     simState.x=36;simState.y=50;simState.heading=0;
     simState.manualX=28;simState.manualY=50;simState.manualHeading=0;
     simState.speed=60;simState.manualSpeed=58;simState.followDistance=.35;simState.elapsed=0;simState.figurePhase=0;simState.stopped=false;
-    manualControlKeys.clear();
     updateSimPose();updateSimMetrics();
     const progress=root.querySelector('#simProgress');if(progress)progress.textContent='0%';
     setActiveBlock(null);
   }
+  function pressProgramControl(action,token){
+    const player=autonomousState.autoFish.toLowerCase();
+    const key='program-'+token+'-'+action;
+    if(activeProgramControls.has(key))return key;
+    const detail={player,action,phase:'start',key};
+    activeProgramControls.set(key,detail);
+    document.dispatchEvent(new CustomEvent('fish-control-key',{detail}));
+    return key;
+  }
+  function releaseProgramControl(key){
+    const active=activeProgramControls.get(key);
+    if(!active)return;
+    activeProgramControls.delete(key);
+    document.dispatchEvent(new CustomEvent('fish-control-key',{
+      detail:{player:active.player,action:active.action,phase:'end',key}
+    }));
+  }
+  function releaseAllProgramControls(){
+    Array.from(activeProgramControls.keys()).forEach(releaseProgramControl);
+  }
+  function syncAdvancedProgramControls(){
+    const pauseButton=root.querySelector('[data-sim-pause]');
+    const runButton=root.querySelector('[data-sim-run]');
+    const target=deviceAvailability[autonomousState.autoFish.toLowerCase()];
+    const targetOnline=!!(target&&target.healthy);
+    if(pauseButton){pauseButton.disabled=!autonomousState.running;pauseButton.textContent=autonomousState.paused?'继续':'暂停';}
+    if(runButton){
+      runButton.disabled=!targetOnline;
+      runButton.textContent=autonomousState.running
+        ? (autonomousState.paused?'▶ 继续执行':'执行中')
+        : (targetOnline?'▶ 启动真实设备':'真实设备未连接');
+    }
+  }
+  function setAdvancedProgramPaused(paused,reason=''){
+    if(!autonomousState.running)return false;
+    const changed=autonomousState.paused!==!!paused;
+    autonomousState.paused=!!paused;
+    if(autonomousState.paused)releaseAllProgramControls();
+    syncAdvancedProgramControls();
+    if(reason&&changed)simLog(autonomousState.paused?'PAUSE':'RUN',reason);
+    return true;
+  }
   function stopAutoSimulation(reason='reset'){
+    releaseAllProgramControls();
     autonomousState.runToken++;
     autonomousState.running=false;autonomousState.paused=false;simState.stopped=true;
     if(autoSimTimer){clearInterval(autoSimTimer);autoSimTimer=null;}
     setActiveBlock(null);
-    const btn=root.querySelector('[data-sim-pause]');if(btn)btn.textContent='暂停';
+    syncAdvancedProgramControls();
     if(reason==='stop')simLog('STOP','执行到停止积木，仿真已终止','ok');
-  }
-
-  function manualControlStep(){
-    if(pageFromHash()!=='missions')return;
-    if(root.querySelector('input:focus,select:focus,textarea:focus'))return;
-    if(autonomousState.paused)return;
-    let moved=false;
-    if(manualControlKeys.has('a')){simState.manualHeading-=3.6;moved=true;}
-    if(manualControlKeys.has('d')){simState.manualHeading+=3.6;moved=true;}
-    if(manualControlKeys.has('w')){
-      const rad=simState.manualHeading*Math.PI/180;
-      const step=(simState.manualSpeed/100)*0.34;
-      simState.manualX=Math.max(7,Math.min(93,simState.manualX+Math.cos(rad)*step));
-      simState.manualY=Math.max(8,Math.min(92,simState.manualY+Math.sin(rad)*step));
-      moved=true;
-    }
-    if(manualControlKeys.has(' ')){moved=true;}
-    if(moved)updateSimPose();
-  }
-
-  function startManualControlTimer(){
-    if(manualControlTimer)return;
-    manualControlTimer=setInterval(manualControlStep,50);
-  }
-
-  function stopManualControlTimerIfIdle(){
-    if(manualControlKeys.size===0&&manualControlTimer){
-      clearInterval(manualControlTimer);manualControlTimer=null;
-    }
   }
 
   async function animateFollow(seconds,distance,token){
@@ -6084,22 +6642,46 @@ p {
   }
 
   async function animateForward(seconds,token){
-    const total=Math.max(.1,Number(seconds)||1)*1000;
-    let elapsed=0;
-    while(elapsed<total&&token===autonomousState.runToken&&!simState.stopped){
-      if(autonomousState.paused){await sleep(50);continue;}
-      const dt=50;await sleep(dt);elapsed+=dt;simState.elapsed+=dt/1000;
-      const rad=simState.heading*Math.PI/180;const step=(simState.speed/100)*0.19;
+    await runVirtualKeyMotion('forward',seconds,token,(dt)=>{
+      const rad=simState.heading*Math.PI/180;const step=(simState.speed/100)*0.19*(dt/50);
       simState.x=Math.max(7,Math.min(93,simState.x+Math.cos(rad)*step));
-      simState.y=Math.max(8,Math.min(92,simState.y+Math.sin(rad)*step));updateSimPose();updateSimMetrics();
+      simState.y=Math.max(8,Math.min(92,simState.y+Math.sin(rad)*step));
+    });
+  }
+  async function runVirtualKeyMotion(action,seconds,token,onStep){
+    const total=Math.max(.1,Number(seconds)||.5)*1000;
+    let elapsed=0,key='';
+    try{
+      while(elapsed<total&&token===autonomousState.runToken&&!simState.stopped){
+        const target=deviceAvailability[autonomousState.autoFish.toLowerCase()];
+        if(!target||!target.healthy){
+          setAdvancedProgramPaused(true,'真实设备连接中断，程序已暂停');
+          await sleep(50);
+          continue;
+        }
+        if(autonomousState.paused){
+          if(key){releaseProgramControl(key);key='';}
+          await sleep(50);
+          continue;
+        }
+        if(!key)key=pressProgramControl(action,token);
+        const dt=Math.min(50,total-elapsed);
+        await sleep(dt);
+        if(token!==autonomousState.runToken||simState.stopped)break;
+        elapsed+=dt;
+        simState.elapsed+=dt/1000;
+        onStep(dt);
+        updateSimPose();
+        updateSimMetrics();
+      }
+    }finally{
+      if(key)releaseProgramControl(key);
     }
   }
-  async function animateTurn(angle,direction,token){
-    const target=Math.max(1,Number(angle)||30),duration=Math.max(260,target*7),steps=Math.ceil(duration/50),delta=(direction==='left'?-target:target)/steps;
-    for(let i=0;i<steps&&token===autonomousState.runToken&&!simState.stopped;i++){
-      if(autonomousState.paused){await sleep(50);i--;continue;}
-      await sleep(50);simState.elapsed+=.05;simState.heading+=delta;updateSimPose();updateSimMetrics();
-    }
+  async function animateTurn(seconds,direction,token){
+    await runVirtualKeyMotion(direction,seconds,token,(dt)=>{
+      simState.heading+=(direction==='left'?-3.6:3.6)*(dt/50);
+    });
   }
   async function animateFigure8(laps,token){
     const totalLaps=Math.max(.5,Number(laps)||1),duration=totalLaps*5200*(60/Math.max(10,simState.speed));
@@ -6123,8 +6705,8 @@ p {
       case 'leader': simLog('SET','领航鱼设为 '+(p.fish||'B1')); await simDelay(180,token); break;
       case 'speed': simState.speed=Math.max(10,Math.min(100,Number(p.speed)||60));simLog('SET','速度 '+simState.speed+'%');await simDelay(180,token);break;
       case 'forward': await animateForward(p.seconds,token);break;
-      case 'left': await animateTurn(p.angle,'left',token);break;
-      case 'right': await animateTurn(p.angle,'right',token);break;
+      case 'left': await animateTurn(p.seconds,'left',token);break;
+      case 'right': await animateTurn(p.seconds,'right',token);break;
       case 'figure8': await animateFigure8(p.laps,token);break;
       case 'follow':
         simLog('FOLLOW',autonomousState.autoFish+' 跟随 '+autonomousState.manualFish+'，间距 '+Number(p.distance||.35).toFixed(2)+'m，持续 '+Number(p.seconds||3).toFixed(1)+'s');
@@ -6132,7 +6714,7 @@ p {
         break;
       case 'spacing': simState.followDistance=Math.max(.1,Number(p.distance)||.35);updateSimPose();await simDelay(180,token);break;
       case 'syncSpeed': await simDelay(180,token);break;
-      case 'wait': await simDelay(Math.max(.1,Number(p.seconds)||.5)*1000,token);break;
+      case 'wait': releaseAllProgramControls();await simDelay(Math.max(.1,Number(p.seconds)||.5)*1000,token);break;
       case 'repeat': {
         const count=Math.max(1,Math.round(Number(p.count)||1));
         for(let i=0;i<count&&token===autonomousState.runToken&&!simState.stopped;i++){
@@ -6155,88 +6737,210 @@ p {
     for(const b of blocks){const ok=await executeBlock(b,token);if(!ok)return false;}return true;
   }
   async function runAutoSimulation(){
-    if(autonomousState.running){simLog('INFO','仿真已经在运行');return;}
+    const target=deviceAvailability[autonomousState.autoFish.toLowerCase()];
+    if(!target||!target.healthy){
+      releaseAllProgramControls();
+      simLog('DEVICE','真实设备未连接，没有发送运动指令','warn');
+      syncAdvancedProgramControls();
+      return;
+    }
+    if(autonomousState.running){
+      if(autonomousState.paused)setAdvancedProgramPaused(false,'继续执行编程控制');
+      else simLog('INFO','编程控制已经在运行');
+      return;
+    }
+    releaseAllProgramControls();
     autonomousState.runToken++;const token=autonomousState.runToken;autonomousState.running=true;autonomousState.paused=false;resetSimVisual();simState.stopped=false;
-    const log=root.querySelector('#simLog');if(log)log.innerHTML='<p><span>RUN</span>'+autonomousState.manualFish+' 手动控制 · '+autonomousState.autoFish+' 执行图形程序</p>';
-    const ok=await executeSequence(autonomousState.blocks,token);
-    if(token!==autonomousState.runToken)return;
-    if(ok&&!simState.stopped){autonomousState.running=false;setActiveBlock(null);const progress=root.querySelector('#simProgress');if(progress)progress.textContent='100%';simLog('DONE','程序执行完毕','ok');}
+    const log=root.querySelector('#simLog');if(log)log.innerHTML='<p><span>RUN</span>'+autonomousState.autoFish+' 正在通过真实控制通道执行按键程序</p>';
+    try{
+      const ok=await executeSequence(autonomousState.blocks,token);
+      if(token!==autonomousState.runToken)return;
+      if(ok&&!simState.stopped){autonomousState.running=false;autonomousState.paused=false;setActiveBlock(null);const progress=root.querySelector('#simProgress');if(progress)progress.textContent='100%';syncAdvancedProgramControls();simLog('DONE','程序执行完毕，按键已全部松开','ok');}
+    }finally{
+      releaseAllProgramControls();
+    }
   }
 
-
-  let studentReplayTimer = null;
-  let studentReplayPlaying = false;
-  let studentReplaySecond = 0;
-
-  function fmtReplayTime(sec){
-    sec=Math.max(0,Math.min(180,Math.round(sec)));
-    return String(Math.floor(sec/60)).padStart(2,'0')+':'+String(sec%60).padStart(2,'0');
+  function refreshProgramEditor(){
+    const workspace=root.querySelector('#workspaceCanvas');
+    if(!workspace)return;
+    const previousScrollTop=workspace.scrollTop;
+    const replacement=workspace.cloneNode(false);
+    replacement.classList.remove('dragOver');
+    replacement.innerHTML=renderWorkspaceBlocks();
+    workspace.replaceWith(replacement);
+    replacement.scrollTop=Math.min(previousScrollTop,Math.max(0,replacement.scrollHeight-replacement.clientHeight));
+    const count=root.querySelector('[data-program-count]');
+    if(count)count.textContent=String(autonomousState.blocks.length);
+    bindProgramWorkspace(replacement);
   }
 
-  function updateStudentReplay(second){
-    studentReplaySecond=Math.max(0,Math.min(180,Number(second)||0));
-    const range=root.querySelector('#studentReplayRange');
-    const time=root.querySelector('#studentReplayTime');
-    if(range)range.value=studentReplaySecond;
-    if(time)time.textContent=fmtReplayTime(studentReplaySecond);
-
-    const t=studentReplaySecond/180;
-    const positions={
-      '.replayFish.b1':[25+44*t,35+15*Math.sin(t*8)],
-      '.replayFish.b2':[30+33*t,67-13*Math.sin(t*7)],
-      '.replayFish.r1':[72-28*t,35+11*Math.sin(t*6)],
-      '.replayFish.r2':[68-22*t,68-12*Math.sin(t*5)],
-      '.replayBall':[50+15*Math.sin(t*10),50+13*Math.cos(t*7)]
+  function bindProgramWorkspace(workspace){
+    if(!workspace)return;
+    let dragFrame=0;
+    let pendingTarget=null;
+    let pendingClientY=0;
+    let activeTarget=null;
+    let activeSide='';
+    const topLevelDropTarget=(node)=>{
+      const target=node&&node.closest?node.closest('.workspaceBlock[data-block-path]'):null;
+      return target&&!target.dataset.blockPath.includes('.')?target:null;
     };
-    Object.entries(positions).forEach(([sel,p])=>{
-      const el=root.querySelector(sel);
-      if(el){el.style.left=p[0]+'%';el.style.top=p[1]+'%';}
+    const sideAtPoint=(target,clientY)=>{
+      if(!target)return '';
+      const rect=target.getBoundingClientRect();
+      return clientY<rect.top+rect.height/2?'before':'after';
+    };
+    const paintDropPreview=()=>{
+      dragFrame=0;
+      const nextTarget=pendingTarget;
+      const nextSide=sideAtPoint(nextTarget,pendingClientY);
+      if(nextTarget===activeTarget&&nextSide===activeSide)return;
+      if(activeTarget)activeTarget.classList.remove('dragBefore','dragAfter');
+      activeTarget=nextTarget;
+      activeSide=nextSide;
+      if(activeTarget)activeTarget.classList.add(activeSide==='before'?'dragBefore':'dragAfter');
+    };
+    const clearWorkspaceDropState=()=>{
+      if(dragFrame){cancelAnimationFrame(dragFrame);dragFrame=0;}
+      workspace.classList.remove('dragOver');
+      if(activeTarget)activeTarget.classList.remove('dragBefore','dragAfter');
+      pendingTarget=null;activeTarget=null;activeSide='';
+    };
+    let pointerSort=null;
+    const finishPointerSort=(e,commit)=>{
+      if(!pointerSort||e.pointerId!==pointerSort.pointerId)return;
+      if(e.cancelable)e.preventDefault();
+      if(dragFrame){cancelAnimationFrame(dragFrame);dragFrame=0;paintDropPreview();}
+      const sourceIndex=pointerSort.sourceIndex;
+      const draggedBlock=pointerSort.block;
+      const target=activeTarget;
+      const side=activeSide;
+      draggedBlock.classList.remove('isDragging');
+      pointerSort=null;
+      let insertIndex=sourceIndex;
+      if(target)insertIndex=Number(target.dataset.blockPath)+(side==='before'?0:1);
+      const finalIndex=sourceIndex<insertIndex?insertIndex-1:insertIndex;
+      clearWorkspaceDropState();
+      if(commit&&target&&finalIndex!==sourceIndex){
+        moveTopLevelBlock(sourceIndex,insertIndex);
+        stopAutoSimulation();
+        refreshProgramEditor();
+      }
+    };
+    workspace.querySelectorAll('.workspaceBlock[data-sortable-step="true"]').forEach(block=>{
+      block.addEventListener('pointerdown',e=>{
+        if(e.button!==0)return;
+        if(e.target.closest('input,button,select'))return;
+        const sourceIndex=Number(block.dataset.blockPath);
+        if(!Number.isInteger(sourceIndex))return;
+        e.preventDefault();
+        pointerSort={pointerId:e.pointerId,sourceIndex,block};
+        block.classList.add('isDragging');
+        workspace.classList.add('dragOver');
+        pendingTarget=block;
+        pendingClientY=e.clientY;
+        try{block.setPointerCapture(e.pointerId);}catch(_){}
+      });
+      block.addEventListener('pointermove',e=>{
+        if(!pointerSort||e.pointerId!==pointerSort.pointerId)return;
+        e.preventDefault();
+        pendingTarget=topLevelDropTarget(document.elementFromPoint(e.clientX,e.clientY));
+        pendingClientY=e.clientY;
+        if(!dragFrame)dragFrame=requestAnimationFrame(paintDropPreview);
+      });
+      block.addEventListener('pointerup',e=>finishPointerSort(e,true));
+      block.addEventListener('pointercancel',e=>finishPointerSort(e,false));
     });
-  }
-
-  function stopStudentReplay(){
-    if(studentReplayTimer){clearInterval(studentReplayTimer);studentReplayTimer=null;}
-    studentReplayPlaying=false;
-    const btn=root.querySelector('[data-student-play]');
-    if(btn)btn.textContent='▶';
-  }
-
-  function startStudentReplay(){
-    if(studentReplaySecond>=180)studentReplaySecond=0;
-    stopStudentReplay();
-    studentReplayPlaying=true;
-    const btn=root.querySelector('[data-student-play]');
-    if(btn)btn.textContent='❚❚';
-    const speed=()=>Number(root.querySelector('#studentReplaySpeed')?.value||1);
-    studentReplayTimer=setInterval(()=>{
-      studentReplaySecond+=speed();
-      if(studentReplaySecond>=180){
-        studentReplaySecond=180;
-        updateStudentReplay(studentReplaySecond);
-        stopStudentReplay();
+    workspace.addEventListener('dragover',e=>{
+      e.preventDefault();
+      if(!workspace.classList.contains('dragOver'))workspace.classList.add('dragOver');
+      pendingTarget=topLevelDropTarget(e.target);
+      pendingClientY=e.clientY;
+      if(!dragFrame)dragFrame=requestAnimationFrame(paintDropPreview);
+    });
+    workspace.addEventListener('dragleave',e=>{if(!workspace.contains(e.relatedTarget))clearWorkspaceDropState();});
+    workspace.addEventListener('drop',e=>{
+      if(e.target.closest('[data-nested-drop]'))return;
+      e.preventDefault();
+      const target=topLevelDropTarget(e.target);
+      let insertIndex=autonomousState.blocks.length;
+      if(target){
+        const side=target===activeTarget&&activeSide?activeSide:sideAtPoint(target,e.clientY);
+        insertIndex=Number(target.dataset.blockPath)+(side==='before'?0:1);
+      }
+      clearWorkspaceDropState();
+      try{
+        const d=JSON.parse(e.dataTransfer.getData('application/json'));
+        if(d?.op)addAutonomousBlock(d.type,d.op,null,insertIndex);
+      }catch(_){}
+    });
+    workspace.addEventListener('click',e=>{
+      const stepButton=e.target.closest('[data-param-step]');
+      if(stepButton){
+        e.preventDefault();e.stopPropagation();
+        const editor=stepButton.closest('[data-param-editor]');
+        const input=editor&&editor.querySelector('[data-block-param-path][data-block-param]');
+        if(!input)return;
+        const step=Math.abs(Number(input.step))||0.1;
+        const min=Number.isFinite(Number(input.min))?Number(input.min):-Infinity;
+        const max=Number.isFinite(Number(input.max))?Number(input.max):Infinity;
+        const direction=Number(stepButton.dataset.paramStep)||0;
+        const decimals=(String(step).split('.')[1]||'').length;
+        const next=Math.max(min,Math.min(max,(Number(input.value)||0)+direction*step));
+        input.value=next.toFixed(decimals);
+        input.dispatchEvent(new Event('change',{bubbles:true}));
         return;
       }
-      updateStudentReplay(studentReplaySecond);
-    },1000);
+      const del=e.target.closest('[data-remove-block]');
+      if(del){e.preventDefault();e.stopPropagation();removeBlockAtPath(del.dataset.removeBlock);stopAutoSimulation();refreshProgramEditor();return;}
+      const copy=e.target.closest('[data-duplicate-block]');
+      if(copy){e.preventDefault();e.stopPropagation();duplicateBlockAtPath(copy.dataset.duplicateBlock);stopAutoSimulation();refreshProgramEditor();}
+    });
+    workspace.addEventListener('change',e=>{
+      const input=e.target.closest('[data-block-param-path][data-block-param]');if(!input)return;
+      const b=blockAtPath(input.dataset.blockParamPath);if(!b)return;
+      const key=input.dataset.blockParam;let value=input.value;
+      if(input.type==='number')value=Number(value);b.params=b.params||{};b.params[key]=value;
+    });
+    workspace.querySelectorAll('[data-nested-drop]').forEach(zone=>{
+      zone.addEventListener('dragover',e=>{e.preventDefault();e.stopPropagation();zone.classList.add('hot')});
+      zone.addEventListener('dragleave',()=>zone.classList.remove('hot'));
+      zone.addEventListener('drop',e=>{
+        e.preventDefault();e.stopPropagation();zone.classList.remove('hot');
+        try{const d=JSON.parse(e.dataTransfer.getData('application/json'));if(d?.op)addAutonomousBlock(d.type,d.op,zone.dataset.nestedDrop);}catch(_){}
+      });
+    });
+    workspace.querySelectorAll('[data-program-preset]').forEach(btn=>btn.addEventListener('click',()=>applyProgramPreset(btn.dataset.programPreset)));
   }
 
   function bindInteractions() {
-    root.querySelectorAll('[data-device-test-open]').forEach((button) => {
+    root.querySelectorAll('[data-player-ready]').forEach((button) => {
       button.addEventListener('click', () => {
-        const modal = root.querySelector('[data-device-test-modal]');
-        if (modal) modal.hidden = false;
+        const player = button.getAttribute('data-player-ready');
+        if (!player || !deviceAvailability[player] || !deviceAvailability[player].healthy) return;
+        const becomingReady = deviceTestState[player] !== 'ok';
+        if (typeof window.fishCompetitionSetReady !== 'function') return;
+        button.disabled = true;
+        window.fishCompetitionSetReady(player, becomingReady).catch(() => {
+          button.disabled = false;
+        });
       });
     });
-    root.querySelectorAll('[data-device-test-close]').forEach((button) => {
-      button.addEventListener('click', () => {
-        const modal = root.querySelector('[data-device-test-modal]');
-        if (modal) modal.hidden = true;
+    root.querySelectorAll('[data-motion-player][data-motion-setting]').forEach((input) => {
+      input.addEventListener('input', () => {
+        const player = input.getAttribute('data-motion-player');
+        const setting = input.getAttribute('data-motion-setting');
+        if (!playerMotionSettings[player] || !['frequency','amplitudePercent'].includes(setting)) return;
+        const value = Number(input.value);
+        playerMotionSettings[player][setting] = value;
+        const output = input.parentElement && input.parentElement.querySelector('[data-motion-output="' + setting + '"]');
+        if (output) output.textContent = setting === 'frequency' ? value.toFixed(1) + ' Hz' : Math.round(value) + '%';
+        savePlayerMotionSettings();
+        dispatchMotionTuning(player);
       });
     });
-    const deviceTestModal = root.querySelector('[data-device-test-modal]');
-    if (deviceTestModal) deviceTestModal.addEventListener('mousedown', (event) => {
-      if (event.target === deviceTestModal) deviceTestModal.hidden = true;
-    });
+    ['b1','b2'].forEach(dispatchMotionTuning);
     const openButton = root.querySelector('.keyConfigOpen');
     if (openButton) openButton.addEventListener('click', openKeyConfig);
     const modal = root.querySelector('.keyConfigModal');
@@ -6252,7 +6956,7 @@ p {
         pendingBinding = null;
         const hint = modal.querySelector('.keyConfigHint');
         if (hint) {
-          hint.textContent = '已恢复默认：B1 = WASD + Space；B2 = 方向键 + Enter';
+          hint.textContent = '已恢复默认：B1 = W / A / D；B2 = ↑ / ← / →';
           hint.classList.remove('warn');
         }
         refreshKeyUi();
@@ -6275,17 +6979,6 @@ p {
         if (event.target === modal) closeKeyConfig();
       });
     }
-    root.querySelectorAll('[data-device-test][data-device-result]').forEach((button) => {
-      button.addEventListener('click', () => {
-        const player = button.getAttribute('data-device-test');
-        const result = button.getAttribute('data-device-result');
-        if (!deviceTestState.opened) return;
-        deviceTestState[player] = result === 'ok' ? 'ok' : 'fault';
-        render();
-        const modal = root.querySelector('[data-device-test-modal]');
-        if (modal) modal.hidden = false;
-      });
-    });
     root.querySelectorAll('[data-enter-live-match]').forEach((button) => {
       button.addEventListener('click', () => {
         if (!preflightProgress().complete) return;
@@ -6303,44 +6996,17 @@ p {
     });
     const blockSearch=root.querySelector('#blockSearchInput');
     if(blockSearch)blockSearch.addEventListener('input',()=>{
-      const q=blockSearch.value.trim().toLowerCase();root.querySelectorAll('.paletteBlock').forEach(b=>{b.hidden=!!q&&!b.textContent.toLowerCase().includes(q);});
+      const q=blockSearch.value.trim().toLowerCase();root.querySelectorAll('.simplePaletteBlock, .paletteBlock').forEach(b=>{b.hidden=!!q&&!b.textContent.toLowerCase().includes(q);});
     });
 
-    root.querySelectorAll('.paletteBlock').forEach(btn=>{
+    root.querySelectorAll('.simplePaletteBlock, .paletteBlock').forEach(btn=>{
       btn.addEventListener('click',()=>addAutonomousBlock(btn.dataset.paletteType,btn.dataset.paletteOp));
       btn.addEventListener('dragstart',(e)=>{e.dataTransfer.setData('application/json',JSON.stringify({type:btn.dataset.paletteType,op:btn.dataset.paletteOp}));});
     });
 
-    const workspace=root.querySelector('#workspaceCanvas');
-    if(workspace){
-      workspace.addEventListener('dragover',e=>{e.preventDefault();workspace.classList.add('dragOver')});
-      workspace.addEventListener('dragleave',()=>workspace.classList.remove('dragOver'));
-      workspace.addEventListener('drop',e=>{
-        if(e.target.closest('[data-nested-drop]'))return;
-        e.preventDefault();workspace.classList.remove('dragOver');
-        try{const d=JSON.parse(e.dataTransfer.getData('application/json'));if(d?.op)addAutonomousBlock(d.type,d.op);}catch(_){}
-      });
-      workspace.addEventListener('click',e=>{
-        const del=e.target.closest('[data-remove-block]');
-        if(del){e.preventDefault();e.stopPropagation();removeBlockAtPath(del.dataset.removeBlock);stopAutoSimulation();render();}
-      });
-      workspace.addEventListener('change',e=>{
-        const input=e.target.closest('[data-block-param-path][data-block-param]');if(!input)return;
-        const b=blockAtPath(input.dataset.blockParamPath);if(!b)return;
-        const key=input.dataset.blockParam;let value=input.value;
-        if(input.type==='number')value=Number(value);b.params=b.params||{};b.params[key]=value;
-      });
-      workspace.querySelectorAll('[data-nested-drop]').forEach(zone=>{
-        zone.addEventListener('dragover',e=>{e.preventDefault();e.stopPropagation();zone.classList.add('hot')});
-        zone.addEventListener('dragleave',()=>zone.classList.remove('hot'));
-        zone.addEventListener('drop',e=>{
-          e.preventDefault();e.stopPropagation();zone.classList.remove('hot');
-          try{const d=JSON.parse(e.dataTransfer.getData('application/json'));if(d?.op)addAutonomousBlock(d.type,d.op,zone.dataset.nestedDrop);}catch(_){}
-        });
-      });
-    }
+    bindProgramWorkspace(root.querySelector('#workspaceCanvas'));
 
-    root.querySelector('[data-clear-program]')?.addEventListener('click',()=>{autonomousState.blocks=[];stopAutoSimulation();render();});
+    root.querySelector('[data-clear-program]')?.addEventListener('click',()=>{autonomousState.blocks=[];stopAutoSimulation();refreshProgramEditor();});
     root.querySelector('[data-save-program]')?.addEventListener('click',()=>{const el=root.querySelector('.workspaceFooter');if(el){const n=document.createElement('span');n.className='saveFlash';n.textContent='✓ 已保存';el.appendChild(n);setTimeout(()=>n.remove(),1200);}});
     root.querySelector('[data-code-preview]')?.addEventListener('click',()=>{const modal=root.querySelector('#codePreviewModal'),pre=root.querySelector('#codePreviewText');if(pre)pre.textContent=generatedProgramText();if(modal){modal.classList.add('open');modal.setAttribute('aria-hidden','false');}});
     root.querySelector('[data-close-code]')?.addEventListener('click',()=>{const modal=root.querySelector('#codePreviewModal');if(modal){modal.classList.remove('open');modal.setAttribute('aria-hidden','true');}});
@@ -6352,54 +7018,35 @@ p {
       autonomousState.autoFish=oldManual;
       render();
       resetSimVisual();
-      simLog('ROLE',autonomousState.manualFish+' = 手动，'+autonomousState.autoFish+' = 程序控制');
+      simLog('TARGET','编程控制目标已切换为 '+autonomousState.autoFish);
     });
 
     root.querySelector('[data-sim-run]')?.addEventListener('click',runAutoSimulation);
     root.querySelector('[data-sim-pause]')?.addEventListener('click',()=>{
-      if(!autonomousState.running)return;autonomousState.paused=!autonomousState.paused;const btn=root.querySelector('[data-sim-pause]');if(btn)btn.textContent=autonomousState.paused?'继续':'暂停';simLog(autonomousState.paused?'PAUSE':'RUN',autonomousState.paused?'仿真已暂停':'继续执行程序');
+      if(!autonomousState.running)return;
+      setAdvancedProgramPaused(!autonomousState.paused,autonomousState.paused?'继续执行编程控制':'编程控制已暂停');
     });
-    root.querySelector('[data-sim-reset]')?.addEventListener('click',()=>{stopAutoSimulation();resetSimVisual();const log=root.querySelector('#simLog');if(log)log.innerHTML='<p><span>READY</span>仿真已复位</p>';});
+    root.querySelector('[data-sim-reset]')?.addEventListener('click',()=>{stopAutoSimulation();resetSimVisual();const log=root.querySelector('#simLog');if(log)log.innerHTML='<p><span>READY</span>程序已复位</p>';});
     root.querySelector('[data-clear-log]')?.addEventListener('click',()=>{const log=root.querySelector('#simLog');if(log)log.innerHTML='';});
     root.querySelector('[data-deploy-program]')?.addEventListener('click',()=>simLog('DEPLOY','程序已提交，等待裁判授权部署','ok'));
 
-
-    root.querySelectorAll('[data-review-tab]').forEach(btn=>{
-      btn.addEventListener('click',()=>{
-        const tab=btn.dataset.reviewTab;
-        root.querySelectorAll('[data-review-tab]').forEach(b=>b.classList.toggle('active',b===btn));
-        root.querySelectorAll('[data-review-pane]').forEach(p=>p.classList.toggle('active',p.dataset.reviewPane===tab));
-      });
-    });
-
-    root.querySelectorAll('[data-replay-seek]').forEach(btn=>{
-      btn.addEventListener('click',()=>{
-        const sec=Number(btn.dataset.replaySeek||0);
-        updateStudentReplay(sec);
-        const toast=root.querySelector('#replayEventToast');
-        if(toast){
-          const label=btn.querySelector('b')?.textContent||'关键事件';
-          toast.textContent=fmtReplayTime(sec)+' · '+label;
-          toast.classList.add('show');
-          setTimeout(()=>toast.classList.remove('show'),1500);
-        }
-      });
-    });
-
-    root.querySelector('[data-student-play]')?.addEventListener('click',()=>{
-      studentReplayPlaying?stopStudentReplay():startStudentReplay();
-    });
-    root.querySelector('#studentReplayRange')?.addEventListener('input',e=>{
-      stopStudentReplay();
-      updateStudentReplay(Number(e.target.value));
-    });
-
     root.querySelectorAll('[data-student-record]').forEach(btn=>{
       btn.addEventListener('click',()=>{
-        root.querySelectorAll('[data-student-record]').forEach(b=>b.classList.toggle('active',b===btn));
+        selectedStudentRecordKey = btn.getAttribute('data-student-record') || '';
+        render();
       });
     });
-    updateStudentReplay(studentReplaySecond);
+    const replayVideo = root.querySelector('#studentReplayVideo');
+    if (replayVideo) {
+      replayVideo.addEventListener('loadedmetadata', () => {
+        const status = root.querySelector('#studentReplayStatus');
+        if (status) status.textContent = '录像已载入 · 可以播放';
+      });
+      replayVideo.addEventListener('error', () => {
+        const status = root.querySelector('#studentReplayStatus');
+        if (status) status.textContent = '服务器录像加载失败';
+      });
+    }
 
     refreshKeyUi();
     setupGlobalKeyboardListeners();
@@ -6432,7 +7079,48 @@ p {
     });
   }
 
-  window.addEventListener('hashchange', render);
+  document.addEventListener('fish-device-availability', (event) => {
+    const detail = event && event.detail;
+    if (!detail || !deviceAvailability[detail.player]) return;
+    const next = { healthy: !!detail.healthy, deviceId: String(detail.deviceId || '') };
+    const current = deviceAvailability[detail.player];
+    if (current.healthy === next.healthy && current.deviceId === next.deviceId) return;
+    deviceAvailability[detail.player] = next;
+    if(
+      autonomousState.running &&
+      detail.player===autonomousState.autoFish.toLowerCase() &&
+      !next.healthy
+    )setAdvancedProgramPaused(true,'真实设备离线，程序已自动暂停');
+    if (deviceTestState[detail.player] === 'ok' && (!next.healthy || readyDevice[detail.player] !== next.deviceId)) {
+      deviceTestState[detail.player] = 'pending';
+      readyDevice[detail.player] = '';
+    }
+    render();
+  });
+
+  document.addEventListener('fish-player-readiness', (event) => {
+    const detail = event && event.detail;
+    if (!detail || !deviceTestState.hasOwnProperty(detail.player)) return;
+    const nextState = detail.ready ? 'ok' : 'pending';
+    const nextDevice = detail.ready ? String(detail.deviceId || '') : '';
+    if (deviceTestState[detail.player] === nextState && readyDevice[detail.player] === nextDevice) return;
+    deviceTestState[detail.player] = nextState;
+    readyDevice[detail.player] = nextDevice;
+    render();
+  });
+
+  window.addEventListener('blur',()=>{
+    if(autonomousState.running)setAdvancedProgramPaused(true,'窗口失去焦点，编程控制已暂停');
+  });
+  window.addEventListener('pagehide',releaseAllProgramControls);
+  window.addEventListener('hashchange',()=>{
+    const nextPage=pageFromHash();
+    if(renderedPage==='control'&&nextPage!=='control')releaseAllActiveControlKeys();
+    if(renderedPage==='missions'&&nextPage!=='missions'){
+      setAdvancedProgramPaused(true,'已离开进阶控制，程序自动暂停');
+    }
+    render();
+  });
   if (!validPageIds.has(pageFromHash())) window.location.hash = 'lobby';
   render();
 })();
@@ -6443,8 +7131,6 @@ p {
   const layer=document.getElementById('teamAuthLayer');
   const login=document.getElementById('teamLoginCard');
   const confirm=document.getElementById('teamConfirmCard');
-  const qs=new URLSearchParams(location.search);
-  const stage=qs.get('stage');
   function showLogin(){ login.hidden=false; confirm.hidden=true; }
   function showConfirm(){ login.hidden=true; confirm.hidden=false; }
   function addSessionBadge(){
@@ -6452,7 +7138,7 @@ p {
       if(shell.querySelector('.teamSessionBadge')) return;
       const badge=document.createElement('span');
       badge.className='teamSessionBadge';
-      badge.textContent='海洋先锋队 · 双账号已认证';
+      badge.textContent='账号状态待读取';
       shell.appendChild(badge);
     });
   }
@@ -6467,12 +7153,10 @@ p {
   document.getElementById('teamEnterTerminal').addEventListener('click',enterTerminal);
   window.addEventListener('hashchange',()=>setTimeout(addSessionBadge,0));
   window.setInterval(()=>{ if(layer.hidden) addSessionBadge(); },500);
-  if(stage==='confirm') showConfirm();
-  else if(stage==='terminal'){ layer.hidden=true; if(location.hash!=='#control') location.hash='control'; setTimeout(addSessionBadge,0); }
-  else showLogin();
+  showLogin();
 })();
 </script>
 
-<script src="competition-adapter.js?v=20260916-strict-cuda-video"></script>
+<script src="competition-adapter.js?v=20260919-public-serialized-control"></script>
 </body>
 </html>

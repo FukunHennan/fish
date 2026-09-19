@@ -145,12 +145,12 @@ class GoControllerCommTests(unittest.TestCase):
         finally:
             comm.close()
 
-    def test_large_steering_uses_directional_tail_mode(self):
+    def test_large_steering_keeps_forward_propulsion_and_limits_bias(self):
         comm = RoboFishComm(controller_url=self.url)
         try:
             left = comm._motion_pid.update(
                 cross_track_error=0.0,
-                heading_error_deg=0.0,
+                heading_error_deg=90.0,
                 distance_to_target=0.8,
                 curvature=0.0,
                 brake=False,
@@ -160,7 +160,7 @@ class GoControllerCommTests(unittest.TestCase):
             )
             right = comm._motion_pid.update(
                 cross_track_error=0.0,
-                heading_error_deg=0.0,
+                heading_error_deg=-90.0,
                 distance_to_target=0.8,
                 curvature=0.0,
                 brake=False,
@@ -168,10 +168,12 @@ class GoControllerCommTests(unittest.TestCase):
                 speed_mps=0.1,
                 steering_demand=-0.5,
             )
-            self.assertEqual(left["mode"], "left")
-            self.assertEqual(right["mode"], "right")
-            self.assertEqual(left["bias"], 0.0)
-            self.assertEqual(right["bias"], 0.0)
+            self.assertEqual(left["mode"], "forward")
+            self.assertEqual(right["mode"], "forward")
+            self.assertLess(left["bias"], 0.0)
+            self.assertGreater(right["bias"], 0.0)
+            self.assertLessEqual(abs(left["bias"]), 18.0)
+            self.assertLessEqual(abs(right["bias"]), 18.0)
         finally:
             comm.close()
 
@@ -185,6 +187,21 @@ class GoControllerCommTests(unittest.TestCase):
         self.assertFalse(comm.start_forward_calibration())
         comm.stopped = True
         comm.thread.join(timeout=1)
+
+    def test_pending_motion_ack_is_accepted(self):
+        CaptureHandler.response = {
+            "sent": True,
+            "acknowledged": False,
+            "pending": True,
+            "success": True,
+        }
+        comm = RoboFishComm(controller_url=self.url)
+        try:
+            self.assertTrue(comm.ensure_hybrid_mode())
+            result = comm._request_motion("forward", 2.5, 20, 0)
+            self.assertTrue(result["pending"])
+        finally:
+            comm.close()
 
 
 if __name__ == "__main__":

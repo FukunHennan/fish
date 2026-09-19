@@ -47,7 +47,7 @@
 <rect x="420" y="255" width="250" height="330" rx="22" fill="#08253f" stroke="#1d7aa2" stroke-width="2"/>
 <circle cx="460" cy="300" r="25" fill="#4fdcf2"/><text x="460" y="309" text-anchor="middle" class="stepNo">2</text>
 <text x="495" y="309" class="stepTitle">场地准备</text>
-<text x="445" y="358" class="role" fill="#67e2ff">裁判</text><text x="445" y="391" class="roleText">检查相机 / Mark / 坐标</text><text x="445" y="420" class="roleText">锁定场地配置</text>
+<text x="445" y="358" class="role" fill="#67e2ff">裁判</text><text x="445" y="391" class="roleText">检查相机 / 有效区 / 坐标</text><text x="445" y="420" class="roleText">锁定场地配置</text>
 <line x1="445" y1="452" x2="645" y2="452" stroke="#245270"/>
 <text x="445" y="490" class="role" fill="#7ff2c0">选手</text><text x="445" y="523" class="roleText">赛事中心显示“准备中”</text><text x="445" y="552" class="roleText">此时不能控制机器鱼</text>
 </g>

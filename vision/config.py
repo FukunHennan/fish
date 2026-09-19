@@ -27,35 +27,40 @@ os.makedirs(os.environ["YOLO_CONFIG_DIR"], exist_ok=True)
 os.makedirs(os.environ["MPLCONFIGDIR"], exist_ok=True)
 os.environ["OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS"] = "0"
 
-# Camera and browser video.
-VIDEO_WIDTH = 640
-VIDEO_HEIGHT = 480
-VIDEO_FPS = 30
-TARGET_FPS = VIDEO_FPS
-TARGET_WIDTH = int(os.environ.get("FISH_CAPTURE_WIDTH", "1920"))
-TARGET_HEIGHT = int(os.environ.get("FISH_CAPTURE_HEIGHT", "1080"))
+# Camera and browser video.  This USB 2.0 Global Shutter Camera negotiates
+# 960x540 when asked for 960x720, which is a 16:9 crop and breaks the fixed
+# 4:3 contract.  Its stable full-frame 4:3 YUY2 mode is 640x480; keep that as
+# the default and allow an explicit deployment override when another sensor
+# exposes a verified mode.  Frame rate remains uncapped and is measured from
+# real frame arrival intervals rather than the driver's claimed value.
+TARGET_WIDTH = int(os.environ.get("FISH_CAPTURE_WIDTH", "640"))
+TARGET_HEIGHT = int(os.environ.get("FISH_CAPTURE_HEIGHT", "480"))
+CAPTURE_FOURCC = os.environ.get("FISH_CAPTURE_FOURCC", "YUY2").strip().upper()
+if len(CAPTURE_FOURCC) != 4:
+    CAPTURE_FOURCC = "YUY2"
+TARGET_FPS = 0
 try:
-    DEFAULT_CAMERA_INDEX = int(os.environ.get("FISH_CAMERA_INDEX", "0"))
+    DEFAULT_CAMERA_INDEX = int(os.environ.get("FISH_CAMERA_INDEX", "1"))
 except ValueError:
-    DEFAULT_CAMERA_INDEX = 0
+    DEFAULT_CAMERA_INDEX = 1
 CAMERA_LATENCY_S = 0.30
 CAMERA_LATENCY_MAX_PREDICTION_M = 0.12
 CAMERA_STALE_TIMEOUT_S = 0.35
 ENABLE_CLAHE_DEFAULT = False
 
-# Pool dimensions and ArUco corner mapping.
+# Pool dimensions used to map the cropped/rotated effective frame to metres.
 PHYSICAL_WIDTH = 3.14
 PHYSICAL_HEIGHT = 1.6
-MARKER_TL = 1
-MARKER_TR = 2
-MARKER_BR = 4
-MARKER_BL = 3
 
 # Fish detection and fixed marker tracking.
 YOLO_MODEL_PATH = os.path.join(ASSET_DIR, "best.pt")
 YOLO_CONF_THRESHOLD = 0.25
 YOLO_IMG_SIZE = int(os.environ.get("FISH_YOLO_IMGSZ", "1920"))
-YOLO_DEVICE = 0
+_YOLO_DEVICE_VALUE = os.environ.get("FISH_YOLO_DEVICE", "0").strip()
+try:
+    YOLO_DEVICE = int(_YOLO_DEVICE_VALUE)
+except ValueError:
+    YOLO_DEVICE = _YOLO_DEVICE_VALUE
 YOLO_DETECT_INTERVAL_S = 0.20
 MARKER_PROFILE_PATH = os.path.join(ASSET_DIR, "marker_profile.local.json")
 TURN_CALIBRATION_PATH = os.path.join(ASSET_DIR, "turn_calibration.local.json")
@@ -71,11 +76,10 @@ POS_SMOOTHING_ALPHA = 0.4
 
 # Browser video transport. WebRTC is the only production browser transport.
 MJPEG_PORT = 8090
-MJPEG_STREAM_WIDTH = VIDEO_WIDTH
-MJPEG_STREAM_HEIGHT = VIDEO_HEIGHT
+MJPEG_STREAM_WIDTH = 640
+MJPEG_STREAM_HEIGHT = 480
 MJPEG_JPEG_QUALITY = 50
-MJPEG_MAX_FPS = VIDEO_FPS
-WEBRTC_MAX_FPS = int(os.environ.get("FISH_WEBRTC_MAX_FPS", str(VIDEO_FPS)))
+MJPEG_MAX_FPS = 0
 WEBRTC_OFFER_TIMEOUT_S = 10.0
 
 # STUN enables the common public-NAT case. A TURN server is still required

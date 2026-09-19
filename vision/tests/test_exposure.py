@@ -136,9 +136,9 @@ class ExposureTests(unittest.TestCase):
                 return Completed(control_after if len(listed) > 1 else control_before)
             return Completed()
 
-        with patch("interface.shutil.which", return_value="/usr/bin/v4l2-ctl"), patch(
-            "interface.subprocess.run", side_effect=fake_run
-        ):
+        with patch("interface.sys.platform", "linux"), patch(
+            "interface.shutil.which", return_value="/usr/bin/v4l2-ctl"
+        ), patch("interface.subprocess.run", side_effect=fake_run):
             result = set_manual_exposure_for_device(FakeCapture(), 9999, 0)
 
         self.assertEqual(result.status, "completed")

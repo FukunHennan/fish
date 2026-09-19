@@ -90,7 +90,7 @@ class CameraEnumerationTests(unittest.TestCase):
 
         self.assertEqual(
             cameras,
-            [CameraInfo(index=1, name="RERVISION", width=1280, height=720, fps=60)],
+            [CameraInfo(index=1, name="RERVISION", width=1280, height=720, fps=None)],
         )
         self.assertTrue(all(capture.released for capture in captures.values()))
 
@@ -133,7 +133,7 @@ class CameraEnumerationTests(unittest.TestCase):
 
         self.assertEqual(
             cameras,
-            [CameraInfo(index=0, name="Generic Test Camera", width=640, height=480, fps=30)],
+            [CameraInfo(index=0, name="Generic Test Camera", width=640, height=480, fps=None)],
         )
         self.assertTrue(all(capture.released for capture in captures.values()))
 
@@ -235,13 +235,27 @@ class VisionServiceLifecycleTests(unittest.TestCase):
 
         accepted = service.handle_session_action(
             snapshot["sessionId"],
-            {"type": "overlay.set", "overlays": {"detections": False}},
+            {
+                "type": "overlay.set",
+                "overlays": {
+                    "detections": False,
+                    "plannedPath": True,
+                    "trajectory": False,
+                },
+            },
         )
 
         self.assertTrue(accepted)
         self.assertEqual(
             service.next_action(),
-            {"type": "overlay.set", "overlays": {"detections": False}},
+            {
+                "type": "overlay.set",
+                "overlays": {
+                    "detections": False,
+                    "plannedPath": True,
+                    "trajectory": False,
+                },
+            },
         )
 
     def test_path_clear_is_accepted_during_preview(self):

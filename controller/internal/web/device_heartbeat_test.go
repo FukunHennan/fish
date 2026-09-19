@@ -63,5 +63,9 @@ func TestDeviceHeartbeatKeepsSocketAliveBeyondReadTimeout(t *testing.T) {
 		}
 		count++
 	}
+	devices := s.hub.List()
+	if len(devices) != 1 || devices[0].HeartbeatRTTMs <= 0 {
+		t.Fatalf("未测得 WebSocket ping/pong RTT: %+v", devices)
+	}
 	t.Logf("exchanged %d heartbeats over %s", count, time.Since(started).Round(time.Millisecond))
 }

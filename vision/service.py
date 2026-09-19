@@ -7,7 +7,6 @@ from pathlib import Path
 from queue import Empty, Queue, SimpleQueue
 from threading import RLock
 import inspect
-import math
 import time
 from typing import Callable, Optional
 
@@ -92,18 +91,20 @@ def _linux_v4l2_camera_indexes(max_index=8, root=Path("/sys/class/video4linux"))
     return sorted(set(indexes))
 
 
-def _camera_info(index, name, capture):
-    reported_fps = _safe_get(capture, cv2.CAP_PROP_FPS, 0.0)
+def _camera_info(index, name, capture, frame=None):
+    # Camera catalogs only prove that a device can deliver an image.  They do
+    # not run long enough to measure a real frame rate, and CAP_PROP_FPS is not
+    # trustworthy on the target UVC driver.  Publish null until the active
+    # session reports measured cameraFps from real frame intervals.
+    shape = getattr(frame, "shape", None)
+    frame_width = int(shape[1]) if shape is not None and len(shape) >= 2 else 0
+    frame_height = int(shape[0]) if shape is not None and len(shape) >= 2 else 0
     return CameraInfo(
         index=index,
         name=name,
-        width=int(_safe_get(capture, cv2.CAP_PROP_FRAME_WIDTH, 0.0)),
-        height=int(_safe_get(capture, cv2.CAP_PROP_FRAME_HEIGHT, 0.0)),
-        fps=(
-            int(reported_fps)
-            if math.isfinite(reported_fps) and reported_fps > 0
-            else None
-        ),
+        width=frame_width or int(_safe_get(capture, cv2.CAP_PROP_FRAME_WIDTH, 0.0)),
+        height=frame_height or int(_safe_get(capture, cv2.CAP_PROP_FRAME_HEIGHT, 0.0)),
+        fps=None,
     )
 
 
@@ -143,11 +144,11 @@ def enumerate_cameras(
         if open_capture is None:
             # Probe with the same explicit backend policy as the real stream.
             try:
-                capture, backend_name, _first_frame = _open_working_capture(index)
+                capture, backend_name, first_frame = _open_working_capture(index)
             except RuntimeError:
                 continue
             try:
-                info = _camera_info(index, name, capture)
+                info = _camera_info(index, name, capture, first_frame)
                 signature = (info.name, info.width, info.height, info.fps)
                 if signature in seen_capture_signatures:
                     continue
@@ -187,7 +188,7 @@ def enumerate_cameras(
             if not readable:
                 continue
 
-            info = _camera_info(index, name, capture)
+            info = _camera_info(index, name, capture, frame)
             signature = (info.name, info.width, info.height, info.fps)
             if signature in seen_capture_signatures:
                 continue
@@ -373,6 +374,10 @@ class VisionService:
             if action.get("type") == "tracking.mode":
                 mode = TrackingMode(action.get("mode") or TrackingMode.YOLO.value)
                 session.tracking_mode = mode
+                if mode == TrackingMode.SINGLE_FISH:
+                    # A single-fish session follows the sole visible target;
+                    # a stale YOLO ID must never block a new detection ID.
+                    session.target_track_id = None
                 action["mode"] = mode.value
                 if session.state == VisionState.TRACKING:
                     session.transition(VisionState.PROCESSING)

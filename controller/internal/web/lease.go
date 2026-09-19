@@ -10,16 +10,17 @@ import (
 )
 
 type controlLease struct {
-	MotionExpired bool      `json:"motionExpired"`
-	DeviceID      string    `json:"deviceId"`
-	ClientID      string    `json:"clientId,omitempty"`
-	OwnerID       string    `json:"ownerId"`
-	OwnerName     string    `json:"ownerName"`
-	OwnerEmail    string    `json:"ownerEmail"`
-	Mode          string    `json:"mode"`
-	AcquiredAt    time.Time `json:"acquiredAt"`
-	ExpiresAt     time.Time `json:"expiresAt"`
-	LastCommandAt time.Time `json:"lastCommandAt"`
+	MotionExpired    bool      `json:"motionExpired"`
+	DeadmanProtected bool      `json:"deadmanProtected,omitempty"`
+	DeviceID         string    `json:"deviceId"`
+	ClientID         string    `json:"clientId,omitempty"`
+	OwnerID          string    `json:"ownerId"`
+	OwnerName        string    `json:"ownerName"`
+	OwnerEmail       string    `json:"ownerEmail"`
+	Mode             string    `json:"mode"`
+	AcquiredAt       time.Time `json:"acquiredAt"`
+	ExpiresAt        time.Time `json:"expiresAt"`
+	LastCommandAt    time.Time `json:"lastCommandAt"`
 }
 
 type leaseStore struct {
@@ -54,9 +55,35 @@ func (l *leaseStore) cleanupLocked(now time.Time) []string {
 // Called while admission is locked: STOP must enter the device queue before a
 // new owner can submit motion. The callback must never wait for device I/O.
 func (l *leaseStore) stopLocked(id string) {
+	l.stopLockedWithPolicy(id, false)
+}
+
+// High-priority takeover must clear a deadman-protected browser lease too.
+func (l *leaseStore) forceStopLocked(id string) {
+	l.stopLockedWithPolicy(id, true)
+}
+
+func (l *leaseStore) stopLockedWithPolicy(id string, force bool) {
+	if !force {
+		if lease, exists := l.leases[id]; exists && lease.DeadmanProtected {
+			return
+		}
+	}
 	if l.onRelease != nil {
 		l.onRelease(id)
 	}
+}
+
+func (l *leaseStore) setDeadmanProtected(deviceID string, user authUser, clientID string, enabled bool) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	lease, exists := l.leases[deviceID]
+	if !exists || lease.OwnerID != user.ID || lease.ClientID != clientID {
+		return false
+	}
+	lease.DeadmanProtected = enabled
+	l.leases[deviceID] = lease
+	return true
 }
 
 func (l *leaseStore) admit(deviceID string, user authUser, clientID string, required bool, queue func() bool) bool {
@@ -90,7 +117,11 @@ func (l *leaseStore) admitVision(deviceID, operation string, queue func() bool) 
 	l.cleanupLocked(now)
 	current, exists := l.leases[deviceID]
 	if exists && current.OwnerID != "vision-bot" {
-		return false
+		// Vision is an operator-approved high-priority control path. Queue a
+		// neutral command before replacing any browser lease, including one
+		// protected by a deadman timeout.
+		l.forceStopLocked(deviceID)
+		delete(l.leases, deviceID)
 	}
 	if !queue() {
 		return false
@@ -114,6 +145,19 @@ func (l *leaseStore) releaseIdleVision(active func(string) bool) bool {
 		}
 	}
 	return changed
+}
+
+func (l *leaseStore) releaseBrowserLeases() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for id, lease := range l.leases {
+		if lease.OwnerID == "vision-bot" {
+			continue
+		}
+		l.forceStopLocked(id)
+		delete(l.leases, id)
+	}
+	_ = l.saveLocked()
 }
 
 func (l *leaseStore) snapshot() map[string]controlLease {
@@ -159,11 +203,16 @@ func (l *leaseStore) acquireExclusive(deviceID string, user authUser, mode strin
 	if mode == "" {
 		mode = "manual"
 	}
-	if current, ok := l.leases[deviceID]; ok && current.OwnerID != user.ID && !force {
+	if current, ok := l.leases[deviceID]; ok &&
+		(current.OwnerID != user.ID || (current.ClientID != "" && current.ClientID != clientID)) && !force {
 		return current, nil, false
 	}
 	if current, ok := l.leases[deviceID]; !ok || current.OwnerID != user.ID || current.ClientID != clientID {
-		l.stopLocked(deviceID)
+		if force {
+			l.forceStopLocked(deviceID)
+		} else {
+			l.stopLocked(deviceID)
+		}
 	}
 	// Exclusivity is per device; a user may hold several devices.
 	lease := controlLease{
@@ -202,7 +251,11 @@ func (l *leaseStore) release(deviceID string, user authUser, force bool, clients
 	if len(clients) > 0 && current.ClientID != clients[0] && !force {
 		return false
 	}
-	l.stopLocked(deviceID)
+	if force {
+		l.forceStopLocked(deviceID)
+	} else {
+		l.stopLocked(deviceID)
+	}
 	delete(l.leases, deviceID)
 	if err := l.saveLocked(); err != nil {
 		l.leases[deviceID] = current

@@ -14,17 +14,31 @@ def _default_model_factory(model_path: str):
     return YOLO(model_path)
 
 
-def resolve_inference_device(requested, model_device, cuda_available=None):
+def resolve_inference_device(
+    requested,
+    model_device,
+    cuda_available=None,
+    xpu_available=None,
+):
     # Model weights normally load on CPU before predict selects the device.
     if isinstance(requested, int):
         if cuda_available is None:
             import torch
             cuda_available = torch.cuda.is_available() and requested < torch.cuda.device_count()
-        if not cuda_available:
-            raise RuntimeError(
-                f"CUDA device {requested} is required but unavailable; CPU fallback is disabled"
+        if cuda_available:
+            return requested
+        if xpu_available is None:
+            import torch
+            xpu_available = (
+                hasattr(torch, "xpu")
+                and torch.xpu.is_available()
+                and requested < torch.xpu.device_count()
             )
-        return requested
+        if xpu_available:
+            return f"xpu:{requested}"
+        raise RuntimeError(
+            f"GPU device {requested} is unavailable; CPU fallback is disabled"
+        )
     return requested
 
 
@@ -170,7 +184,7 @@ class FishDetector:
                 load_seconds=load_seconds,
                 device=str(inference_device),
             )
-        print(f"[YOLO] Model ready in {load_seconds:.2f}s on CUDA device {inference_device}")
+        print(f"[YOLO] Model ready in {load_seconds:.2f}s on GPU device {inference_device}")
 
         while not self._stop_event.is_set():
             with self._latest_frame_lock:
@@ -1475,10 +1489,6 @@ from config import (
     CAMERA_LATENCY_MAX_PREDICTION_M,
     CAMERA_LATENCY_S,
     ENABLE_CLAHE_DEFAULT,
-    MARKER_BL,
-    MARKER_BR,
-    MARKER_TL,
-    MARKER_TR,
     POS_SMOOTHING_ALPHA,
     YOLO_DETECT_INTERVAL_S,
 )
@@ -1520,7 +1530,7 @@ class VisionFrameResult:
 
 
 class VisionPipeline:
-    """Combine low-rate YOLO identity and high-rate marker observations."""
+    """Combine YOLO identity with the optional fish-body reference tracker."""
 
     def __init__(
         self,
@@ -1531,10 +1541,6 @@ class VisionPipeline:
     ):
         self.fish_detector = fish_detector
         self.reference_tracker = reference_tracker
-        aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
-        self.aruco_detector = cv2.aruco.ArucoDetector(
-            aruco_dict, cv2.aruco.DetectorParameters()
-        )
         self.clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
         self.use_clahe = ENABLE_CLAHE_DEFAULT
         self._last_yolo_submit_t = float("-inf")
@@ -1544,6 +1550,7 @@ class VisionPipeline:
         self.velocity_estimator = velocity_estimator
         self._latency_compensator = latency_compensator
         self.target_track_id = None
+        self.single_fish_mode = False
         self._target_hold_center = None
         self._target_hold_max_distance_px = 90.0
 
@@ -1564,10 +1571,52 @@ class VisionPipeline:
         self._target_hold_center = None
         self.reset_motion()
 
+    def set_single_fish_mode(self, enabled: bool) -> None:
+        """Allow the sole visible fish to receive a new YOLO ID per frame."""
+        self.single_fish_mode = bool(enabled)
+        self.reset_motion()
+
     def _select_target(self, yolo_result):
         selected = dict(yolo_result)
         detections = list(yolo_result.get("detections") or [])
         selected["targetTrackId"] = self.target_track_id
+        if self.single_fish_mode:
+            if not detections:
+                selected["targetFound"] = False
+                selected.update({
+                    "pixel": None,
+                    "bbox": None,
+                    "confidence": 0.0,
+                    "track_id": None,
+                })
+                return selected
+            # In single-fish mode the tracker ID is only an implementation
+            # detail. Prefer the current ID when it is present; otherwise use
+            # the strongest current detection and publish its new ID.
+            target = next(
+                (item for item in detections
+                 if item.get("trackId") == self.target_track_id),
+                None,
+            )
+            if target is None:
+                target = max(
+                    detections,
+                    key=lambda item: float(item.get("confidence", 0.0)),
+                )
+            self.target_track_id = target.get("trackId")
+            selected["targetTrackId"] = self.target_track_id
+            selected["targetFound"] = True
+            selected.update({
+                "pixel": list(target["center"]),
+                "bbox": list(target["bbox"]),
+                "confidence": float(target.get("confidence", 0.0)),
+                "track_id": target.get("trackId"),
+            })
+            self._target_hold_center = (
+                float(target["center"][0]),
+                float(target["center"][1]),
+            )
+            return selected
         if self.target_track_id is None:
             selected["targetFound"] = bool(detections)
             return selected
@@ -1609,7 +1658,6 @@ class VisionPipeline:
             self.fish_detector.submit_frame(frame, frame_time)
             self._last_yolo_submit_t = frame_time
 
-        corner_pixels = self._detect_pool_corners(gray) if homography is None else {}
         yolo_result = self._select_target(self.fish_detector.get_latest())
         yolo_status = self.fish_detector.get_status()
         reference = self.reference_tracker.update(
@@ -1670,7 +1718,7 @@ class VisionPipeline:
             frame=frame,
             gray=gray,
             frame_time=float(frame_time),
-            corner_pixels=corner_pixels,
+            corner_pixels={},
             yolo_result=yolo_result,
             yolo_status=yolo_status,
             reference=reference,
@@ -1683,19 +1731,6 @@ class VisionPipeline:
             speed=speed,
             direction_deg=direction_deg,
         )
-
-    def _detect_pool_corners(self, gray):
-        corners, ids, _ = self.aruco_detector.detectMarkers(gray)
-        found = {}
-        if ids is None:
-            return found
-        wanted = {MARKER_TL, MARKER_TR, MARKER_BR, MARKER_BL}
-        for index, marker_id in enumerate(ids.flatten()):
-            marker_id = int(marker_id)
-            if marker_id in wanted:
-                centre = np.mean(corners[index][0], axis=0)
-                found[marker_id] = [float(centre[0]), float(centre[1])]
-        return found
 
     def _smooth_pixel(self, pixel):
         if pixel is None:

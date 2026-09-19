@@ -1,7 +1,9 @@
 package hub
 
 import (
+	"math"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 )
@@ -12,39 +14,99 @@ type Conn interface {
 }
 
 type Device struct {
-	ID                 string    `json:"deviceId"`
-	Name               string    `json:"name"`
-	IP                 string    `json:"ip"`
-	FirmwareVersion    string    `json:"firmwareVersion"`
-	Online             bool      `json:"online"`
-	LastSeen           time.Time `json:"lastSeen"`
-	Mode               int       `json:"mode"`
-	Frequency          float64   `json:"frequency"`
-	Amplitude          float64   `json:"amplitude"`
-	Bias               float64   `json:"bias"`
-	RSSI               int       `json:"rssi"`
-	UptimeMs           uint64    `json:"uptimeMs"`
-	LastControlMs      uint64    `json:"lastControlMs"`
-	StopReason         string    `json:"stopReason"`
-	BatteryVoltage     float64   `json:"batteryVoltage"`
-	BatteryPercent     int       `json:"batteryPercent"`
-	BatterySampleAgeMs uint64    `json:"batterySampleAgeMs"`
-	Capabilities       []string  `json:"capabilities,omitempty"`
-	ControlSource      string    `json:"controlSource"`
-	VisionActive       bool      `json:"visionActive"`
-	VisionSessionID    string    `json:"visionSessionId"`
-	VisionSequence     uint32    `json:"visionSequence"`
-	OTAState           string    `json:"otaState"`
-	OTAProgress        int       `json:"otaProgress"`
-	LightSensorOnline  bool      `json:"lightSensorOnline"`
-	IlluminanceLux     float64   `json:"illuminanceLux"`
-	I2CAddresses       []int     `json:"i2cAddresses,omitempty"`
-	RGBMode            string    `json:"rgbMode"`
-	RGBOrder           string    `json:"rgbOrder"`
-	RGBRed             int       `json:"rgbRed"`
-	RGBGreen           int       `json:"rgbGreen"`
-	RGBBlue            int       `json:"rgbBlue"`
-	RGBBrightness      int       `json:"rgbBrightness"`
+	ID                   string    `json:"deviceId"`
+	Name                 string    `json:"name"`
+	IP                   string    `json:"ip"`
+	FirmwareVersion      string    `json:"firmwareVersion"`
+	ProtocolVersion      int       `json:"protocolVersion"`
+	BootID               string    `json:"bootId,omitempty"`
+	Online               bool      `json:"online"`
+	LastSeen             time.Time `json:"lastSeen"`
+	Mode                 int       `json:"mode"`
+	Frequency            float64   `json:"frequency"`
+	Amplitude            float64   `json:"amplitude"`
+	Bias                 float64   `json:"bias"`
+	RSSI                 int       `json:"rssi"`
+	UptimeMs             uint64    `json:"uptimeMs"`
+	LastControlMs        uint64    `json:"lastControlMs"`
+	StopReason           string    `json:"stopReason"`
+	BatteryVoltage       float64   `json:"batteryVoltage"`
+	BatteryPercent       int       `json:"batteryPercent"`
+	HeartbeatRTTMs       float64   `json:"heartbeatRttMs,omitempty"`
+	Capabilities         []string  `json:"capabilities,omitempty"`
+	Sensors              []string  `json:"sensors,omitempty"`
+	ServoPin             int       `json:"servoPin,omitempty"`
+	StatusLedPin         int       `json:"statusLedPin,omitempty"`
+	BatterySensePin      int       `json:"batterySensePin,omitempty"`
+	BatteryDividerRatio  float64   `json:"batteryDividerRatio,omitempty"`
+	BatteryEmptyVoltage  float64   `json:"batteryEmptyVoltage,omitempty"`
+	BatteryFullVoltage   float64   `json:"batteryFullVoltage,omitempty"`
+	ControlSource        string    `json:"controlSource"`
+	VisionActive         bool      `json:"visionActive"`
+	VisionSessionID      string    `json:"visionSessionId"`
+	VisionSequence       uint32    `json:"visionSequence"`
+	OTAState             string    `json:"otaState"`
+	OTAProgress          int       `json:"otaProgress"`
+	LightSensorOnline    bool      `json:"lightSensorOnline"`
+	IlluminanceLux       float64   `json:"illuminanceLux"`
+	I2CAddresses         []int     `json:"i2cAddresses,omitempty"`
+	RGBMode              string    `json:"rgbMode"`
+	RGBOrder             string    `json:"rgbOrder"`
+	RGBRed               int       `json:"rgbRed"`
+	RGBGreen             int       `json:"rgbGreen"`
+	RGBBlue              int       `json:"rgbBlue"`
+	RGBBrightness        int       `json:"rgbBrightness"`
+	ServoCenter          float64   `json:"servoCenter"`
+	LastCommandRequestID string    `json:"lastCommandRequestId,omitempty"`
+	LastCommandAcked     bool      `json:"lastCommandAcked"`
+	LastCommandSuccess   bool      `json:"lastCommandSuccess"`
+	LastCommandCode      string    `json:"lastCommandCode,omitempty"`
+	LastCommandMessage   string    `json:"lastCommandMessage,omitempty"`
+	CommandAckAtMs       int64     `json:"commandAckAtMs,omitempty"`
+	HeartbeatAtMs        int64     `json:"heartbeatAtMs,omitempty"`
+	MotionStateAtMs      int64     `json:"motionStateAtMs,omitempty"`
+	RGBStateAtMs         int64     `json:"rgbStateAtMs,omitempty"`
+	BatteryAtMs          int64     `json:"batteryAtMs,omitempty"`
+	LightAtMs            int64     `json:"lightAtMs,omitempty"`
+	LinkAtMs             int64     `json:"linkAtMs,omitempty"`
+	IdentityAtMs         int64     `json:"identityAtMs,omitempty"`
+	OTAAtMs              int64     `json:"otaAtMs,omitempty"`
+}
+
+// UpdateHeartbeatRTT stores a lightly smoothed WebSocket ping/pong round-trip
+// measurement. This is actual transport RTT, unlike LastSeen which only says
+// how old the latest status report is.
+func (h *Hub) UpdateHeartbeatRTT(id string, rtt time.Duration) {
+	if rtt < 0 {
+		return
+	}
+	value := float64(rtt.Microseconds()) / 1000
+	if value < 0.1 {
+		value = 0.1
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	e := h.entries[id]
+	if e == nil {
+		return
+	}
+	if e.device.HeartbeatRTTMs > 0 {
+		value = e.device.HeartbeatRTTMs*0.7 + value*0.3
+	}
+	e.device.HeartbeatRTTMs = math.Round(value*10) / 10
+}
+
+// HeartbeatRTT returns the latest smoothed device WebSocket round-trip time.
+// HTTP command handlers use it to avoid treating public-network delay as a
+// device failure.
+func (h *Hub) HeartbeatRTT(id string) (time.Duration, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	e := h.entries[id]
+	if e == nil || e.device.HeartbeatRTTMs <= 0 {
+		return 0, false
+	}
+	return time.Duration(e.device.HeartbeatRTTMs * float64(time.Millisecond)), true
 }
 
 type entry struct {
@@ -100,6 +162,9 @@ func (h *Hub) Register(d Device, c Conn) {
 	}
 	d.Online = true
 	d.LastSeen = time.Now()
+	if d.ProtocolVersion >= 2 {
+		d.IdentityAtMs = d.LastSeen.UnixMilli()
+	}
 	current := &entry{
 		device:       d,
 		conn:         c,
@@ -129,9 +194,53 @@ func (h *Hub) Update(id string, values map[string]any) {
 		return
 	}
 	before := deviceDisplaySignature(e.device)
-	e.device.LastSeen = time.Now()
+	now := time.Now()
+	nowMs := now.UnixMilli()
+	e.device.LastSeen = now
+	if _, ok := values["uptimeMs"]; ok {
+		e.device.HeartbeatAtMs = nowMs
+	}
+	if _, ok := values["mode"]; ok {
+		e.device.MotionStateAtMs = nowMs
+	}
+	if _, ok := values["rgbMode"]; ok {
+		e.device.RGBStateAtMs = nowMs
+	}
+	if _, ok := values["batteryVoltage"]; ok {
+		e.device.BatteryAtMs = nowMs
+	}
+	if _, ok := values["lightSensorOnline"]; ok {
+		e.device.LightAtMs = nowMs
+	}
+	if _, ok := values["rssi"]; ok {
+		e.device.LinkAtMs = nowMs
+	}
+	if _, ok := values["servoCenter"]; ok {
+		e.device.IdentityAtMs = nowMs
+	}
+	if _, ok := values["otaState"]; ok {
+		e.device.OTAAtMs = nowMs
+	}
+	if requestID, ok := values["requestId"].(string); ok && requestID != "" {
+		e.device.LastCommandRequestID = requestID
+		e.device.LastCommandAcked = true
+		e.device.CommandAckAtMs = nowMs
+		if success, ok := values["success"].(bool); ok {
+			e.device.LastCommandSuccess = success
+		}
+		if code, ok := values["code"].(string); ok {
+			e.device.LastCommandCode = code
+		}
+		if message, ok := values["message"].(string); ok {
+			e.device.LastCommandMessage = message
+		}
+	}
 	if v, ok := values["mode"].(float64); ok {
 		e.device.Mode = int(v)
+	} else if v, ok := values["mode"].(string); ok {
+		if mode, valid := motionModeFromString(v); valid {
+			e.device.Mode = mode
+		}
 	}
 	if v, ok := values["frequency"].(float64); ok {
 		e.device.Frequency = v
@@ -166,9 +275,6 @@ func (h *Hub) Update(id string, values map[string]any) {
 	if v, ok := values["batteryPercent"].(float64); ok && v >= 0 && v <= 100 {
 		e.device.BatteryPercent = int(v)
 	}
-	if v, ok := values["batterySampleAgeMs"].(float64); ok && v >= 0 {
-		e.device.BatterySampleAgeMs = uint64(v)
-	}
 	if v, ok := values["controlSource"].(string); ok {
 		e.device.ControlSource = v
 	}
@@ -189,6 +295,9 @@ func (h *Hub) Update(id string, values map[string]any) {
 	}
 	if v, ok := values["lightSensorOnline"].(bool); ok {
 		e.device.LightSensorOnline = v
+		if !v {
+			e.device.IlluminanceLux = 0
+		}
 	}
 	if v, ok := values["illuminanceLux"].(float64); ok && v >= 0 {
 		e.device.IlluminanceLux = v
@@ -219,8 +328,60 @@ func (h *Hub) Update(id string, values map[string]any) {
 	if v, ok := values["rgbBrightness"].(float64); ok {
 		e.device.RGBBrightness = int(v)
 	}
+	if v, ok := values["servoCenter"].(float64); ok && v >= 0 && v <= 180 {
+		e.device.ServoCenter = v
+	}
+	if v, ok := values["bootId"].(string); ok {
+		e.device.BootID = v
+	}
+	if v, ok := values["protocolVersion"].(float64); ok && v >= 1 {
+		e.device.ProtocolVersion = int(v)
+	}
+	if values, ok := values["sensors"].([]any); ok {
+		e.device.Sensors = e.device.Sensors[:0]
+		for _, value := range values {
+			if sensor, ok := value.(string); ok && sensor != "" {
+				e.device.Sensors = append(e.device.Sensors, sensor)
+			}
+		}
+	}
+	if v, ok := values["servoPin"].(float64); ok && v >= 0 && v <= 48 {
+		e.device.ServoPin = int(v)
+	}
+	if v, ok := values["statusLedPin"].(float64); ok && v >= 0 && v <= 48 {
+		e.device.StatusLedPin = int(v)
+	}
+	if v, ok := values["batterySensePin"].(float64); ok && v >= 0 && v <= 48 {
+		e.device.BatterySensePin = int(v)
+	}
+	if v, ok := values["batteryDividerRatio"].(float64); ok && v > 0 && v < 100 {
+		e.device.BatteryDividerRatio = v
+	}
+	if v, ok := values["batteryEmptyVoltage"].(float64); ok && v >= 0 && v < 100 {
+		e.device.BatteryEmptyVoltage = v
+	}
+	if v, ok := values["batteryFullVoltage"].(float64); ok && v >= 0 && v < 100 {
+		e.device.BatteryFullVoltage = v
+	}
 	if !reflect.DeepEqual(before, deviceDisplaySignature(e.device)) {
 		h.notifyLocked()
+	}
+}
+
+func motionModeFromString(value string) (int, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "stopped", "stop":
+		return 0, true
+	case "idle":
+		return 1, true
+	case "forward":
+		return 2, true
+	case "left":
+		return 3, true
+	case "right":
+		return 4, true
+	default:
+		return 0, false
 	}
 }
 
@@ -502,6 +663,11 @@ func (h *Hub) QueueVisionCommand(id, requestID string, value any, lifetime time.
 	e := h.entries[id]
 	h.mu.Unlock()
 	r.queued = e != nil && e.enqueueVision(value, r.written, lifetime, session, operation)
+	if !r.queued {
+		h.mu.Lock()
+		delete(h.pending, requestID)
+		h.mu.Unlock()
+	}
 	return r
 }
 
@@ -623,6 +789,7 @@ func (h *Hub) List() []Device {
 
 func cloneDevice(device Device) Device {
 	device.Capabilities = append([]string(nil), device.Capabilities...)
+	device.Sensors = append([]string(nil), device.Sensors...)
 	device.I2CAddresses = append([]int(nil), device.I2CAddresses...)
 	return device
 }
@@ -637,63 +804,91 @@ func containsDeviceID(order []string, id string) bool {
 }
 
 type deviceDisplayState struct {
-	ID                string
-	Name              string
-	IP                string
-	FirmwareVersion   string
-	Online            bool
-	Mode              int
-	Frequency         float64
-	Amplitude         float64
-	Bias              float64
-	StopReason        string
-	BatteryVoltage    float64
-	BatteryPercent    int
-	Capabilities      []string
-	ControlSource     string
-	VisionActive      bool
-	VisionSessionID   string
-	OTAState          string
-	OTAProgress       int
-	LightSensorOnline bool
-	IlluminanceLux    float64
-	I2CAddresses      []int
-	RGBMode           string
-	RGBOrder          string
-	RGBRed            int
-	RGBGreen          int
-	RGBBlue           int
-	RGBBrightness     int
+	ID                   string
+	Name                 string
+	IP                   string
+	FirmwareVersion      string
+	Online               bool
+	Mode                 int
+	Frequency            float64
+	Amplitude            float64
+	Bias                 float64
+	StopReason           string
+	BatteryVoltage       float64
+	BatteryPercent       int
+	Capabilities         []string
+	Sensors              []string
+	ServoPin             int
+	StatusLedPin         int
+	BatterySensePin      int
+	BatteryDividerRatio  float64
+	BatteryEmptyVoltage  float64
+	BatteryFullVoltage   float64
+	ControlSource        string
+	VisionActive         bool
+	VisionSessionID      string
+	OTAState             string
+	OTAProgress          int
+	LightSensorOnline    bool
+	IlluminanceLux       float64
+	I2CAddresses         []int
+	RGBMode              string
+	RGBOrder             string
+	RGBRed               int
+	RGBGreen             int
+	RGBBlue              int
+	RGBBrightness        int
+	ServoCenter          float64
+	LastCommandRequestID string
+	LastCommandAcked     bool
+	LastCommandSuccess   bool
+	LastCommandCode      string
+	LastCommandMessage   string
+	CommandAckAtMs       int64
 }
 
 func deviceDisplaySignature(device Device) deviceDisplayState {
 	return deviceDisplayState{
-		ID:                device.ID,
-		Name:              device.Name,
-		IP:                device.IP,
-		FirmwareVersion:   device.FirmwareVersion,
-		Online:            device.Online,
-		Mode:              device.Mode,
-		Frequency:         device.Frequency,
-		Amplitude:         device.Amplitude,
-		Bias:              device.Bias,
-		StopReason:        device.StopReason,
-		BatteryVoltage:    device.BatteryVoltage,
-		BatteryPercent:    device.BatteryPercent,
-		Capabilities:      append([]string(nil), device.Capabilities...),
-		ControlSource:     device.ControlSource,
-		VisionActive:      device.VisionActive,
-		VisionSessionID:   device.VisionSessionID,
-		OTAState:          device.OTAState,
-		OTAProgress:       device.OTAProgress,
-		LightSensorOnline: device.LightSensorOnline,
-		IlluminanceLux:    device.IlluminanceLux,
-		I2CAddresses:      append([]int(nil), device.I2CAddresses...),
-		RGBMode:           device.RGBMode,
-		RGBOrder:          device.RGBOrder,
-		RGBRed:            device.RGBRed,
-		RGBGreen:          device.RGBGreen,
-		RGBBlue:           device.RGBBlue,
-		RGBBrightness:     device.RGBBrightness,
+		ID:                   device.ID,
+		Name:                 device.Name,
+		IP:                   device.IP,
+		FirmwareVersion:      device.FirmwareVersion,
+		Online:               device.Online,
+		Mode:                 device.Mode,
+		Frequency:            device.Frequency,
+		Amplitude:            device.Amplitude,
+		Bias:                 device.Bias,
+		StopReason:           device.StopReason,
+		BatteryVoltage:       device.BatteryVoltage,
+		BatteryPercent:       device.BatteryPercent,
+		Capabilities:         append([]string(nil), device.Capabilities...),
+		Sensors:              append([]string(nil), device.Sensors...),
+		ServoPin:             device.ServoPin,
+		StatusLedPin:         device.StatusLedPin,
+		BatterySensePin:      device.BatterySensePin,
+		BatteryDividerRatio:  device.BatteryDividerRatio,
+		BatteryEmptyVoltage:  device.BatteryEmptyVoltage,
+		BatteryFullVoltage:   device.BatteryFullVoltage,
+		ControlSource:        device.ControlSource,
+		VisionActive:         device.VisionActive,
+		VisionSessionID:      device.VisionSessionID,
+		OTAState:             device.OTAState,
+		OTAProgress:          device.OTAProgress,
+		LightSensorOnline:    device.LightSensorOnline,
+		IlluminanceLux:       device.IlluminanceLux,
+		I2CAddresses:         append([]int(nil), device.I2CAddresses...),
+		RGBMode:              device.RGBMode,
+		RGBOrder:             device.RGBOrder,
+		RGBRed:               device.RGBRed,
+		RGBGreen:             device.RGBGreen,
+		RGBBlue:              device.RGBBlue,
+		RGBBrightness:        device.RGBBrightness,
+		ServoCenter:          device.ServoCenter,
+		LastCommandRequestID: device.LastCommandRequestID,
+		LastCommandAcked:     device.LastCommandAcked,
+		LastCommandSuccess:   device.LastCommandSuccess,
+		LastCommandCode:      device.LastCommandCode,
+		LastCommandMessage:   device.LastCommandMessage,
+		CommandAckAtMs:       device.CommandAckAtMs,
 	}
 }

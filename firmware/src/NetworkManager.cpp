@@ -56,7 +56,12 @@ void NetworkManager::printConnectionInfo(){
 }
 
 void NetworkManager::registerRoutes(){
-    auto showPortal=[this](){server_.sendHeader("Cache-Control","no-store");server_.send(200,"text/html; charset=utf-8",PAGE);};
+    auto showPortal=[this](){
+        String page=PAGE;
+        page.replace("placeholder=\"设备名称\" value=\"机器鱼\"", "placeholder=\"留空则默认使用设备 MAC\"");
+        server_.sendHeader("Cache-Control","no-store");
+        server_.send(200,"text/html; charset=utf-8",page);
+    };
     server_.on("/",HTTP_GET,showPortal);
     const char* probes[]={"/generate_204","/gen_204","/hotspot-detect.html","/library/test/success.html","/connecttest.txt","/redirect","/ncsi.txt","/fwlink"};
     for(const char* path:probes)server_.on(path,HTTP_GET,showPortal);
@@ -66,7 +71,9 @@ void NetworkManager::registerRoutes(){
     });
 
     server_.on("/configure",HTTP_POST,[this](){
-        DeviceConfig c=*config_; c.ssid=server_.arg("ssid");c.password=server_.arg("password");c.controllerHost="";c.displayName=server_.arg("name");
+        DeviceConfig c=*config_; c.ssid=server_.arg("ssid");c.password=server_.arg("password");c.controllerHost="";
+        c.displayName=server_.arg("name");
+        c.displayName.trim();
         if(!c.valid()){server_.send(400,"text/plain; charset=utf-8","配置无效，请检查所有字段");return;}
         Preferences cache;if(cache.begin("fish-endpoint",false)){cache.clear();cache.end();}
         if(!store_.save(c)){server_.send(500,"text/plain; charset=utf-8","保存失败");return;}

@@ -20,6 +20,8 @@ config/deployment.json
 *.bin
 *.uf2
 controller/diagnostics/runs/
+output/
+firmware/.pio/
 
 # Python environments, caches and local calibration output
 vision/.venv/
