@@ -10,7 +10,9 @@ set "RUNTIME=%CONTROLLER%\.runtime"
 set "EXE=%RUNTIME%\fish-controller.exe"
 set "CLOUDFLARED=%RUNTIME%\cloudflared.exe"
 set "TUNNEL_CONFIG=%RUNTIME%\cloudflared-live.yml"
+set "TUNNEL_PID_FILE=%RUNTIME%\cloudflared.pid"
 set "STARTUP_TASK=%~dp0install-startup-task.ps1"
+set "TAKEOVER_SCRIPT=%~dp0takeover-running-instance.ps1"
 
 if not exist "%CONTROLLER%\go.mod" (
   echo [ERROR] controller\go.mod not found.
@@ -20,10 +22,24 @@ if not exist "%CONTROLLER%\go.mod" (
 
 if not exist "%RUNTIME%" mkdir "%RUNTIME%"
 
+if not exist "%TAKEOVER_SCRIPT%" (
+  echo [ERROR] Startup takeover helper is missing: %TAKEOVER_SCRIPT%
+  pause
+  exit /b 1
+)
+
+echo [INFO] Taking over any previous Fish instance...
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%TAKEOVER_SCRIPT%"
+if errorlevel 1 (
+  echo [ERROR] Could not stop the previous Fish instance safely.
+  pause
+  exit /b 1
+)
+
 for /f %%P in ('powershell.exe -NoProfile -Command "try { (Get-NetTCPConnection -State Listen -LocalPort 8081 -ErrorAction Stop | Select-Object -First 1 -ExpandProperty OwningProcess) } catch { }"') do set "EXISTING_CONTROLLER_PID=%%P"
 if defined EXISTING_CONTROLLER_PID (
-  echo [ERROR] Port 8081 is already owned by process %EXISTING_CONTROLLER_PID%. No process was stopped.
-  echo Close the existing Fish startup window before starting another instance.
+  echo [ERROR] Port 8081 is owned by unrelated process %EXISTING_CONTROLLER_PID%.
+  echo The process was not stopped because it does not belong to this Fish workspace.
   pause
   exit /b 1
 )
@@ -91,16 +107,27 @@ if errorlevel 1 (
 echo [5/5] Starting Cloudflare Tunnel and Fish Controller...
 echo Close this window to stop the services started from this window.
 echo Open: http://localhost:8081
-for /f %%P in ('powershell.exe -NoProfile -Command "$p = Start-Process -FilePath '%CLOUDFLARED%' -ArgumentList @('--config','%TUNNEL_CONFIG%','tunnel','run') -PassThru -NoNewWindow; $p.Id"') do set "TUNNEL_PID=%%P"
+if exist "%TUNNEL_PID_FILE%" del /Q "%TUNNEL_PID_FILE%"
+powershell.exe -NoProfile -Command "$p = Start-Process -FilePath '%CLOUDFLARED%' -ArgumentList @('--config','%TUNNEL_CONFIG%','tunnel','run') -PassThru -WindowStyle Hidden -RedirectStandardOutput '%RUNTIME%\cloudflared.out.log' -RedirectStandardError '%RUNTIME%\cloudflared.err.log'; Set-Content -LiteralPath '%TUNNEL_PID_FILE%' -Value $p.Id"
+if exist "%TUNNEL_PID_FILE%" set /p TUNNEL_PID=<"%TUNNEL_PID_FILE%"
 if not defined TUNNEL_PID (
   echo [ERROR] Failed to start Cloudflare Tunnel.
   goto :fail
 )
 pushd "%CONTROLLER%"
+echo [INFO] Fish Controller supervisor is active.
+:controller_loop
 "%EXE%"
 set "EXIT_CODE=!errorlevel!"
+if "!EXIT_CODE!"=="0" goto controller_stopped
+echo [WARN] Fish Controller exited unexpectedly with code !EXIT_CODE!.
+echo [INFO] Restarting Fish Controller in 5 seconds. Close this window to stop supervision.
+timeout /t 5 /nobreak >nul
+goto controller_loop
+:controller_stopped
 popd
 if defined TUNNEL_PID powershell.exe -NoProfile -Command "Stop-Process -Id %TUNNEL_PID% -Force -ErrorAction SilentlyContinue"
+if exist "%TUNNEL_PID_FILE%" del /Q "%TUNNEL_PID_FILE%"
 exit /b !EXIT_CODE!
 
 :fail

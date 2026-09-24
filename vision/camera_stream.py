@@ -60,6 +60,28 @@ def _linux_v4l2_present_names(
     return result
 
 
+def _windows_directshow_present_names():
+    """Return the current DirectShow camera order without opening devices.
+
+    USB replugging can change the OpenCV index on Windows.  The optional
+    pygrabber dependency exposes the stable device display names, so recovery
+    can follow the same physical camera to its new index.  An empty result is
+    intentionally harmless: the original index remains the fallback.
+    """
+    if not sys.platform.startswith("win"):
+        return {}
+    try:
+        from pygrabber.dshow_graph import FilterGraph
+
+        return {
+            index: str(name).strip()
+            for index, name in enumerate(FilterGraph().get_input_devices())
+            if str(name).strip()
+        }
+    except (ImportError, OSError, RuntimeError):
+        return {}
+
+
 def _backend_candidates():
     if sys.platform.startswith("linux"):
         return [("V4L2", cv2.CAP_V4L2)] if hasattr(cv2, "CAP_V4L2") else []
@@ -119,6 +141,12 @@ def _safe_get(capture, prop, default=0.0):
         return value if math.isfinite(value) else default
     except (cv2.error, OSError, RuntimeError, TypeError, ValueError):
         return default
+
+
+def _positive_capture_value(capture, prop, default):
+    """Read a driver property, falling back when UVC reports 0 or -1."""
+    value = _safe_get(capture, prop, default)
+    return value if value > 0 else float(default)
 
 
 def _read_fixed_resolution_frame(
@@ -216,10 +244,10 @@ class RestartSafeCameraStream:
         self.last_recovery_error = ""
 
         self.cap, self.backend_name, first_frame = _open_working_capture(src)
-        present_names = (
-            _linux_v4l2_present_names()
-            if sys.platform.startswith("linux") else {}
-        )
+        if sys.platform.startswith("linux"):
+            present_names = _linux_v4l2_present_names()
+        else:
+            present_names = _windows_directshow_present_names()
         self.device_name = present_names.get(src, "")
         try:
             self._configure_capture()
@@ -284,11 +312,15 @@ class RestartSafeCameraStream:
         _safe_set(capture, cv2.CAP_PROP_FRAME_WIDTH, TARGET_WIDTH, "WIDTH")
         _safe_set(capture, cv2.CAP_PROP_FRAME_HEIGHT, TARGET_HEIGHT, "HEIGHT")
 
+        # DirectShow/MSMF may transiently report -1x-1 while a USB camera is
+        # being re-enumerated.  Treat that as unknown and retain the requested
+        # mode; accepting a negative size would make the first-frame contract
+        # fail and cause the web UI to enter an endless reconnect loop.
         self.real_width = int(
-            _safe_get(capture, cv2.CAP_PROP_FRAME_WIDTH, TARGET_WIDTH)
+            _positive_capture_value(capture, cv2.CAP_PROP_FRAME_WIDTH, TARGET_WIDTH)
         )
         self.real_height = int(
-            _safe_get(capture, cv2.CAP_PROP_FRAME_HEIGHT, TARGET_HEIGHT)
+            _positive_capture_value(capture, cv2.CAP_PROP_FRAME_HEIGHT, TARGET_HEIGHT)
         )
         self.reported_fps = _safe_get(
             capture, cv2.CAP_PROP_FPS, 0.0
@@ -348,6 +380,18 @@ class RestartSafeCameraStream:
                     if index != self.src and present[index] == self.device_name
                 )
             return [index for index in ordered if index in present]
+        if sys.platform.startswith("win") and self.device_name:
+            present = _windows_directshow_present_names()
+            ordered = [
+                index
+                for index in sorted(present)
+                if present[index] == self.device_name
+            ]
+            # Keep the original index first when the driver still exposes it;
+            # duplicate names are possible, so all matching indexes are tried.
+            if self.src in ordered:
+                ordered.remove(self.src)
+            return [self.src, *ordered]
         return [self.src]
 
     def _start_recovery(self, force=False):
@@ -432,6 +476,8 @@ class RestartSafeCameraStream:
             self.src = source
             self.cap = capture
             self.backend_name = backend_name
+            if sys.platform.startswith("win") and not self.device_name:
+                self.device_name = _windows_directshow_present_names().get(source, "")
             self._configure_capture()
             first_frame = _read_fixed_resolution_frame(
                 self.cap,

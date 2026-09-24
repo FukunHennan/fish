@@ -107,6 +107,8 @@ OTA 接口只接受与当前源码一致的应用 `firmware.bin`，不能上传 
 
 ## 6. 运行检查
 
+`start.bat` 是唯一启动入口，也是控制器监督进程。再次启动时，入口会先接管并关闭上一实例的启动监督窗口、控制器、视觉服务和 Tunnel，等待 `8081` 与 `8091` 释放后只启动一个新实例；不属于本工作区的端口占用不会被强制关闭。控制器异常退出时，入口等待 5 秒并重新启动；控制器以退出码 0 正常结束时，入口停止它启动的 Cloudflare Tunnel 并退出。项目不再使用独立 watchdog 或 stop 脚本。
+
 ```powershell
 scripts\start.bat
 Invoke-WebRequest http://127.0.0.1:8081/healthz
