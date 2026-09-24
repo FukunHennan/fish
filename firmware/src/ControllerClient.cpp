@@ -98,7 +98,6 @@ String ControllerClient::currentIdentitySignature() const {
 
 static void appendHardwareInventory(JsonDocument& document) {
     document["servoPin"] = SERVO_PIN;
-    document["statusLedPin"] = STATUS_LED_PIN;
     document["batterySensePin"] = BATTERY_SENSE_PIN;
     document["batteryDividerRatio"] = BATTERY_DIVIDER_RATIO;
     document["batteryEmptyVoltage"] = BATTERY_EMPTY_VOLTAGE;
@@ -112,7 +111,7 @@ void ControllerClient::sendRegistration(const String& nonce) {
     char mac[18];
     char proof[65];
     formatDeviceMac(mac);
-    if (!computeIdentityProof("fish-websocket-v1", nonce.c_str(), proof)) return;
+    if (!computeIdentityProof("fish-websocket-v2", nonce.c_str(), proof)) return;
     document["type"] = "register";
     document["protocolVersion"] = 2;
     document["deviceId"] = mac;
@@ -127,7 +126,6 @@ void ControllerClient::sendRegistration(const String& nonce) {
     capabilities.add("motion");
     capabilities.add("ota");
     capabilities.add("battery");
-    capabilities.add("status-rgb");
     lastIdentitySignature_ = currentIdentitySignature();
     sendDocument(document);
 }
@@ -169,27 +167,6 @@ void ControllerClient::sendMotionState(bool force) {
     document["stopReason"] = stopReason_;
     lastMotionSignature_ = signature;
     lastMotionStateReport_ = now;
-    sendDocument(document);
-}
-
-void ControllerClient::sendRGBState(bool force) {
-    String mode = statusLight_.manual() ? "SOLID" : "AUTO";
-    String signature = mode + "|" + statusLight_.colorOrder() + "|" +
-                       String(statusLight_.red()) + "|" + String(statusLight_.green()) + "|" +
-                       String(statusLight_.blue()) + "|" + String(statusLight_.brightness());
-    uint32_t now = millis();
-    if (!force && signature == lastRGBSignature_ &&
-        !hasElapsed(now, lastRGBStateReport_, kStateResyncIntervalMs)) return;
-    JsonDocument document;
-    document["type"] = "rgb.state";
-    document["rgbMode"] = mode;
-    document["rgbOrder"] = statusLight_.colorOrder();
-    document["rgbRed"] = statusLight_.red();
-    document["rgbGreen"] = statusLight_.green();
-    document["rgbBlue"] = statusLight_.blue();
-    document["rgbBrightness"] = statusLight_.brightness();
-    lastRGBSignature_ = signature;
-    lastRGBStateReport_ = now;
     sendDocument(document);
 }
 
@@ -466,36 +443,7 @@ void ControllerClient::handleCommand(JsonDocument& document) {
         return;
     }
     if (command == "rgb.set") {
-        JsonObject payload = document["payload"].as<JsonObject>();
-        String mode = payload["mode"] | "AUTO";
-        mode.toUpperCase();
-        String order = payload["order"] | statusLight_.colorOrder();
-        if (!statusLight_.setColorOrder(order)) {
-            sendResult(requestId, false, "INVALID_RGB_ORDER", "Unsupported RGB color order");
-            return;
-        }
-        int brightness = payload["brightness"] | STATUS_LED_BRIGHTNESS;
-        if (brightness < 1 || brightness > 255) {
-            sendResult(requestId, false, "INVALID_RGB", "RGB brightness out of range");
-            return;
-        }
-        if (mode == "AUTO") {
-            statusLight_.clearManual(brightness);
-            sendRGBState();
-            sendResult(requestId, true, "OK", "RGB automatic brightness applied");
-            return;
-        }
-        int red = payload["red"] | -1;
-        int green = payload["green"] | -1;
-        int blue = payload["blue"] | -1;
-        if (mode != "SOLID" || red < 0 || red > 255 || green < 0 || green > 255 ||
-            blue < 0 || blue > 255) {
-            sendResult(requestId, false, "INVALID_RGB", "RGB parameter out of range");
-            return;
-        }
-        statusLight_.setManualColor(red, green, blue, brightness);
-        sendRGBState();
-        sendResult(requestId, true, "OK", "RGB color applied");
+        sendResult(requestId, false, "UNSUPPORTED_HARDWARE", "设备未安装 RGB 灯");
         return;
     }
     if (command == "ota.start") {
@@ -538,6 +486,13 @@ void ControllerClient::onEvent(WStype_t type, uint8_t* payload, size_t length) {
         stopReason_ = "CONTROLLER_DISCONNECTED";
         return;
     }
+    if (type == WStype_PONG) {
+        // The controller sends a WebSocket ping every second. Transport-level
+        // pong proves the connection is alive even when application messages
+        // are briefly queued behind a burst of motion frames.
+        lastHeartbeat_ = millis();
+        return;
+    }
     if (type != WStype_TEXT) return;
     JsonDocument document;
     if (deserializeJson(document, payload, length)) return;
@@ -562,7 +517,6 @@ void ControllerClient::onEvent(WStype_t type, uint8_t* payload, size_t length) {
             cache.end();
         }
         sendMotionState(true);
-        sendRGBState(true);
         sendBatteryTelemetry(true);
         sendLinkTelemetry(true);
         if (otaState_ != "IDLE") sendOtaProgress();
@@ -590,8 +544,8 @@ void ControllerClient::update(uint32_t nowMs, bool online) {
         return;
     }
     if (!endpointReady_) return;
-    if (registered_) endpointAttemptAt_ = nowMs;
-    if (!registered_ && !otaActive() && hasElapsed(nowMs, endpointAttemptAt_, 5000)) {
+    if (!registered_ && !otaActive() &&
+        hasElapsed(nowMs, endpointAttemptAt_, CONTROLLER_ENDPOINT_REGISTRATION_TIMEOUT_MS)) {
         socket_.disconnect();
         clearEndpoint();
         return;
@@ -628,7 +582,6 @@ void ControllerClient::update(uint32_t nowMs, bool online) {
         sendHeartbeat();
     }
     if (hasElapsed(nowMs, lastMotionStateReport_, kStateResyncIntervalMs)) sendMotionState();
-    if (hasElapsed(nowMs, lastRGBStateReport_, kStateResyncIntervalMs)) sendRGBState();
     if (!otaActive()) {
         sendBatteryTelemetry();
         if (hasElapsed(nowMs, lastLinkCheckMs_, kLinkSampleIntervalMs)) {

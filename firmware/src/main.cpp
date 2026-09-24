@@ -16,7 +16,7 @@ NetworkManager network(configStore);
 MotionController motion(SERVO_PIN,SWIM_SPEED,SWIM_POWER,TURN_AMOUNT);
 CommandProcessor commands(motion);
 BatteryMonitor battery(BATTERY_SENSE_PIN,BATTERY_DIVIDER_RATIO,BATTERY_EMPTY_VOLTAGE,BATTERY_FULL_VOLTAGE,BATTERY_SAMPLE_INTERVAL_MS);
-StatusLight statusLight(STATUS_LED_PIN,STATUS_LED_COUNT,STATUS_LED_BRIGHTNESS);
+StatusLight statusLight(STATUS_LED_PIN, STATUS_LED_ACTIVE_LOW);
 ControllerClient controller(motion,commands,battery,statusLight,configStore);
 DiscoveryResponder discovery(motion,controller);
 BootButton bootButton(BOOT_BUTTON_PIN,BOOT_LONG_PRESS_MS);

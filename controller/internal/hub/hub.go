@@ -96,6 +96,32 @@ func (h *Hub) UpdateHeartbeatRTT(id string, rtt time.Duration) {
 	e.device.HeartbeatRTTMs = math.Round(value*10) / 10
 }
 
+// TouchHeartbeat records transport-level liveness without treating a pong as
+// a device state update. Application heartbeat messages remain useful for
+// telemetry, while WebSocket pong frames prevent a busy command queue from
+// making a healthy connection look inactive.
+func (h *Hub) TouchHeartbeat(id string, rtt time.Duration) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	e := h.entries[id]
+	if e == nil {
+		return
+	}
+	now := time.Now()
+	e.device.LastSeen = now
+	e.device.HeartbeatAtMs = now.UnixMilli()
+	if rtt >= 0 {
+		value := float64(rtt.Microseconds()) / 1000
+		if value < 0.1 {
+			value = 0.1
+		}
+		if e.device.HeartbeatRTTMs > 0 {
+			value = e.device.HeartbeatRTTMs*0.7 + value*0.3
+		}
+		e.device.HeartbeatRTTMs = math.Round(value*10) / 10
+	}
+}
+
 // HeartbeatRTT returns the latest smoothed device WebSocket round-trip time.
 // HTTP command handlers use it to avoid treating public-network delay as a
 // device failure.
@@ -334,7 +360,7 @@ func (h *Hub) Update(id string, values map[string]any) {
 	if v, ok := values["bootId"].(string); ok {
 		e.device.BootID = v
 	}
-	if v, ok := values["protocolVersion"].(float64); ok && v >= 1 {
+	if v, ok := values["protocolVersion"].(float64); ok && v == 2 {
 		e.device.ProtocolVersion = int(v)
 	}
 	if values, ok := values["sensors"].([]any); ok {
@@ -469,6 +495,20 @@ func (h *Hub) SendLatestStop(id string, sequence uint64, v any) bool {
 	case e.outboundWake <- struct{}{}:
 	default:
 	}
+	return true
+}
+
+// ResetLatestSequence starts a fresh browser control session at sequence 1.
+// The sequence is transport-local state, so it must not survive a new lease
+// owner or a page reload.
+func (h *Hub) ResetLatestSequence(id string) bool {
+	e := h.entry(id)
+	if e == nil {
+		return false
+	}
+	e.outboundMu.Lock()
+	e.latestSequence = 0
+	e.outboundMu.Unlock()
 	return true
 }
 

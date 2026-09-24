@@ -6344,7 +6344,7 @@ p {
     const page = pageFromHash();
     const pageConfig = pages.find((item) => item.id === page) || pages[0];
     const content = page === 'lobby' ? lobbyPage() : page === 'control' ? controlPage() : page === 'missions' ? missionsPage() : recordsPage();
-    root.innerHTML = '<main class="competitionApp page-' + page + '" style="--page-ratio:' + pageConfig.ratio + ';--ratio-value:' + pageConfig.ratioValue + '"><div class="designShell">' + header(page) + content + '<footer class="competitionFooter"><span>设备、延迟与安全状态均来自实时上报</span><span>FISH CONTROL · STUDENT COMPETITION PLATFORM</span></footer></div></main>';
+    root.innerHTML = '<main class="competitionApp page-' + page + '" style="--page-ratio:' + pageConfig.ratio + ';--ratio-value:' + pageConfig.ratioValue + '"><div class="designShell">' + header(page) + content + '</div></main>';
     renderedPage = page;
     bindInteractions();
   }
@@ -7095,6 +7095,11 @@ p {
       deviceTestState[detail.player] = 'pending';
       readyDevice[detail.player] = '';
     }
+    // The control page owns a live WebRTC element. Its device status is
+    // painted by competition-adapter.js; rebuilding root.innerHTML here would
+    // destroy the video element and briefly turn a reconnect into a black
+    // screen.
+    if (pageFromHash() === 'control') return;
     render();
   });
 
@@ -7106,6 +7111,7 @@ p {
     if (deviceTestState[detail.player] === nextState && readyDevice[detail.player] === nextDevice) return;
     deviceTestState[detail.player] = nextState;
     readyDevice[detail.player] = nextDevice;
+    if (pageFromHash() === 'control') return;
     render();
   });
 
@@ -7133,26 +7139,14 @@ p {
   const confirm=document.getElementById('teamConfirmCard');
   function showLogin(){ login.hidden=false; confirm.hidden=true; }
   function showConfirm(){ login.hidden=true; confirm.hidden=false; }
-  function addSessionBadge(){
-    document.querySelectorAll('.designShell').forEach(shell=>{
-      if(shell.querySelector('.teamSessionBadge')) return;
-      const badge=document.createElement('span');
-      badge.className='teamSessionBadge';
-      badge.textContent='账号状态待读取';
-      shell.appendChild(badge);
-    });
-  }
   function enterTerminal(){
     layer.hidden=true;
     sessionStorage.setItem('fishTeamTerminal','1');
     if(location.hash!=='#control') location.hash='control';
-    setTimeout(addSessionBadge,0);
   }
   document.getElementById('teamLoginNext').addEventListener('click',showConfirm);
   document.getElementById('teamConfirmBack').addEventListener('click',showLogin);
   document.getElementById('teamEnterTerminal').addEventListener('click',enterTerminal);
-  window.addEventListener('hashchange',()=>setTimeout(addSessionBadge,0));
-  window.setInterval(()=>{ if(layer.hidden) addSessionBadge(); },500);
   showLogin();
 })();
 </script>

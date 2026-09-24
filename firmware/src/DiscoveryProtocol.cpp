@@ -5,7 +5,7 @@ bool readDiscoveryRequest(JsonDocument& document, String& requestId, String& non
     int version = document["protocolVersion"] | 0;
     String id = document["requestId"] | "";
     String value = document["nonce"] | "";
-    if (type != "discovery.request" || version != 1 || id.length() < 4 || id.length() > 64 || value.length() < 16 || value.length() > 128) return false;
+    if (type != "discovery.request" || version != 2 || id.length() < 4 || id.length() > 64 || value.length() < 16 || value.length() > 128) return false;
     requestId = id;
     nonce = value;
     return true;

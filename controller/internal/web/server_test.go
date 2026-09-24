@@ -82,8 +82,7 @@ func TestHealthAndDashboard(t *testing.T) {
 	handler := NewHandler(hub.New(), testKey())
 	for _, tc := range []struct{ path, contains string }{
 		{"/healthz", "ok"},
-		{"/", "FISH CONTROL · 赛事平台"},
-		{"/console.html", "机器鱼控制台"},
+		{"/competition.html", "FISH CONTROL · 赛事平台"},
 	} {
 		r := httptest.NewRequest("GET", tc.path, nil)
 		w := httptest.NewRecorder()
@@ -91,6 +90,70 @@ func TestHealthAndDashboard(t *testing.T) {
 		if w.Code != 200 || !strings.Contains(w.Body.String(), tc.contains) {
 			t.Fatalf("%s 返回异常: %d %s", tc.path, w.Code, w.Body.String())
 		}
+	}
+}
+
+func TestLegacyFrontendAliasesRedirectToCanonicalCompetitionUI(t *testing.T) {
+	handler := NewHandler(hub.New(), testKey())
+	for _, path := range []string{"/", "/console.html", "/index.html"} {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		if w.Code != http.StatusTemporaryRedirect || w.Header().Get("Location") != "/competition.html" {
+			t.Fatalf("%s redirect = %d %q", path, w.Code, w.Header().Get("Location"))
+		}
+	}
+}
+
+func TestAPIStatusReportsCanonicalFrontendAndControlEndpoints(t *testing.T) {
+	handler := NewHandler(hub.New(), testKey())
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/status", nil))
+	var payload map[string]any
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &payload) != nil {
+		t.Fatalf("status response = %d %s", w.Code, w.Body.String())
+	}
+	if payload["frontend"] != "competition" || payload["apiVersion"] != float64(1) {
+		t.Fatalf("status payload = %#v", payload)
+	}
+	control, ok := payload["control"].(map[string]any)
+	if !ok || control["transport"] != "websocket" || control["endpoint"] != "/ws/control" {
+		t.Fatalf("status must expose the single control transport: %#v", payload["control"])
+	}
+	if w.Header().Get("X-Fish-API-Version") != "1" || w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("status headers = %#v", w.Header())
+	}
+}
+
+func TestLogsEndpointReturnsBoundedDiagnosticTail(t *testing.T) {
+	root := t.TempDir()
+	session := "test-session"
+	if err := os.MkdirAll(filepath.Join(root, session), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "LATEST.txt"), []byte(session+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte(`{"time":"2026-01-01T00:00:00Z","msg":"one"}` + "\n" + `{"time":"2026-01-01T00:00:01Z","msg":"two"}` + "\n")
+	if err := os.WriteFile(filepath.Join(root, session, "controller.jsonl"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FISH_DIAGNOSTIC_DIR", root)
+	handler := NewHandler(hub.New(), testKey())
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/logs?limit=1", nil)
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("logs response = %d %s", w.Code, w.Body.String())
+	}
+	var payload struct {
+		SessionID string           `json:"sessionId"`
+		Entries   []map[string]any `json:"entries"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.SessionID != session || len(payload.Entries) != 1 || payload.Entries[0]["msg"] != "two" {
+		t.Fatalf("unexpected log tail: %#v", payload)
 	}
 }
 
@@ -357,16 +420,6 @@ func TestUserCannotAccessAdminOnlyEndpoints(t *testing.T) {
 		t.Fatalf("普通用户应能保存舵机标定: %d %s", calibrationResponse.Code, calibrationResponse.Body.String())
 	}
 
-	rgb := httptest.NewRequest(http.MethodPost, "/api/rgb", strings.NewReader(
-		`{"deviceId":"fish-1","mode":"SOLID","order":"GRB","red":0,"green":255,"blue":80,"brightness":32}`,
-	))
-	rgb.AddCookie(userCookie)
-	rgbResponse := httptest.NewRecorder()
-	handler.ServeHTTP(rgbResponse, rgb)
-	if rgbResponse.Code != http.StatusOK {
-		t.Fatalf("普通用户应能设置 RGB: %d %s", rgbResponse.Code, rgbResponse.Body.String())
-	}
-
 	devices := httptest.NewRecorder()
 	deviceRequest := httptest.NewRequest(http.MethodGet, "/api/devices", nil)
 	deviceRequest.AddCookie(userCookie)
@@ -428,7 +481,7 @@ func TestVisionDeviceCommandRoutesToOnlyConnectedFish(t *testing.T) {
 		t.Fatalf("命令=%v", message["command"])
 	}
 	payload := message["payload"].(map[string]any)
-	if payload["mode"] != "forward" || payload["frequency"] != 2.8 || payload["amplitude"] != 31.0 || payload["bias"] != -12.0 {
+	if payload["mode"] != "forward" || payload["frequency"] != 2.8 || payload["amplitude"] != 31.0 || payload["bias"] != -12.0 || payload["deadmanMs"] != 2000 {
 		t.Fatalf("载荷=%+v", payload)
 	}
 }
@@ -577,11 +630,11 @@ func TestDynamicChallengeRegistersDevice(t *testing.T) {
 	if err := conn.ReadJSON(&challenge); err != nil {
 		t.Fatalf("读取挑战失败: %v", err)
 	}
-	proof, err := identity.Proof(key, "fish-websocket-v1", challenge.Nonce, "AC:27:6E:7C:37:18")
+	proof, err := identity.Proof(key, "fish-websocket-v2", challenge.Nonce, "AC:27:6E:7C:37:18")
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = conn.WriteJSON(map[string]any{"type": "register", "protocolVersion": 1, "deviceId": "AC:27:6E:7C:37:18", "proof": proof, "name": "测试鱼", "ip": "192.168.137.117", "firmwareVersion": "1.1.0"})
+	err = conn.WriteJSON(map[string]any{"type": "register", "protocolVersion": 2, "deviceId": "AC:27:6E:7C:37:18", "proof": proof, "name": "测试鱼", "ip": "192.168.137.117", "firmwareVersion": "2.0.0"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -610,13 +663,13 @@ func TestProtocolV2RegistrationKeepsIdentityMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	const deviceID = "AC:27:6E:7C:37:19"
-	proof, err := identity.Proof(key, "fish-websocket-v1", text(challenge["nonce"]), deviceID)
+	proof, err := identity.Proof(key, "fish-websocket-v2", text(challenge["nonce"]), deviceID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := conn.WriteJSON(map[string]any{
 		"type": "register", "protocolVersion": 2, "deviceId": deviceID, "proof": proof,
-		"name": "V2 机器鱼", "bootId": "boot-1234", "firmwareVersion": "1.4.0",
+		"name": "V2 机器鱼", "bootId": "boot-1234", "firmwareVersion": "2.0.0",
 		"ip": "192.168.1.50", "servoCenter": 87.5, "i2cAddresses": []int{35, 74},
 	}); err != nil {
 		t.Fatal(err)
@@ -637,19 +690,6 @@ func TestProtocolV2RegistrationKeepsIdentityMetadata(t *testing.T) {
 	if len(devices) != 1 || devices[0].ProtocolVersion != 2 || devices[0].BootID != "boot-1234" ||
 		devices[0].ServoCenter != 87.5 || len(devices[0].I2CAddresses) != 2 {
 		t.Fatalf("v2 身份信息没有完整保存: %+v", devices)
-	}
-}
-
-// The React operator console moved from "/" to "/console.html" when the
-// competition platform page took over the root path.
-func TestConsoleServesReactApplication(t *testing.T) {
-	handler := NewHandler(hub.New(), testKey())
-	r := httptest.NewRequest("GET", "/console.html", nil)
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, r)
-	body := w.Body.String()
-	if w.Code != 200 || !strings.Contains(body, `id="root"`) || !strings.Contains(body, `<script type="module"`) {
-		t.Fatalf("主操控台没有提供 React 应用入口: %d %s", w.Code, body)
 	}
 }
 

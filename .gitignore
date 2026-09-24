@@ -30,8 +30,7 @@ vision/.cache/
 __pycache__/
 *.py[cod]
 .pytest_cache/
-# Local calibration profiles are project state and are intentionally tracked.
-firmware/include/FactoryWifi.local.h
+# Factory Wi-Fi defaults are maintained as an explicit project configuration file.
 
 .vscode/.browse_c_cpp.db*
 .vscode/c_cpp_properties.json

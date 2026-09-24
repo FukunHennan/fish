@@ -64,6 +64,7 @@ type competitionMatch struct {
 	FieldWidthCm       float64         `json:"fieldWidthCm,omitempty"`
 	FieldHeightCm      float64         `json:"fieldHeightCm,omitempty"`
 	FieldLocked        bool            `json:"fieldLocked"`
+	DurationMs         int64           `json:"durationMs"`
 }
 
 type competitionRecord struct {
@@ -153,7 +154,8 @@ func newMatchBlueRed(matchNo, group, venue string) *competitionMatch {
 		MatchNo:   matchNo,
 		Group:     group,
 		Venue:     venue,
-		State:     matchStateSignup,
+		State:      matchStateSignup,
+		DurationMs: 180000,
 		UpdatedAt: time.Now().Format(time.RFC3339),
 		Blue: competitionTeam{Side: "blue", Name: "蓝队", Players: []competitionPlayer{
 			{Slot: "B1"}, {Slot: "B2"},
@@ -171,7 +173,8 @@ func newDevelopmentMatch() *competitionMatch {
 		MatchNo:   "第 08 场",
 		Group:     "学生组",
 		Venue:     "A 赛场",
-		State:     matchStateReady,
+		State:      matchStateReady,
+		DurationMs: 180000,
 		UpdatedAt: now,
 		Operator:  "local@fish",
 		Blue: competitionTeam{Side: "blue", Name: "海洋先锋队", Players: []competitionPlayer{
@@ -272,6 +275,7 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 		FieldWidthCm  *float64            `json:"fieldWidthCm"`
 		FieldHeightCm *float64            `json:"fieldHeightCm"`
 		FieldLocked   *bool               `json:"fieldLocked"`
+		DurationMs    *int64              `json:"durationMs"`
 	}
 	if r.Body != nil && r.ContentLength != 0 {
 		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
@@ -286,6 +290,9 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 			store.Match = newMatchBlueRed("", "", "")
 		}
 		match := store.Match
+		if match.DurationMs <= 0 {
+			match.DurationMs = 180000
+		}
 		if input.MatchNo != "" {
 			match.MatchNo = input.MatchNo
 		}
@@ -294,6 +301,17 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		if input.Venue != "" {
 			match.Venue = input.Venue
+		}
+		if input.DurationMs != nil {
+			if *input.DurationMs < 10000 || *input.DurationMs > 3600000 {
+				http.Error(w, "比赛时长须为 10 秒至 60 分钟", http.StatusBadRequest)
+				return
+			}
+			if match.State == matchStateRunning || match.State == matchStatePaused {
+				http.Error(w, "比赛进行或暂停期间不能修改时长", http.StatusConflict)
+				return
+			}
+			match.DurationMs = *input.DurationMs
 		}
 		// 合并更新：只覆盖传来的字段，保留默认席位，避免裁判改队名时丢掉名单
 		if input.Blue != nil {
@@ -728,10 +746,17 @@ func (s *server) matchSnapshotLocked(store *competitionStore) map[string]any {
 	if store.Match == nil {
 		return map[string]any{"match": nil, "elapsedMs": 0, "running": false}
 	}
+	if store.Match.DurationMs <= 0 {
+		store.Match.DurationMs = 180000
+	}
 	elapsed := store.elapsedLocked()
 	snapshot := *store.Match
 	snapshot.ElapsedMs = elapsed
-	return map[string]any{"match": snapshot, "elapsedMs": elapsed, "running": store.running}
+	remaining := snapshot.DurationMs - elapsed
+	if remaining < 0 {
+		remaining = 0
+	}
+	return map[string]any{"match": snapshot, "elapsedMs": elapsed, "remainingMs": remaining, "running": store.running}
 }
 
 func (t *competitionTeam) allSignedIn() bool {

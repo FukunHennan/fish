@@ -5,7 +5,7 @@
 
 void test_accepts_valid_discovery_request() {
     JsonDocument document;
-    deserializeJson(document, R"({"type":"discovery.request","protocolVersion":1,"requestId":"aabbccdd","nonce":"00112233445566778899aabbccddeeff"})");
+    deserializeJson(document, R"({"type":"discovery.request","protocolVersion":2,"requestId":"aabbccdd","nonce":"00112233445566778899aabbccddeeff"})");
     String requestId, nonce;
     TEST_ASSERT_TRUE(readDiscoveryRequest(document, requestId, nonce));
     TEST_ASSERT_EQUAL_STRING("aabbccdd", requestId.c_str());

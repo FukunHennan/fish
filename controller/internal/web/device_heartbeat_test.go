@@ -29,15 +29,15 @@ func TestDeviceHeartbeatKeepsSocketAliveBeyondReadTimeout(t *testing.T) {
 	if err := c.ReadJSON(&challenge); err != nil {
 		t.Fatal(err)
 	}
-	if challenge["type"] != "auth.challenge" || challenge["protocolVersion"] != float64(1) {
+	if challenge["type"] != "auth.challenge" || challenge["protocolVersion"] != float64(2) {
 		t.Fatalf("unexpected challenge: %v", challenge)
 	}
 	id := "02:00:00:00:00:01"
-	proof, err := identity.Proof(key, "fish-websocket-v1", challenge["nonce"].(string), id)
+	proof, err := identity.Proof(key, "fish-websocket-v2", challenge["nonce"].(string), id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := c.WriteJSON(map[string]any{"type": "register", "protocolVersion": 1, "deviceId": id, "proof": proof}); err != nil {
+	if err := c.WriteJSON(map[string]any{"type": "register", "protocolVersion": 2, "deviceId": id, "proof": proof}); err != nil {
 		t.Fatal(err)
 	}
 	var result map[string]any

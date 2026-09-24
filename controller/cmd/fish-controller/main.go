@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"fish-controller/internal/config"
 	"fish-controller/internal/diagnostics"
@@ -12,7 +13,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 )
 
@@ -122,11 +125,32 @@ func main() {
 	diag.Logger.Info("discovery_started")
 
 	address := ":8081"
-	handler := diag.HTTPMiddleware(webapp.NewHandler(hub.New(), cfg.DeploymentKey))
+	handler := diag.HTTPMiddleware(webapp.NewHandlerWithDiagnostics(hub.New(), cfg.DeploymentKey, diag.Logger))
 	log.Printf("fish controller ready: http://localhost%s", address)
 	diag.Logger.Info("controller_ready", "address", address)
-	if err := http.ListenAndServe(address, handler); err != nil {
-		diag.Logger.Error("http_server_stopped", "error", err)
-		log.Fatal(err)
+	server := &http.Server{Addr: address, Handler: handler}
+	serverErrors := make(chan error, 1)
+	go func() { serverErrors <- server.ListenAndServe() }()
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(signals)
+	select {
+	case err := <-serverErrors:
+		if err != nil && err != http.ErrServerClosed {
+			diag.Logger.Error("http_server_stopped", "error", err)
+			log.Printf("HTTP server stopped: %v", err)
+		}
+	case sig := <-signals:
+		log.Printf("received %s; shutting down", sig)
+		diag.Logger.Info("controller_shutdown_requested", "signal", sig.String())
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil {
+			diag.Logger.Error("http_server_shutdown_failed", "error", err)
+			_ = server.Close()
+		}
+		if err := <-serverErrors; err != nil && err != http.ErrServerClosed {
+			diag.Logger.Error("http_server_stopped", "error", err)
+		}
 	}
 }

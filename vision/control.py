@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import http.client
+import io
 import os
 import queue
 import threading
 import time
-import urllib.request
 import urllib.error
+from urllib.parse import urlsplit
 from dataclasses import dataclass
 
 import numpy as np
@@ -116,6 +118,11 @@ class MotionPidController:
 class RoboFishComm:
     def __init__(self, controller_url="http://127.0.0.1:8081/api/vision/device-command"):
         self.base_url = controller_url
+        self._controller_url = urlsplit(controller_url)
+        if self._controller_url.scheme not in ("http", "https") or not self._controller_url.netloc:
+            raise ValueError(f"无效的控制器地址: {controller_url}")
+        self._http_connection = None
+        self._http_transport_lock = threading.Lock()
         self.cmd_queue = queue.Queue(maxsize=1)
         self.stopped = False
         self.mcu_hz = 0.0
@@ -134,39 +141,77 @@ class RoboFishComm:
         self.thread.start()
         print(f"Vision motion routed through Go controller -> {self.base_url}")
 
+    def _close_http_connection(self):
+        connection = self._http_connection
+        self._http_connection = None
+        if connection is not None:
+            try:
+                connection.close()
+            except OSError:
+                pass
+
+    def _new_http_connection(self, timeout):
+        connection_type = (
+            http.client.HTTPSConnection
+            if self._controller_url.scheme == "https"
+            else http.client.HTTPConnection
+        )
+        return connection_type(self._controller_url.netloc, timeout=timeout)
+
     def _post(self, payload, timeout=0.5):
         payload = dict(payload)
         payload.update(getattr(self, "workspace_identity", {}))
         if self._device_id:
             payload["deviceId"] = self._device_id
-        request = urllib.request.Request(
-            self.base_url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "User-Agent": "RoboFish-Visual-Tracker",
-                "Connection": "close",
-            },
-            method="POST",
-        )
+        body = json.dumps(payload).encode("utf-8")
+        path = self._controller_url.path or "/"
+        if self._controller_url.query:
+            path += "?" + self._controller_url.query
         internal_token = os.environ.get("FISH_VISION_INTERNAL_TOKEN", "").strip()
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "RoboFish-Visual-Tracker",
+            "Connection": "keep-alive",
+        }
         if internal_token:
-            request.add_header("X-Fish-Vision-Internal", internal_token)
-        try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
-                result = json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as error:
-            body = error.read().decode("utf-8", errors="replace")
-            if error.code == 409 and payload.get("operation") in ("motion", "calibrate-forward"):
+            headers["X-Fish-Vision-Internal"] = internal_token
+        with self._http_transport_lock:
+            connection = self._http_connection
+            try:
+                if connection is None:
+                    connection = self._new_http_connection(timeout)
+                    self._http_connection = connection
+                else:
+                    connection.timeout = timeout
+                connection.request("POST", path, body=body, headers=headers)
+                response = connection.getresponse()
+                response_body = response.read().decode("utf-8", errors="replace")
+                status = response.status
+                reason = response.reason
+                response_headers = response.headers
+            except (OSError, http.client.HTTPException) as error:
+                self._close_http_connection()
+                raise RuntimeError(f"控制器连接失败: {error}") from error
+        if status >= 400:
+            if status == 409 and payload.get("operation") in ("motion", "calibrate-forward"):
                 with self._state_lock:
                     if payload.get("sessionId") == self._session_id:
                         self._motion_enabled = False
                         self._control_session += 1
                         self._clear_queue()
-            if body:
-                print(f"[HTTP Forwarding] {error.code} {body}")
-            error.close()
-            raise
+            if response_body:
+                print(f"[HTTP Forwarding] {status} {response_body}")
+            raise urllib.error.HTTPError(
+                self.base_url,
+                status,
+                reason or "控制器拒绝请求",
+                response_headers,
+                io.BytesIO(response_body.encode("utf-8")),
+            )
+        try:
+            result = json.loads(response_body)
+        except json.JSONDecodeError as error:
+            raise RuntimeError("控制器返回了无效响应") from error
         if not result.get("sent"):
             raise RuntimeError("没有唯一在线机器鱼可接收运动命令")
         if not result.get("acknowledged"):
@@ -435,6 +480,8 @@ class RoboFishComm:
     def close(self):
         self.stop_now()
         self.stopped = True
+        with self._http_transport_lock:
+            self._close_http_connection()
         if self.thread.is_alive():
             self.thread.join(timeout=1.0)
 

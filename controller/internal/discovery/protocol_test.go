@@ -12,7 +12,7 @@ func TestVerifierAcceptsOnceAndRejectsReplay(t *testing.T) {
 	verifier := NewVerifier(key, 10*time.Second)
 	request := verifier.NewRequest(now)
 	proof, _ := identity.Proof(key, discoveryDomain, request.Nonce, "AC:27:6E:7C:37:18")
-	response := Response{Type: "discovery.response", ProtocolVersion: 1, RequestID: request.RequestID, Nonce: request.Nonce, DeviceID: "AC:27:6E:7C:37:18", Proof: proof}
+	response := Response{Type: "discovery.response", ProtocolVersion: 2, RequestID: request.RequestID, Nonce: request.Nonce, DeviceID: "AC:27:6E:7C:37:18", Proof: proof}
 	if !verifier.Accept(response, now.Add(time.Second)) {
 		t.Fatal("合法回复应被接受")
 	}
@@ -26,7 +26,7 @@ func TestVerifierRejectsExpiredAndInvalidProof(t *testing.T) {
 	now := time.Unix(100, 0)
 	verifier := NewVerifier(key, 10*time.Second)
 	request := verifier.NewRequest(now)
-	bad := Response{Type: "discovery.response", ProtocolVersion: 1, RequestID: request.RequestID, Nonce: request.Nonce, DeviceID: "AC:27:6E:7C:37:18", Proof: "00"}
+	bad := Response{Type: "discovery.response", ProtocolVersion: 2, RequestID: request.RequestID, Nonce: request.Nonce, DeviceID: "AC:27:6E:7C:37:18", Proof: "00"}
 	if verifier.Accept(bad, now.Add(time.Second)) {
 		t.Fatal("错误 proof 必须被拒绝")
 	}

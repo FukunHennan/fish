@@ -6,6 +6,7 @@ from datetime import datetime
 from threading import Lock
 import json
 import os
+from queue import Empty
 
 from flask import Flask, Response, jsonify, request, stream_with_context, g, send_from_directory
 
@@ -353,7 +354,14 @@ def create_app(service, camera_provider=None, camera_catalog=None, webrtc_server
             try:
                 yield f"event: session\ndata: {json.dumps(build_envelope(service.current_session()), separators=(',', ':'))}\n\n"
                 while True:
-                    snapshot = updates.get()
+                    try:
+                        snapshot = updates.get(timeout=15)
+                    except Empty:
+                        # Keep the SSE response active through Cloudflare and
+                        # other idle HTTP intermediaries. This is a comment
+                        # frame, so browsers do not treat it as a state update.
+                        yield ": keep-alive\n\n"
+                        continue
                     yield f"event: session\ndata: {json.dumps(build_envelope(snapshot), separators=(',', ':'))}\n\n"
             finally:
                 unsubscribe()

@@ -2274,6 +2274,7 @@ input:focus,select:focus{
   .match .bottom{height:44px}
 }
 
+.clockConfig{margin-top:2px;padding:3px 7px;border:1px solid rgba(57,216,255,.25);border-radius:5px;background:#0a2946;color:#bfeeff;font:inherit;font-size:8px;cursor:pointer}.clockConfig:disabled{opacity:.45;cursor:not-allowed}
 </style>
 </head>
 <body>
@@ -2296,7 +2297,7 @@ input:focus,select:focus{
 <main class="main">
  <section id="signup" class="page signup">
   <section class="teamCard blue panel"><div class="teamHead"><h2>蓝队 · 等待账号数据</h2><span>B1 / B2</span></div><div class="players" id="bluePlayers"></div></section>
-  <section class="centerAction"><div class="actionBox"><div class="actionIcon">✓</div><div class="actionCopy"><h3>正在读取选手账号</h3><p>账号和机器鱼归属均以服务器数据为准</p><div class="signupDeviceSummary" id="signupDeviceSummary"><span>设备状态读取中</span></div></div><button class="bigBtn" id="openSignup">设备管理</button><button class="btn good nextBtn" id="signupNext" disabled>等待账号数据</button></div></section>
+  <section class="centerAction"><div class="actionBox"><div class="actionIcon">✓</div><div class="actionCopy"><h3>4 名选手</h3><p>机器鱼归属以服务器数据为准</p><div class="signupDeviceSummary" id="signupDeviceSummary"><span>设备状态读取中</span></div></div><button class="bigBtn" id="openSignup">设备管理</button><button class="btn good nextBtn" id="signupNext">进入场地调整</button></div></section>
   <section class="teamCard red panel"><div class="teamHead"><h2>红队 · 等待账号数据</h2><span>R1 / R2</span></div><div class="players" id="redPlayers"></div></section>
  </section>
 
@@ -2316,7 +2317,7 @@ input:focus,select:focus{
  </section>
 
  <section id="match" class="page match hidden">
-  <section class="scorebar panel"><div class="sideScore"><span>蓝队</span><b class="blueTxt" id="blueScore">0</b></div><div class="clock"><strong id="clock">00:00</strong><small id="clockState">等待服务器</small></div><div class="sideScore red"><b class="redTxt" id="redScore">0</b><span>红队</span></div></section>
+  <section class="scorebar panel"><div class="sideScore"><span>蓝队</span><b class="blueTxt" id="blueScore">0</b></div><div class="clock"><strong id="clock">03:00</strong><small id="clockState">剩余时间</small><button class="clockConfig" id="clockDurationEdit" type="button">设置时长</button></div><div class="sideScore red"><b class="redTxt" id="redScore">0</b><span>红队</span></div></section>
   <aside class="deviceOverview panel" aria-labelledby="deviceOverviewTitle">
    <header class="deviceOverviewHead"><div><span>DEVICE STATUS</span><h2 id="deviceOverviewTitle">在线设备</h2></div><b id="onlineDeviceCount">0 台</b></header>
    <div class="deviceOverviewList" id="deviceOverviewList"><div class="deviceOverviewEmpty"><b>等待设备上线</b><span>电量、WebSocket 往返延迟和控制者将在这里显示</span></div></div>
@@ -2423,9 +2424,9 @@ function toast(t){const el=document.getElementById('toast');el.textContent=t;el.
 function show(page){state.page=page;document.querySelectorAll('.page').forEach(x=>x.classList.toggle('hidden',x.id!==page));document.querySelectorAll('.nav button').forEach(x=>x.classList.toggle('active',x.dataset.page===page));document.getElementById('globalState').textContent=page==='signup'?'签到中':page==='calibration'?(state.calLocked?'场地已锁定':'场地调整'):page==='match'?(state.match==='running'?'比赛进行中':state.match==='paused'?'比赛暂停':state.match==='ended'?'比赛已结束':'等待比赛'):'比赛记录'}
 document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>show(b.dataset.page));
 function renderSignup(){
- const card=p=>`<article class="player ${p.done?'done':''} device-unassigned"><div class="playerTop"><b>${p.slot} · ${p.name}</b><span class="status">${p.done?'✓ 已登录':'○ 未登录'}</span></div><div class="playerMeta"><div class="meta"><span>编号</span><strong>${p.id}</strong></div><div class="meta"><span>机器鱼</span><strong>${p.fish}</strong></div><div class="meta"><span>席位</span><strong>${p.slot}</strong></div></div><div class="deviceState unassigned" data-device-state>设备状态：未分配</div><div class="playerTime">${p.done?'开发模式账号已就绪':'等待选手登录'}</div></article>`;
+ const card=p=>`<article class="player done device-unassigned"><div class="playerTop"><b>${p.slot} · ${p.name}</b></div><div class="playerMeta"><div class="meta"><span>编号</span><strong>${p.id}</strong></div><div class="meta"><span>机器鱼</span><strong>${p.fish}</strong></div><div class="meta"><span>席位</span><strong>${p.slot}</strong></div></div><div class="deviceState unassigned" data-device-state>设备状态：未分配</div></article>`;
  bluePlayers.innerHTML=state.players.filter(p=>p.side==='blue').map(card).join('');redPlayers.innerHTML=state.players.filter(p=>p.side==='red').map(card).join('');
- const n=state.players.filter(p=>p.done).length;signupNext.disabled=n!==4;signupNext.textContent=n===4?'进入场地调整':'等待选手账号';renderSelect();
+ signupNext.disabled=false;signupNext.textContent='进入场地调整';renderSelect();
 }
 function renderSelect(){['blue','red'].forEach(side=>document.getElementById(side+'Select').innerHTML=state.players.filter(p=>p.side===side).map(p=>`<button class="selectPlayer" data-slot="${p.slot}"><div><b>${p.slot} · ${p.name}</b><small>${p.id} · ${p.fish}</small></div><span>调整 →</span></button>`).join(''));document.querySelectorAll('.selectPlayer').forEach(b=>b.onclick=()=>openConfirm(b.dataset.slot))}
 function openConfirm(slot){selectedPlayer=state.players.find(p=>p.slot===slot);selectStep.style.display='none';confirmStep.classList.add('show');modalTitle.textContent='核对签到信息';avatar.textContent=selectedPlayer.slot;confirmName.textContent=selectedPlayer.name;confirmTeam.textContent=selectedPlayer.team;confirmId.textContent=selectedPlayer.id;confirmSlot.textContent=selectedPlayer.slot;confirmFish.textContent=selectedPlayer.fish}
@@ -2616,6 +2617,6 @@ replayVideo.ontimeupdate=()=>{
 
 renderSignup();renderCalibrationLock();renderMatch();renderHistory();renderHistoryDetail();show('signup');
 </script>
-<script src="competition-adapter.js?v=20260919-public-refresh-stability"></script>
+<script src="competition-adapter.js?v=20260923-referee-roster"></script>
 </body>
 </html>

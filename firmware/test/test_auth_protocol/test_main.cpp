@@ -5,7 +5,7 @@
 
 void test_accepts_valid_auth_challenge() {
     JsonDocument document;
-    deserializeJson(document, R"({"type":"auth.challenge","protocolVersion":1,"nonce":"00112233445566778899aabbccddeeff"})");
+    deserializeJson(document, R"({"type":"auth.challenge","protocolVersion":2,"nonce":"00112233445566778899aabbccddeeff"})");
     String nonce;
     TEST_ASSERT_TRUE(readAuthChallenge(document, nonce));
     TEST_ASSERT_EQUAL_STRING("00112233445566778899aabbccddeeff", nonce.c_str());
@@ -13,11 +13,11 @@ void test_accepts_valid_auth_challenge() {
 
 void test_rejects_wrong_version_and_empty_nonce() {
     JsonDocument wrongVersion;
-    deserializeJson(wrongVersion, R"({"type":"auth.challenge","protocolVersion":2,"nonce":"abc"})");
+    deserializeJson(wrongVersion, R"({"type":"auth.challenge","protocolVersion":1,"nonce":"abc"})");
     String nonce;
     TEST_ASSERT_FALSE(readAuthChallenge(wrongVersion, nonce));
     JsonDocument emptyNonce;
-    deserializeJson(emptyNonce, R"({"type":"auth.challenge","protocolVersion":1,"nonce":""})");
+    deserializeJson(emptyNonce, R"({"type":"auth.challenge","protocolVersion":2,"nonce":""})");
     TEST_ASSERT_FALSE(readAuthChallenge(emptyNonce, nonce));
 }
 

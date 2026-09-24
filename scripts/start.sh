@@ -6,8 +6,6 @@ CONTROLLER="$ROOT/controller"
 FRONTEND="$CONTROLLER/frontend"
 RUNTIME="$CONTROLLER/.runtime"
 EXE="$RUNTIME/fish-controller"
-CONTROLLER_LOG="$RUNTIME/fish-controller.log"
-CONTROLLER_PID="$RUNTIME/fish-controller.pid"
 
 if [[ ! -f "$CONTROLLER/go.mod" ]]; then
   echo "[ERROR] controller/go.mod not found."
@@ -38,20 +36,7 @@ mkdir -p "$RUNTIME"
 echo "[3/4] Building Go controller..."
 (cd "$CONTROLLER" && go build -o "$EXE" ./cmd/fish-controller)
 
-if [[ -f "$CONTROLLER_PID" ]]; then
-  OLD_PID="$(cat "$CONTROLLER_PID" 2>/dev/null || true)"
-  if [[ "$OLD_PID" =~ ^[0-9]+$ ]] && kill -0 "$OLD_PID" >/dev/null 2>&1; then
-    echo "[INFO] Fish Controller already running (pid=$OLD_PID)."
-  else
-    rm -f "$CONTROLLER_PID"
-  fi
-fi
-
-if [[ ! -f "$CONTROLLER_PID" ]]; then
-  echo "[4/4] Starting Fish Controller..."
-  "$EXE" >>"$CONTROLLER_LOG" 2>&1 &
-  echo $! > "$CONTROLLER_PID"
-fi
-
-echo
-echo "Started. Open: http://localhost:8081"
+echo "[4/4] Starting Fish Controller in this terminal..."
+echo "Close this terminal to stop the controller and its attached services."
+echo "Open: http://localhost:8081"
+exec "$EXE"

@@ -9,8 +9,8 @@ void test_hmac_matches_go_vector() {
     };
     char output[65] = {};
     TEST_ASSERT_TRUE(computeIdentityProofForMac(
-        key, "fish-discovery-v1", "00112233445566778899aabbccddeeff", "ac276e7c3718", output));
-    TEST_ASSERT_EQUAL_STRING("7a230c9e3d58592fccba3c17d292d01d5c68840754e4c508d748d60abebe22ab", output);
+        key, "fish-discovery-v2", "00112233445566778899aabbccddeeff", "ac276e7c3718", output));
+    TEST_ASSERT_EQUAL_STRING("210fa80c3c074759b3e859887d9dbea21ad65392f91b119d0549e08902cd079a", output);
 }
 
 void setup() {

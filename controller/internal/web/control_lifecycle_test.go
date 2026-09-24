@@ -114,6 +114,79 @@ func TestPlayerLeaseCannotBeTakenByAnotherBrowserOfSameAccount(t *testing.T) {
 	}
 }
 
+func TestAdminCannotReplaceOwnActiveLeaseFromAnotherClient(t *testing.T) {
+	l := newLeaseStore(time.Minute)
+	admin := authUser{ID: "same-admin", Role: "Admin", Status: "active"}
+	if _, _, ok := l.acquireExclusive("fish", admin, "player", true, "client-a"); !ok {
+		t.Fatal("first admin client could not acquire lease")
+	}
+	if lease, _, ok := l.acquireExclusive("fish", admin, "player", true, "client-b"); ok {
+		t.Fatal("second client replaced an active lease for the same account")
+	} else if lease.ClientID != "client-a" {
+		t.Fatalf("active lease client = %q, want client-a", lease.ClientID)
+	}
+}
+
+func TestAccountClientLockAppliesAcrossDevices(t *testing.T) {
+	l := newLeaseStore(time.Minute)
+	user := authUser{ID: "same-user", Role: "User", Status: "active"}
+	if _, _, ok := l.acquireExclusive("fish-a", user, "player", false, "client-a"); !ok {
+		t.Fatal("first device could not acquire lease")
+	}
+	if lease, _, ok := l.acquireExclusive("fish-b", user, "player", false, "client-b"); ok {
+		t.Fatal("second client acquired another device for the same account")
+	} else if lease.ClientID != "client-a" {
+		t.Fatalf("active account client = %q, want client-a", lease.ClientID)
+	}
+}
+
+func TestExpiredPlayerLeaseCanBeRecoveredBySameAccount(t *testing.T) {
+	l := newLeaseStore(time.Minute)
+	user := authUser{ID: "same-user", Role: "User", Status: "active"}
+	stops := 0
+	l.onRelease = func(string) { stops++ }
+	if _, _, ok := l.acquireExclusive("fish", user, "player", false, "old-tab"); !ok {
+		t.Fatal("initial player browser could not acquire lease")
+	}
+	lease := l.leases["fish"]
+	lease.MotionExpired = true
+	lease.ExpiresAt = time.Now().Add(-time.Second)
+	lease.DeadmanProtected = true
+	l.leases["fish"] = lease
+	recovered, _, ok := l.acquireExclusive("fish", user, "player", false, "new-tab")
+	if !ok {
+		t.Fatal("same account could not recover expired lease")
+	}
+	if recovered.ClientID != "new-tab" || recovered.MotionExpired {
+		t.Fatalf("recovered lease = %+v", recovered)
+	}
+	if stops != 1 {
+		t.Fatalf("recovery must clear old connection once, got %d stops", stops)
+	}
+}
+
+func TestExpiredLeaseCannotResumeMotionWithoutReacquire(t *testing.T) {
+	l := newLeaseStore(time.Minute)
+	user := authUser{ID: "same-user", Role: "User", Status: "active"}
+	if _, _, ok := l.acquireExclusive("fish", user, "player", false, "old-tab"); !ok {
+		t.Fatal("initial player browser could not acquire lease")
+	}
+	lease := l.leases["fish"]
+	lease.MotionExpired = true
+	lease.ExpiresAt = time.Now().Add(-time.Second)
+	l.leases["fish"] = lease
+	queued := false
+	if l.admit("fish", user, "old-tab", true, func() bool {
+		queued = true
+		return true
+	}) {
+		t.Fatal("expired browser lease resumed motion without an explicit reacquire")
+	}
+	if queued {
+		t.Fatal("expired browser lease reached the motion queue")
+	}
+}
+
 func TestPlayerControlRequiresLockedAssignedField(t *testing.T) {
 	store := &competitionStore{Match: newDevelopmentMatch()}
 	store.Match.Blue.Players[0].DeviceID = "fish"
@@ -166,7 +239,7 @@ func (c *lifecycleConn) WriteJSON(value any) error {
 }
 func (c *lifecycleConn) Close() error { return nil }
 
-func TestBrowserTakeoverResetsSequenceAndRejectsPreviousClient(t *testing.T) {
+func TestBrowserSecondClientOfSameAccountIsRejected(t *testing.T) {
 	t.Setenv("FISH_AUTH_DISABLED", "true")
 	t.Setenv("FISH_MOTION_CALIBRATIONS", filepath.Join(t.TempDir(), "calibration.json"))
 	h := hub.New()
@@ -183,19 +256,17 @@ func TestBrowserTakeoverResetsSequenceAndRejectsPreviousClient(t *testing.T) {
 			t.Fatalf("%s status=%d want=%d body=%s", path, w.Code, want, w.Body.String())
 		}
 	}
-	claim := func(client string) { post("/api/leases", map[string]any{"deviceId": "fish", "clientId": client}, 200) }
+	claim := func(client string, want int) {
+		post("/api/leases", map[string]any{"deviceId": "fish", "clientId": client}, want)
+	}
 	motion := func(client, mode string, seq uint64, want int) {
 		post("/api/command/realtime", map[string]any{"deviceId": "fish", "clientId": client, "mode": mode, "sequence": seq, "frequency": 2.5, "amplitude": 0}, want)
 	}
-	claim("ahead")
+	claim("ahead", 200)
 	motion("ahead", "forward", 1000000, 200)
-	claim("behind")
-	motion("behind", "forward", 1, 200)
-	motion("ahead", "forward", 1000001, 409)
-	motion("ahead", "stop", 1000002, 409)
-	motion("behind", "forward", 2, 200)
-	motion("behind", "stop", 1, 200)
+	claim("behind", 409)
 	motion("behind", "forward", 1, 409)
+	motion("ahead", "forward", 1000001, 200)
 }
 
 func TestVisionMustStartAndCannotResumeExpiredSession(t *testing.T) {

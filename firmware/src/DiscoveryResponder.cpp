@@ -175,12 +175,12 @@ void DiscoveryResponder::receivePacket() {
         }
     }
     char proof[65], mac[18];
-    if (!computeIdentityProof("fish-discovery-v1", nonce.c_str(), proof)) return;
+    if (!computeIdentityProof("fish-discovery-v2", nonce.c_str(), proof)) return;
     formatDeviceMac(mac);
     MotionSnapshot state = motion_.snapshot();
     JsonDocument response;
     response["type"] = "discovery.response";
-    response["protocolVersion"] = 1;
+    response["protocolVersion"] = 2;
     response["requestId"] = requestId;
     response["nonce"] = nonce;
     response["deviceId"] = mac;

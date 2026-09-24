@@ -13,7 +13,7 @@
 
 
 /* Wi-Fi 和控制器配置通过 Fish-Setup-XXXXXX 热点写入 NVS。 */
-#define FIRMWARE_VERSION "1.4.5"
+#define FIRMWARE_VERSION "2.0.0"
 
 /* Allow short Wi-Fi stalls without falsely declaring the controller lost. */
 #define CONTROLLER_HEARTBEAT_TIMEOUT_MS 10000
@@ -25,11 +25,13 @@
 #define CONTROLLER_DISCOVERY_SCAN_INTERVAL_MS 220
 #define CONTROLLER_DISCOVERY_SCAN_TIMEOUT_MS 260
 #define CONTROLLER_DISCOVERY_NEAR_SCAN_RADIUS 96
+#define CONTROLLER_REGISTRATION_RECOVERY_MS 180000
+#define CONTROLLER_PROVISIONING_WINDOW_MS 300000
+#define CONTROLLER_ENDPOINT_REGISTRATION_TIMEOUT_MS 15000
 
-/* Four WS2812 status LEDs: original XIAO D3 pad maps to Super Mini GPIO8. */
-#define STATUS_LED_PIN   8
-#define STATUS_LED_COUNT 4
-#define STATUS_LED_BRIGHTNESS 32
+/* Single-color on-board LED. It is a normal GPIO LED, not an RGB/WS2812. */
+#define STATUS_LED_PIN 8
+#define STATUS_LED_ACTIVE_LOW false
 
 /* On-board BOOT button: active-low GPIO9 on XIAO ESP32-C3. */
 #define BOOT_BUTTON_PIN 9
@@ -41,7 +43,7 @@
  */
 #define BATTERY_SENSE_PIN 4
 #define BATTERY_DIVIDER_RATIO 3.0f
-#define BATTERY_EMPTY_VOLTAGE 5.0f
+#define BATTERY_EMPTY_VOLTAGE 7.0f
 #define BATTERY_FULL_VOLTAGE 7.4f
 #define BATTERY_SAMPLE_INTERVAL_MS 10000
 

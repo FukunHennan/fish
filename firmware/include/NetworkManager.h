@@ -20,6 +20,8 @@ private:
     void printConnectionInfo();
     ConfigStore& store_;
     DeviceConfig* config_ = nullptr;
+    bool hasSavedWifi_ = false;
+    uint32_t wifiAttemptStartedAt_ = 0;
     NetworkPolicy policy_;
     WebServer server_{80};
     DNSServer dnsServer_;

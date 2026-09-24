@@ -20,6 +20,12 @@ Require-Command "node"
 Require-Command "npm"
 Require-Command "go"
 
+$PlatformIO = Get-Command pio -ErrorAction SilentlyContinue
+$PlatformIOPath = if ($PlatformIO) { $PlatformIO.Source } else { Join-Path $env:USERPROFILE ".platformio\penv\Scripts\pio.exe" }
+if (-not (Test-Path -LiteralPath $PlatformIOPath -PathType Leaf)) {
+    throw "PlatformIO executable not found. Install PlatformIO Core 6.2.x in the standard .platformio environment."
+}
+
 if (-not $SkipPython) {
     Push-Location (Join-Path $ProjectRoot "vision")
     try {
@@ -40,10 +46,10 @@ if (-not $SkipFrontend) {
 }
 
 if (-not $SkipFirmware) {
-    python -m pip install "platformio>=6.1,<7"
+    & $PlatformIOPath --version
     Push-Location (Join-Path $ProjectRoot "firmware")
     try {
-        python -m platformio run -e seeed_xiao_esp32c3
+        & $PlatformIOPath run -e seeed_xiao_esp32c3
     } finally {
         Pop-Location
     }

@@ -4,6 +4,7 @@
 #include <ArduinoJson.h>
 #include <Update.h>
 #include <Preferences.h>
+#include "AppConfig.h"
 
 namespace {
 struct ScanEntry {
@@ -12,11 +13,20 @@ struct ScanEntry {
     bool secure = false;
 };
 
-const char PAGE[] PROGMEM = R"HTML(<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>机器鱼配网</title><style>body{font-family:system-ui,-apple-system,"Microsoft YaHei",sans-serif;max-width:440px;margin:24px auto;padding:16px;color:#172033;background:#f5f7fb}.card{background:white;border:1px solid #dbe3ee;border-radius:14px;padding:16px;box-shadow:0 8px 26px rgba(25,45,75,.06)}h2{margin:0 0 10px}.tip{background:#eef6ff;padding:12px;border-radius:9px;margin-bottom:14px;font-size:14px;line-height:1.5}.scan-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:12px 0 8px}.scan-head strong{font-size:14px}.refresh{width:auto;margin:0;padding:8px 12px;background:#eef4ff;color:#1458c0;border:1px solid #bdd2f5}.networks{display:flex;flex-direction:column;gap:7px;max-height:260px;overflow:auto;margin-bottom:12px}.network{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;text-align:left;background:#fff;color:#172033;border:1px solid #dbe3ee;border-radius:9px;padding:10px 12px;margin:0}.network:active{background:#eef6ff}.network strong,.network small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.network small{color:#6e7d90;margin-top:3px}.signal{font-size:12px;color:#516273;white-space:nowrap}.empty{padding:14px;text-align:center;color:#7a899b;border:1px dashed #c9d4e2;border-radius:9px;font-size:13px}.manual{font-size:12px;color:#758599;margin:6px 0 4px}label{display:block;font-size:13px;color:#46576a;margin-top:10px}input,button{width:100%;box-sizing:border-box;padding:12px;margin:5px 0;border-radius:8px}input{border:1px solid #cbd6e3;background:#fff;color:#172033}button{background:#1677ff;color:white;border:0;font-weight:700}.save{margin-top:12px}.status{font-size:12px;color:#6f7f91;min-height:18px;margin:4px 0 6px}.lock{font-size:11px;color:#7c8b9d;margin-left:5px}</style></head><body><div class="card"><h2>机器鱼配网</h2><div class="tip">选择附近的 2.4 GHz Wi-Fi，输入密码后保存。设备重启后自动寻找同一局域网中的控制电脑。连续 3 分钟无法连接服务器时，会再次进入此配网页。若要重新配网，长按 BOOT 约 3 秒即可清除配置。</div><div class="scan-head"><strong>附近 Wi-Fi</strong><button class="refresh" type="button" id="refresh">重新扫描</button></div><div class="status" id="scanStatus">正在扫描附近网络…</div><div class="networks" id="networks"></div><div class="manual">如果是隐藏网络，也可以手动输入 SSID。</div><form method="post" action="/configure"><label>Wi-Fi 名称<input id="ssid" name="ssid" placeholder="SSID" maxlength="32" required></label><label>Wi-Fi 密码<input id="password" type="password" name="password" placeholder="Wi-Fi 密码" maxlength="64"></label><label>设备名称<input name="name" placeholder="设备名称" value="机器鱼"></label><button class="save" type="submit">保存并重启</button></form><hr><h3>离线固件恢复</h3><p>服务器无法连接时，可在这里上传 ESP32-C3 的 firmware.bin。上传期间保持供电；成功后自动重启，保留 Wi-Fi 配置。</p><form method="post" action="/update" enctype="multipart/form-data"><input type="file" name="firmware" accept=".bin" required><button type="submit">上传固件并重启</button></form></div><script>const list=document.getElementById('networks'),statusEl=document.getElementById('scanStatus'),ssid=document.getElementById('ssid'),password=document.getElementById('password'),refresh=document.getElementById('refresh');function bars(rssi){if(rssi>=-50)return '████';if(rssi>=-65)return '███';if(rssi>=-75)return '██';return '█'}function render(items){list.textContent='';if(!items.length){const empty=document.createElement('div');empty.className='empty';empty.textContent='没有扫描到可见 Wi-Fi，可手动输入 SSID';list.appendChild(empty);return}items.forEach(net=>{const button=document.createElement('button');button.type='button';button.className='network';const left=document.createElement('span');const name=document.createElement('strong');name.textContent=net.ssid;const detail=document.createElement('small');detail.textContent=(net.secure?'需要密码':'开放网络')+' · '+net.rssi+' dBm';left.appendChild(name);left.appendChild(detail);const signal=document.createElement('span');signal.className='signal';signal.textContent=bars(net.rssi)+(net.secure?' 🔒':'');button.appendChild(left);button.appendChild(signal);button.addEventListener('click',()=>{ssid.value=net.ssid;password.focus()});list.appendChild(button)})}async function scan(){refresh.disabled=true;statusEl.textContent='正在扫描附近网络…';try{const response=await fetch('/scan',{cache:'no-store'});if(!response.ok)throw new Error('扫描失败');const data=await response.json();render(data.networks||[]);statusEl.textContent='已找到 '+(data.networks||[]).length+' 个可见网络'}catch(e){render([]);statusEl.textContent='扫描失败，可手动输入 Wi-Fi 名称'}finally{refresh.disabled=false}}refresh.addEventListener('click',scan);scan();</script></body></html>)HTML";
+constexpr uint32_t kWifiAttemptTimeoutMs = 15000;
+
+const char PAGE[] PROGMEM = R"HTML(<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>机器鱼配网</title><style>body{font-family:system-ui,-apple-system,"Microsoft YaHei",sans-serif;max-width:440px;margin:24px auto;padding:16px;color:#172033;background:#f5f7fb}.card{background:white;border:1px solid #dbe3ee;border-radius:14px;padding:16px;box-shadow:0 8px 26px rgba(25,45,75,.06)}h2{margin:0 0 10px}.tip{background:#eef6ff;padding:12px;border-radius:9px;margin-bottom:14px;font-size:14px;line-height:1.5}.scan-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:12px 0 8px}.scan-head strong{font-size:14px}.refresh{width:auto;margin:0;padding:8px 12px;background:#eef4ff;color:#1458c0;border:1px solid #bdd2f5}.networks{display:flex;flex-direction:column;gap:7px;max-height:260px;overflow:auto;margin-bottom:12px}.network{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;text-align:left;background:#fff;color:#172033;border:1px solid #dbe3ee;border-radius:9px;padding:10px 12px;margin:0}.network:active{background:#eef6ff}.network strong,.network small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.network small{color:#6e7d90;margin-top:3px}.signal{font-size:12px;color:#516273;white-space:nowrap}.empty{padding:14px;text-align:center;color:#7a899b;border:1px dashed #c9d4e2;border-radius:9px;font-size:13px}.manual{font-size:12px;color:#758599;margin:6px 0 4px}label{display:block;font-size:13px;color:#46576a;margin-top:10px}input,button{width:100%;box-sizing:border-box;padding:12px;margin:5px 0;border-radius:8px}input{border:1px solid #cbd6e3;background:#fff;color:#172033}button{background:#1677ff;color:white;border:0;font-weight:700}.save{margin-top:12px}.status{font-size:12px;color:#6f7f91;min-height:18px;margin:4px 0 6px}.lock{font-size:11px;color:#7c8b9d;margin-left:5px}</style></head><body><div class="card"><h2>机器鱼配网</h2><div class="tip">选择附近的 2.4 GHz Wi-Fi，输入密码后保存。设备重启后自动寻找同一局域网中的控制电脑。服务器暂时不可用时，设备会继续保持 Wi-Fi 并自动重连，不会自动进入配网；如需重新配网，请长按 BOOT 约 3 秒清除配置。</div><div class="scan-head"><strong>附近 Wi-Fi</strong><button class="refresh" type="button" id="refresh">重新扫描</button></div><div class="status" id="scanStatus">正在扫描附近网络…</div><div class="networks" id="networks"></div><div class="manual">如果是隐藏网络，也可以手动输入 SSID。</div><form method="post" action="/configure"><label>Wi-Fi 名称<input id="ssid" name="ssid" placeholder="SSID" maxlength="32" required></label><label>Wi-Fi 密码<input id="password" type="password" name="password" placeholder="Wi-Fi 密码" maxlength="64"></label><label>设备名称<input name="name" placeholder="设备名称" value="机器鱼"></label><button class="save" type="submit">保存并重启</button></form><hr><h3>离线固件恢复</h3><p>服务器无法连接时，可在这里上传 ESP32-C3 的 firmware.bin。上传期间保持供电；成功后自动重启，保留 Wi-Fi 配置。</p><form method="post" action="/update" enctype="multipart/form-data"><input type="file" name="firmware" accept=".bin" required><button type="submit">上传固件并重启</button></form></div><script>const list=document.getElementById('networks'),statusEl=document.getElementById('scanStatus'),ssid=document.getElementById('ssid'),password=document.getElementById('password'),refresh=document.getElementById('refresh');function bars(rssi){if(rssi>=-50)return '████';if(rssi>=-65)return '███';if(rssi>=-75)return '██';return '█'}function render(items){list.textContent='';if(!items.length){const empty=document.createElement('div');empty.className='empty';empty.textContent='没有扫描到可见 Wi-Fi，可手动输入 SSID';list.appendChild(empty);return}items.forEach(net=>{const button=document.createElement('button');button.type='button';button.className='network';const left=document.createElement('span');const name=document.createElement('strong');name.textContent=net.ssid;const detail=document.createElement('small');detail.textContent=(net.secure?'需要密码':'开放网络')+' · '+net.rssi+' dBm';left.appendChild(name);left.appendChild(detail);const signal=document.createElement('span');signal.className='signal';signal.textContent=bars(net.rssi)+(net.secure?' 🔒':'');button.appendChild(left);button.appendChild(signal);button.addEventListener('click',()=>{ssid.value=net.ssid;password.focus()});list.appendChild(button)})}async function scan(){refresh.disabled=true;statusEl.textContent='正在扫描附近网络…';try{const response=await fetch('/scan',{cache:'no-store'});if(!response.ok)throw new Error('扫描失败');const data=await response.json();render(data.networks||[]);statusEl.textContent='已找到 '+(data.networks||[]).length+' 个可见网络'}catch(e){render([]);statusEl.textContent='扫描失败，可手动输入 Wi-Fi 名称'}finally{refresh.disabled=false}}refresh.addEventListener('click',scan);scan();</script></body></html>)HTML";
 }
 
 NetworkManager::NetworkManager(ConfigStore& store):store_(store){}
-void NetworkManager::begin(DeviceConfig& config){config_=&config; policy_.begin(config.valid(),millis());}
+void NetworkManager::begin(DeviceConfig& config){
+    config_=&config;
+    hasSavedWifi_=config.hasSavedWifi;
+    wifiAttemptStartedAt_=millis();
+    // ConfigStore applies the built-in network only when NVS is empty. This
+    // keeps the saved-network flag available for the recovery policy below.
+    policy_.begin(config.valid(),millis(),CONTROLLER_REGISTRATION_RECOVERY_MS,CONTROLLER_PROVISIONING_WINDOW_MS);
+}
 bool NetworkManager::connected() const{return WiFi.status()==WL_CONNECTED;}
 bool NetworkManager::provisioning() const{return portalStarted_;}
 String NetworkManager::scanNetworksJson(){
@@ -58,6 +68,9 @@ void NetworkManager::printConnectionInfo(){
 void NetworkManager::registerRoutes(){
     auto showPortal=[this](){
         String page=PAGE;
+        // The configured-device recovery policy still enters provisioning
+        // after three minutes without a controller registration.
+        page.replace("服务器暂时不可用时，设备会继续保持 Wi-Fi 并自动重连，不会自动进入配网；如需重新配网，请长按 BOOT 约 3 秒清除配置。", "连续 3 分钟无法连接服务器时，会再次进入此配网页。若要重新配网，也可以长按 BOOT 约 3 秒清除配置。");
         page.replace("placeholder=\"设备名称\" value=\"机器鱼\"", "placeholder=\"留空则默认使用设备 MAC\"");
         server_.sendHeader("Cache-Control","no-store");
         server_.send(200,"text/html; charset=utf-8",page);
@@ -71,12 +84,16 @@ void NetworkManager::registerRoutes(){
     });
 
     server_.on("/configure",HTTP_POST,[this](){
-        DeviceConfig c=*config_; c.ssid=server_.arg("ssid");c.password=server_.arg("password");c.controllerHost="";
+        DeviceConfig c=*config_; c.ssid=server_.arg("ssid");c.password=server_.arg("password");c.hasSavedWifi=true;c.controllerHost="";
         c.displayName=server_.arg("name");
         c.displayName.trim();
         if(!c.valid()){server_.send(400,"text/plain; charset=utf-8","配置无效，请检查所有字段");return;}
         Preferences cache;if(cache.begin("fish-endpoint",false)){cache.clear();cache.end();}
         if(!store_.save(c)){server_.send(500,"text/plain; charset=utf-8","保存失败");return;}
+        policy_.provisioningFinished(millis());
+        portalStarted_=false;
+        dnsServer_.stop();
+        server_.stop();
         server_.send(200,"text/plain; charset=utf-8","保存成功，设备正在重启");delay(300);ESP.restart();
     });
     server_.on("/update",HTTP_POST,[this](){
@@ -99,6 +116,8 @@ void NetworkManager::registerRoutes(){
 }
 
 void NetworkManager::startProvisioning(){
+    if(portalStarted_)return;
+    Serial.printf("[Recovery] setup AP %s at 192.168.4.1\n", provisioningApName().c_str());
     WiFi.disconnect(true);
     WiFi.mode(WIFI_STA);
     scannedNetworksJson_=scanNetworksJson();
@@ -109,8 +128,30 @@ void NetworkManager::startProvisioning(){
 }
 
 void NetworkManager::update(uint32_t nowMs,bool registered){
-    if(portalStarted_){dnsServer_.processNextRequest();server_.handleClient();return;}
-    bool online=connected();policy_.setConnected(online,nowMs);policy_.setRegistered(registered,nowMs);
+    if(portalStarted_){
+        dnsServer_.processNextRequest();
+        server_.handleClient();
+        // Stay in AP mode until the user submits a new configuration. This
+        // prevents an unreachable server from causing an AP/reconnect loop.
+        return;
+    }
+    bool online=connected();
+    if (!online && lastConnected_) wifiAttemptStartedAt_=nowMs;
+    policy_.setConnected(online,nowMs);
+    policy_.setRegistered(registered,nowMs);
+
+    // A device with no NVS Wi-Fi gets one chance to use the compiled factory
+    // network. A device that already has Wi-Fi configured goes straight to
+    // the setup AP when its controller cannot be reached; it never silently
+    // switches away from the user's saved network.
+    if (!online && nowMs - wifiAttemptStartedAt_ >= kWifiAttemptTimeoutMs) {
+        startProvisioning();
+        return;
+    }
+    if (online && !registered && nowMs - wifiAttemptStartedAt_ >= CONTROLLER_REGISTRATION_RECOVERY_MS) {
+        startProvisioning();
+        return;
+    }
     NetworkAction action=policy_.next(nowMs);
     if(action==NetworkAction::StartProvisioning){Serial.println("[Recovery] controller unavailable; starting setup portal");startProvisioning();return;}
     if(online){
@@ -121,6 +162,6 @@ void NetworkManager::update(uint32_t nowMs,bool registered){
         return;
     }
     lastConnected_=false;
-    if(action==NetworkAction::Connect)connect(); else if(action==NetworkAction::StartProvisioning)startProvisioning();
+    if(action==NetworkAction::Connect){wifiAttemptStartedAt_=nowMs;connect();} else if(action==NetworkAction::StartProvisioning)startProvisioning();
     else if(nowMs-lastReconnect_>=15000)connect();
 }

@@ -3,6 +3,7 @@
 
 struct DeviceConfig {
     String ssid, password, controllerHost, displayName;
+    bool hasSavedWifi = false;
     uint16_t controllerPort = 8081;
     float servoCenter = 90.0f;
     bool valid() const {

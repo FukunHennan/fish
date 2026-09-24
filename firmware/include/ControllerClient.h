@@ -35,7 +35,6 @@ private:
     void sendIdentity();
     void sendHeartbeat();
     void sendMotionState(bool force = false);
-    void sendRGBState(bool force = false);
     void sendBatteryTelemetry(bool force = false);
     void sendLinkTelemetry(bool force = false);
     void sendOtaProgress();
@@ -63,7 +62,6 @@ private:
     uint32_t lastHeartbeat_ = 0;
     uint32_t lastHeartbeatReport_ = 0;
     uint32_t lastMotionStateReport_ = 0;
-    uint32_t lastRGBStateReport_ = 0;
     uint32_t lastBatterySampleMs_ = 0;
     uint32_t lastLinkCheckMs_ = 0;
     uint32_t lastLinkReportMs_ = 0;
@@ -73,7 +71,6 @@ private:
     bool linkReported_ = false;
     String bootId_;
     String lastMotionSignature_;
-    String lastRGBSignature_;
     String lastIdentitySignature_;
     String stopReason_ = "BOOT";
     String controlSource_;

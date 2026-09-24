@@ -41,6 +41,20 @@ func TestOfflineDeviceCannotReceiveCommand(t *testing.T) {
 	}
 }
 
+func TestResetLatestSequenceAllowsFreshControlSession(t *testing.T) {
+	h := New()
+	h.Register(Device{ID: "fish-sequence"}, &fakeConn{})
+	if !h.SendLatestOrdered("fish-sequence", 10, map[string]any{"command": "motion.set"}) {
+		t.Fatal("初始控制帧应入队")
+	}
+	if !h.ResetLatestSequence("fish-sequence") {
+		t.Fatal("在线设备应能重置序列")
+	}
+	if !h.SendLatestOrdered("fish-sequence", 1, map[string]any{"command": "motion.set"}) {
+		t.Fatal("新控制会话的首帧不应被旧序列拒绝")
+	}
+}
+
 func TestDeviceStateUpdateKeepsDashboardFields(t *testing.T) {
 	h := New()
 	c := &fakeConn{}

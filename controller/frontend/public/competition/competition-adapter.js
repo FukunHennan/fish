@@ -6,7 +6,7 @@
  *   1. 战队登录   -> POST /api/auth/login
  *   2. 设备发现   -> GET  /api/devices
  *   3. 设备绑定   -> POST /api/leases          (B1/B2 各绑定一台真实设备)
- *   4. 运动控制   -> POST /api/command/realtime (含松键停止)
+ *   4. 运动控制   -> WebSocket /ws/control (含松键停止)
  *   5. 状态订阅   -> SSE  /api/events
  *   6. 设备信息   -> 用真实数据替换界面里的演示文案
  * 全部通过事件委托实现，因此界面重建 DOM 后依然生效。
@@ -65,6 +65,8 @@
   var controlSocket = null;
   var controlSocketPromise = null;
   var controlSocketRetryAt = 0;
+  var controlSocketLastMessageAt = 0;
+  var controlSocketLastSendAt = 0;
 
   function controlSocketUrl() {
     var scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -73,7 +75,11 @@
 
   function ensureControlSocket() {
     if (typeof WebSocket === "undefined") return Promise.reject(new Error("WebSocket unavailable"));
-    if (controlSocket && controlSocket.readyState === WebSocket.OPEN) return Promise.resolve(controlSocket);
+    if (controlSocket && controlSocket.readyState === WebSocket.OPEN) {
+      // The server sends WebSocket pings and closes dead connections. Do not
+      // tear down a healthy socket merely because the controls were idle.
+      return Promise.resolve(controlSocket);
+    }
     if (controlSocketPromise) return controlSocketPromise;
     if (Date.now() < controlSocketRetryAt) return Promise.reject(new Error("control socket backoff"));
     controlSocketPromise = new Promise(function (resolve, reject) {
@@ -83,9 +89,11 @@
       socket.onopen = function () {
         settled = true;
         controlSocket = socket;
+        controlSocketLastMessageAt = Date.now();
         resolve(socket);
       };
       socket.onmessage = function (event) {
+        controlSocketLastMessageAt = Date.now();
         var frame;
         try { frame = JSON.parse(event.data); } catch (_) { return; }
         var result = frame && frame.result;
@@ -110,12 +118,9 @@
 
   function sendRealtimeFrame(body) {
     return ensureControlSocket().then(function (socket) {
+      controlSocketLastSendAt = Date.now();
       socket.send(JSON.stringify(body));
       return true;
-    }).catch(function () {
-      // Preserve a short-lived HTTP fallback while the persistent channel is
-      // reconnecting or when a proxy does not permit WebSocket upgrades.
-      return api("/api/command/realtime", { method: "POST", body: body }).then(function () { return true; });
     });
   }
   var activePointers = {};
@@ -126,6 +131,7 @@
     user: null,
     authenticated: false,
     devices: [],
+    competitionDevices: [],
     match: null,
     bound: {},       // player -> deviceId
     sequence: {},    // deviceId -> sequence
@@ -223,9 +229,42 @@
   }
 
   function currentTeamSide() {
-    if (activeTeamSide === "blue" || activeTeamSide === "red") return activeTeamSide;
     var text = ((state.user && (state.user.name + " " + state.user.email)) || "").toLowerCase();
     if (text.indexOf("红队") >= 0 || text.indexOf("team-red") >= 0) return "red";
+
+    // A browser may retain an old team selection while the server has moved
+    // the live assignment. Resolve the account/roster first, then only honor
+    // the saved selection when it is not contradicted by online assignments.
+    if (state.match && state.user) {
+      var email = String(state.user.email || "").toLowerCase();
+      var name = String(state.user.name || "").trim();
+      for (var sideIndex = 0; sideIndex < 2; sideIndex += 1) {
+        var side = sideIndex === 0 ? "blue" : "red";
+        var players = state.match[side] && state.match[side].players || [];
+        if (players.some(function (player) {
+          return (email && String(player.email || "").toLowerCase() === email) ||
+            (name && String(player.name || "").trim() === name);
+        })) return side;
+      }
+      var onlineAssigned = { blue: 0, red: 0 };
+      ["blue", "red"].forEach(function (side) {
+        var players = state.match[side] && state.match[side].players || [];
+        players.forEach(function (player) {
+          if (!player.deviceId) return;
+          if (state.devices.some(function (device) {
+            return sameDeviceId(device, player.deviceId) && device.online;
+          })) onlineAssigned[side] += 1;
+        });
+      });
+      if (activeTeamSide === "blue" || activeTeamSide === "red") {
+        var otherSide = activeTeamSide === "blue" ? "red" : "blue";
+        if (onlineAssigned[activeTeamSide] === 0 && onlineAssigned[otherSide] > 0) return otherSide;
+        return activeTeamSide;
+      }
+      if (onlineAssigned.red > 0 && onlineAssigned.blue === 0) return "red";
+      if (onlineAssigned.blue > 0 && onlineAssigned.red === 0) return "blue";
+    }
+    if (activeTeamSide === "blue" || activeTeamSide === "red") return activeTeamSide;
     return "blue";
   }
 
@@ -311,6 +350,15 @@
     return currentTeamSide() === "red" ? "红队" : "蓝队";
   }
 
+  function paintCurrentTeamIdentity() {
+    if (!state.match) return;
+    var team = state.match[currentTeamSide()];
+    var label = team && team.name ? team.name : (currentTeamSide() === "red" ? "红队" : "蓝队");
+    document.querySelectorAll("[data-live-current-team]").forEach(function (node) {
+      if (node.textContent !== label) node.textContent = label;
+    });
+  }
+
   function currentTeamData() {
     if (!state.match) return null;
     return currentTeamSide() === "red" ? state.match.red : state.match.blue;
@@ -376,9 +424,6 @@
     if (!state.user || !document.body) return;
     var account = shortAccount(state.user.email) || state.user.name || "当前账号";
     var team = currentTeamLabel();
-    document.querySelectorAll(".teamSessionBadge").forEach(function (node) {
-      node.textContent = team + " · " + account + " 已认证";
-    });
     document.querySelectorAll("[data-current-account]").forEach(function (node) {
       node.textContent = state.user.email || state.user.name || account;
       node.title = node.textContent;
@@ -621,6 +666,7 @@
       .catch(function () { return null; })
       .then(function (match) {
         state.match = match;
+        paintCurrentTeamIdentity();
         var assigned = {};
         if (match) {
           ["blue", "red"].forEach(function (side) {
@@ -635,13 +681,31 @@
 			setBadge("等待裁判锁定场地；选手控制权尚未开放", "info");
 			return applyBindings({});
 		}
-        if (!onlineDevices.length) {
-          setBadge("当前没有在线机器鱼", "warn");
-          return applyBindings({});
-        }
+		if (!onlineDevices.length) {
+		  setBadge("当前没有在线机器鱼", "warn");
+		  return applyBindings({});
+		}
+		// When a fresh public browser has no team selection, make the only
+		// team with an online assigned fish the active team before calculating
+		// seat targets. This removes the race between match and device loading.
+		var selectedSide = currentTeamSide();
+		if (state.match && (!state.user || state.user.role === "Admin")) {
+		  var onlineBySide = { blue: 0, red: 0 };
+		  ["blue", "red"].forEach(function (side) {
+		    var players = state.match[side] && state.match[side].players || [];
+		    players.forEach(function (player) {
+		      if (player.deviceId && onlineDevices.some(function (device) {
+		        return sameDeviceId(device, player.deviceId);
+		      })) onlineBySide[side] += 1;
+		    });
+		  });
+		  if (onlineBySide.red > 0 && onlineBySide.blue === 0) selectedSide = activeTeamSide = "red";
+		  if (onlineBySide.blue > 0 && onlineBySide.red === 0) selectedSide = activeTeamSide = "blue";
+		  paintCurrentTeamIdentity();
+		}
         var targets = {
-          b1: assigned[slotForPlayer("b1")],
-          b2: assigned[slotForPlayer("b2")],
+          b1: assigned[(selectedSide === "red" ? "R" : "B") + "1"],
+          b2: assigned[(selectedSide === "red" ? "R" : "B") + "2"],
         };
         PLAYERS.forEach(function (player) {
           var deviceId = targets[player];
@@ -653,8 +717,8 @@
           setBadge("本队暂无可手动操控的在线机器鱼", "warn");
         } else {
           var missing = [];
-          if (assigned[slotForPlayer("b1")] && !targets.b1) missing.push(slotForPlayer("b1"));
-          if (assigned[slotForPlayer("b2")] && !targets.b2) missing.push(slotForPlayer("b2"));
+          if (assigned[(selectedSide === "red" ? "R" : "B") + "1"] && !targets.b1) missing.push((selectedSide === "red" ? "R" : "B") + "1");
+          if (assigned[(selectedSide === "red" ? "R" : "B") + "2"] && !targets.b2) missing.push((selectedSide === "red" ? "R" : "B") + "2");
           if (missing.length) setBadge(missing.join("/") + " 已分配但当前离线", "warn");
         }
         return applyBindings(targets);
@@ -690,6 +754,7 @@
       setBadge(pairs.length ? "已绑定 " + pairs.join("　") : emptyText, pairs.length ? "ok" : "warn");
       paintDeviceInfo();
       paintAccountInfo();
+      paintCurrentTeamIdentity();
       return syncRuntimeVisionBindings(true).catch(function (error) {
         setBadge("机器鱼已绑定，YOLO 角色等待重新同步：" + error.message, "warn");
         return { applied: 0, deferred: true, failed: true };
@@ -779,16 +844,19 @@
             if (sameDeviceId(currentDevice(player), next.deviceId)) recoverPlayerLease(player, error);
             return;
           }
-          // A transient public-network timeout is retried by the next queued
-          // frame; do not tear down the selected device for one lost HTTP
-          // response.
+          // Keep the selected device, but report the actual transport. Any
+          // next frame may reconnect the same WebSocket; no other protocol is
+          // silently substituted.
           if (activeMotion[player] && activeMotion[player].action === action) {
-            setBadge(slotForPlayer(player) + " 网络延迟，正在继续发送控制", "warn");
+            setBadge(slotForPlayer(player) + " WebSocket 控制连接异常，正在重连", "warn");
           }
         })
         .finally(function () {
           transport.active = false;
-          if (transport.pending && activeMotion[player] && activeMotion[player].action === action) flush();
+          // A stop queued during an in-flight motion frame must always flush,
+          // even after the local activeMotion entry has been cleared.
+          var pendingStop = transport.pending && transport.pending.body && transport.pending.body.mode === "stop";
+          if (transport.pending && (pendingStop || (activeMotion[player] && activeMotion[player].action === action))) flush();
         });
     };
     flush();
@@ -876,6 +944,9 @@
     var entry = activeMotion[player];
     if (!entry) return;
     cancelPendingStop(entry);
+    // Stop immediately on key-up/blur/route changes instead of waiting for
+    // the device deadman window to expire.
+    if (entry.action !== "stop") sendMotion(player, "stop");
     delete activeMotion[player];
   }
 
@@ -2991,6 +3062,15 @@
     }
     renderRefreshTimer = window.setInterval(function () {
       ensureVideoSurface();
+      // player_interface.html owns the static page renderer and may recreate
+      // the control cards. Re-apply server-owned team/seat/device state after
+      // that render so its B1/B2 demo defaults cannot overwrite live R1/R2
+      // assignments from the controller.
+      if (state.ready && !isRefereePage()) {
+        paintDeviceInfo();
+        paintAccountInfo();
+        paintCurrentTeamIdentity();
+      }
     }, 1000);
   }
 
@@ -3240,8 +3320,8 @@
       if (input) input.focus();
       return Promise.resolve(null);
     }
-    if (referee.match && ["running", "paused", "finished"].indexOf(referee.match.state) >= 0) {
-      setBadge("比赛开始后不能修改赛事名称", "warn");
+    if (referee.match && ["running", "paused"].indexOf(referee.match.state) >= 0) {
+      setBadge("比赛进行或暂停期间不能修改赛事名称", "warn");
       return Promise.resolve(null);
     }
     if (saveButton) saveButton.disabled = true;
@@ -3266,6 +3346,7 @@
         referee.match = payload.match;
         state.match = payload.match;
         referee.elapsedMs = payload.elapsedMs || 0;
+        referee.remainingMs = payload.remainingMs != null ? payload.remainingMs : Math.max(0, (payload.match && payload.match.durationMs || 180000) - referee.elapsedMs);
         referee.running = !!payload.running;
         paintReferee();
         if (typeof window.applyCompetitionRecords === "function") {
@@ -3282,7 +3363,8 @@
     var score = referee.bar && referee.bar.querySelector("#fishRefScore");
     var info = referee.bar && referee.bar.querySelector("#fishRefInfo");
     var toggle = referee.bar && referee.bar.querySelector("#fishRefToggle");
-    if (clock) clock.textContent = fmtClock(referee.elapsedMs);
+    var remainingMs = referee.remainingMs != null ? referee.remainingMs : Math.max(0, (match.durationMs || 180000) - referee.elapsedMs);
+    if (clock) clock.textContent = fmtClock(remainingMs);
     if (score) score.textContent = match.blue.score + " : " + match.red.score;
     if (info) {
       info.textContent = (match.matchNo || "未建赛") + " · " + stateText(match.state)
@@ -3294,13 +3376,19 @@
     syncText("redScore", match.red.score);
     syncText("blueQuick", match.blue.score);
     syncText("redQuick", match.red.score);
-    syncText("clock", fmtClock(referee.elapsedMs));
-    syncText("clockState", referee.running ? "进行中" : stateText(match.state));
+    syncText("clock", fmtClock(remainingMs));
+    syncText("clockState", referee.running ? "剩余时间" : stateText(match.state));
     syncText("currentMatchSummary", [match.matchNo, match.group, match.venue].filter(Boolean).join(" · ") || "比赛信息未填写");
     var matchNameButton = document.getElementById("currentMatchEdit");
     if (matchNameButton) {
-      matchNameButton.disabled = ["running", "paused", "finished"].indexOf(match.state) >= 0;
-      matchNameButton.title = matchNameButton.disabled ? "比赛开始后不能修改赛事名称" : "编辑赛事名称";
+      matchNameButton.disabled = ["running", "paused"].indexOf(match.state) >= 0;
+      matchNameButton.title = matchNameButton.disabled ? "比赛进行或暂停期间不能修改赛事名称" : "编辑赛事名称";
+    }
+    var durationButton = document.getElementById("clockDurationEdit");
+    if (durationButton) {
+      durationButton.disabled = ["running", "paused"].indexOf(match.state) >= 0;
+      durationButton.title = durationButton.disabled ? "比赛进行或暂停期间不能修改时长" : "设置比赛倒计时";
+      durationButton.textContent = fmtClock(match.durationMs || 180000);
     }
     syncText("currentBlueTeam", match.blue && match.blue.name ? match.blue.name : "蓝队");
     syncText("currentRedTeam", match.red && match.red.name ? match.red.name : "红队");
@@ -3476,6 +3564,18 @@
     });
   }
 
+  function refereeDevices() {
+    var assignments = state.competitionDevices || [];
+    var merged = (state.devices || []).map(function (device) {
+      var assignment = assignments.find(function (item) { return sameDeviceId(item, device); });
+      return assignment ? Object.assign({}, device, assignment, { online: !!device.online }) : device;
+    });
+    assignments.forEach(function (assignment) {
+      if (!merged.some(function (device) { return sameDeviceId(device, assignment); })) merged.push(assignment);
+    });
+    return merged;
+  }
+
   function fmtSignedAt(value) {
     if (!value) return "";
     var date = new Date(value);
@@ -3483,8 +3583,9 @@
     return date.toLocaleTimeString("zh-CN", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
   }
 
-  function paintRefereeRoster(match) {
+  function paintRefereeRoster(match, devices) {
     if (!match) return;
+    var rosterDevices = devices || refereeDevices();
     var blueTitle = document.querySelector(".teamCard.blue .teamHead h2");
     var redTitle = document.querySelector(".teamCard.red .teamHead h2");
     if (blueTitle) blueTitle.textContent = "蓝队 · " + (match.blue && match.blue.name ? match.blue.name : "蓝队");
@@ -3500,12 +3601,11 @@
       var player = playerForSlot(match, slot);
       if (!slot || !player) return;
       var assignedDeviceId = player.deviceId ? String(player.deviceId) : "";
-      var device = rosterDeviceForPlayer(state.devices, player, slot);
+      var device = rosterDeviceForPlayer(rosterDevices, player, slot);
       var deviceStatus = device ? (device.online ? "online" : "offline") : (assignedDeviceId ? "offline" : "unassigned");
       deviceStatuses[deviceStatus] += 1;
       title.textContent = slot + " · " + (player.name || slot);
-      setTextIfFound(card, ".status", player.signedIn ? "✓ 已登录" : "○ 未登录");
-      card.classList.toggle("done", !!player.signedIn);
+      card.classList.add("done");
       card.classList.remove("device-online", "device-offline", "device-unassigned");
       card.classList.add("device-" + deviceStatus);
       var deviceState = card.querySelector("[data-device-state]");
@@ -3521,9 +3621,8 @@
         if (index === 1) { label.textContent = "MAC"; value.textContent = device ? (device.deviceId || device.id || "—") : "—"; }
         if (index === 2) { label.textContent = "电量"; value.textContent = device ? deviceBatteryLabel(device) : "—"; }
       });
-      setTextIfFound(card, ".playerTime", player.signedIn ? ("账号已登录 · " + (fmtSignedAt(player.signedAt) || "开发模式")) : "等待选手登录");
     });
-    var onlineDevices = (state.devices || []).filter(function (item) { return !!item.online; });
+    var onlineDevices = rosterDevices.filter(function (item) { return !!item.online; });
     paintSignupDeviceSummary({
       online: onlineDevices.length,
       unassigned: onlineDevices.filter(function (item) { return !item.assignedTo; }).length,
@@ -3548,14 +3647,14 @@
       button.disabled = false;
     });
     var players = ((match.blue && match.blue.players) || []).concat((match.red && match.red.players) || []);
-    var readyCount = players.filter(function (player) { return !!player.signedIn; }).length;
+    var readyCount = players.length;
     var signupNext = document.getElementById("signupNext");
     if (signupNext) {
-      signupNext.disabled = readyCount !== 4;
-      signupNext.textContent = readyCount === 4 ? "进入场地调整" : ("等待账号 " + readyCount + " / 4");
+      signupNext.disabled = false;
+      signupNext.textContent = "进入场地调整";
     }
     var actionTitle = document.querySelector(".signup .actionCopy h3");
-    if (actionTitle) actionTitle.textContent = readyCount + " 名选手已登录";
+    if (actionTitle) actionTitle.textContent = readyCount + " 名选手";
     var slotNode = document.getElementById("confirmSlot");
     if (slotNode) {
       var current = playerForSlot(match, slotNode.textContent);
@@ -3563,7 +3662,7 @@
         syncText("confirmName", current.name || current.slot);
         syncText("confirmTeam", (/^R/i.test(current.slot) ? (match.red && match.red.name) : (match.blue && match.blue.name)) || "");
         syncText("confirmId", shortAccount(current.email) || current.name || current.slot);
-        syncText("confirmAccount", current.signedIn ? "已登录" : "未登录");
+        syncText("confirmAccount", "默认已登录");
       }
     }
   }
@@ -3592,8 +3691,7 @@
       var slot = title ? normalizeSlot(String(title.textContent).split("·")[0]) : "";
       if (!slot) return;
       title.textContent = slot + " · 未读取账号";
-      setTextIfFound(card, ".status", "○ 未确认");
-      card.classList.remove("done");
+      card.classList.add("done");
       card.querySelectorAll(".meta").forEach(function (meta) {
         var label = meta.querySelector("span");
         var value = meta.querySelector("strong");
@@ -3602,7 +3700,6 @@
         if (label.textContent.trim() === "机器鱼") value.textContent = "未读取";
         if (label.textContent.trim() === "席位") value.textContent = slot;
       });
-      setTextIfFound(card, ".playerTime", reason || "等待真实数据");
     });
     document.querySelectorAll(".selectPlayer[data-slot]").forEach(function (button) {
       var slot = button.getAttribute("data-slot");
@@ -3612,7 +3709,7 @@
   }
 
   function paintSignupFish(devices) {
-    paintRefereeRoster(referee.match || state.match);
+    paintRefereeRoster(referee.match || state.match, devices);
     document.querySelectorAll(".player").forEach(function (card) {
       var title = card.querySelector(".playerTop b");
       var slot = title ? normalizeSlot(String(title.textContent).split("·")[0]) : "";
@@ -3663,6 +3760,7 @@
     }
     return loadCompetitionDevices()
       .then(function (devices) {
+        state.competitionDevices = devices;
         paintSignupFish(devices);
         paintSelectFish(devices);
         var slotNode = document.getElementById("confirmSlot");
@@ -3732,6 +3830,23 @@
       event.preventDefault();
       event.stopImmediatePropagation();
       if (!target.closest("#currentMatchEdit").disabled) setMatchNameEditor(true);
+      return true;
+    }
+    if (target.closest("#clockDurationEdit")) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      var currentDuration = Number(referee.match && referee.match.durationMs) || 180000;
+      var value = window.prompt("输入比赛倒计时（分:秒，范围 00:10 至 60:00）", fmtClock(currentDuration));
+      if (value == null) return true;
+      var parts = String(value).trim().match(/^(\d{1,2}):(\d{2})$/);
+      var seconds = parts ? Number(parts[1]) * 60 + Number(parts[2]) : 0;
+      if (!parts || Number(parts[2]) > 59 || seconds < 10 || seconds > 3600) {
+        setBadge("时长格式无效，请使用 分:秒（00:10 至 60:00）", "warn");
+        return true;
+      }
+      api("/api/competition/match", { method: "PUT", body: { durationMs: seconds * 1000 } })
+        .then(function () { setBadge("比赛倒计时已设置为 " + fmtClock(seconds * 1000), "ok"); return refreshReferee(); })
+        .catch(function (error) { setBadge("倒计时设置失败：" + error.message, "error"); });
       return true;
     }
     if (target.closest("#matchNameCancel")) {
@@ -3871,7 +3986,7 @@
     if (modal) return modal;
     var style = document.createElement("style");
     style.id = "deviceManagerStyles";
-    style.textContent = "#deviceManagerModal{position:fixed;inset:0;z-index:10000;display:none;place-items:center;padding:18px;background:rgba(2,10,18,.78)}#deviceManagerModal.show{display:grid}#deviceManagerModal .deviceManagerCard{width:min(720px,96vw);max-height:min(680px,90vh);overflow:auto;background:#071a2d;color:#e5f7ff;border:1px solid rgba(91,205,246,.35);border-radius:12px;box-shadow:0 18px 60px rgba(0,0,0,.45)}#deviceManagerModal .deviceManagerHead{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 18px;border-bottom:1px solid rgba(132,194,218,.18)}#deviceManagerModal h2{margin:0;font-size:16px}#deviceManagerModal .deviceManagerSub{margin:4px 0 0;color:#8eb0c1;font-size:11px}#deviceManagerModal .deviceManagerClose{border:0;background:transparent;color:#b8d7e5;font-size:24px;cursor:pointer}#deviceManagerModal .deviceManagerBody{padding:12px 18px}#deviceManagerModal .deviceManagerSummary{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;color:#9bc0d0;font-size:11px}#deviceManagerModal .deviceManagerSummary b{color:#9effcf}#deviceManagerModal .deviceRow{display:grid;grid-template-columns:26px minmax(150px,1fr) minmax(105px,130px) minmax(120px,150px) minmax(125px,150px);align-items:center;gap:9px;padding:10px 0;border-top:1px solid rgba(132,194,218,.12)}#deviceManagerModal .deviceRow:first-child{border-top:0}#deviceManagerModal .deviceIdentity{min-width:0}#deviceManagerModal .deviceIdentity strong,#deviceManagerModal .deviceIdentity small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#deviceManagerModal .deviceIdentity strong{font-size:12px}#deviceManagerModal .deviceIdentity small{margin-top:3px;color:#8eafbf;font-size:10px}#deviceManagerModal .deviceMac{font:10px ui-monospace,SFMono-Regular,Consolas,monospace;color:#9ac1d1;word-break:break-all}#deviceManagerModal .deviceBattery{font-size:11px;color:#d4ebf2}#deviceManagerModal select,#deviceManagerModal input{width:100%;box-sizing:border-box;border:1px solid rgba(117,195,226,.28);border-radius:6px;padding:7px 8px;background:#0a243b;color:#e5f7ff;font-size:11px}#deviceManagerModal .deviceNameEdit{display:flex;gap:5px}#deviceManagerModal .deviceNameEdit button{border:1px solid rgba(117,195,226,.35);border-radius:6px;background:#0b3550;color:#c9efff;padding:6px 7px;cursor:pointer}#deviceManagerModal .deviceManagerFoot{display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid rgba(132,194,218,.18)}#deviceManagerModal .deviceManagerFoot button{border:1px solid rgba(117,195,226,.35);border-radius:7px;padding:8px 13px;background:#0b3550;color:#d7f5ff;cursor:pointer}#deviceManagerModal .deviceManagerFoot .primary{background:#1389bf;border-color:#54d9ff;color:#fff}@media(max-width:650px){#deviceManagerModal .deviceRow{grid-template-columns:26px 1fr 100px;gap:7px}#deviceManagerModal .deviceMac,#deviceManagerModal .deviceBattery{grid-column:2}#deviceManagerModal .deviceNameEdit{grid-column:2 / -1}#deviceManagerModal .deviceRow select{grid-column:3}}";
+    style.textContent = "#deviceManagerModal{position:fixed;inset:0;z-index:10000;display:none;place-items:center;padding:18px;background:rgba(2,10,18,.78)}#deviceManagerModal.show{display:grid}#deviceManagerModal .deviceManagerCard{width:min(900px,96vw);max-height:min(680px,90vh);overflow:auto;background:#071a2d;color:#e5f7ff;border:1px solid rgba(91,205,246,.35);border-radius:12px;box-shadow:0 18px 60px rgba(0,0,0,.45)}#deviceManagerModal .deviceManagerHead{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 18px;border-bottom:1px solid rgba(132,194,218,.18)}#deviceManagerModal h2{margin:0;font-size:16px}#deviceManagerModal .deviceManagerSub{margin:4px 0 0;color:#8eb0c1;font-size:11px}#deviceManagerModal .deviceManagerClose{border:0;background:transparent;color:#b8d7e5;font-size:24px;cursor:pointer}#deviceManagerModal .deviceManagerBody{padding:12px 18px}#deviceManagerModal .deviceManagerSummary{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;color:#9bc0d0;font-size:11px}#deviceManagerModal .deviceManagerSummary b{color:#9effcf}#deviceManagerModal .deviceRow{display:grid;grid-template-columns:26px minmax(130px,1.2fr) minmax(130px,1fr) 78px minmax(125px,150px) minmax(210px,1.4fr);align-items:center;gap:10px;padding:10px 0;border-top:1px solid rgba(132,194,218,.12)}#deviceManagerModal .deviceRow:first-child{border-top:0}#deviceManagerModal .deviceIdentity{min-width:0}#deviceManagerModal .deviceIdentity strong,#deviceManagerModal .deviceIdentity small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#deviceManagerModal .deviceIdentity strong{font-size:12px}#deviceManagerModal .deviceIdentity small{margin-top:3px;color:#8eafbf;font-size:10px}#deviceManagerModal .deviceMac{font:10px ui-monospace,SFMono-Regular,Consolas,monospace;color:#9ac1d1;word-break:break-all}#deviceManagerModal .deviceBattery{font-size:11px;color:#d4ebf2;white-space:nowrap}#deviceManagerModal select,#deviceManagerModal input{width:100%;min-width:0;box-sizing:border-box;border:1px solid rgba(117,195,226,.28);border-radius:6px;padding:7px 8px;background:#0a243b;color:#e5f7ff;font-size:11px}#deviceManagerModal .deviceNameEdit{display:flex;min-width:0;gap:6px}#deviceManagerModal .deviceNameEdit button{flex:0 0 auto;white-space:nowrap;border:1px solid rgba(117,195,226,.35);border-radius:6px;background:#0b3550;color:#c9efff;padding:6px 9px;cursor:pointer}#deviceManagerModal .deviceManagerFoot{display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid rgba(132,194,218,.18)}#deviceManagerModal .deviceManagerFoot button{border:1px solid rgba(117,195,226,.35);border-radius:7px;padding:8px 13px;background:#0b3550;color:#d7f5ff;cursor:pointer}#deviceManagerModal .deviceManagerFoot .primary{background:#1389bf;border-color:#54d9ff;color:#fff}@media(max-width:840px){#deviceManagerModal .deviceRow{grid-template-columns:26px minmax(130px,1fr) minmax(125px,1fr) 78px minmax(125px,150px);gap:8px}#deviceManagerModal .deviceNameEdit{grid-column:2 / -1}}@media(max-width:650px){#deviceManagerModal .deviceRow{grid-template-columns:26px 1fr 110px;gap:7px}#deviceManagerModal .deviceMac,#deviceManagerModal .deviceBattery{grid-column:2}#deviceManagerModal .deviceNameEdit{grid-column:2 / -1}#deviceManagerModal .deviceRow select{grid-column:3}}";
     document.head.appendChild(style);
     modal = document.createElement("div");
     modal.id = "deviceManagerModal";
@@ -3955,6 +4070,7 @@
       state.devices = deviceList(payload);
       paintDeviceInfo();
       paintAccountInfo();
+      paintCurrentTeamIdentity();
       // 设备掉线立即停止对应玩家
       PLAYERS.forEach(function (player) {
         var deviceId = state.bound[player];

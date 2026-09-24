@@ -57,7 +57,7 @@ func (h *Hub) StopAndReset(id string) bool {
 	e.nextOrder++
 	e.outbound = append(e.outbound, &outboundMessage{order: e.nextOrder, value: map[string]any{
 		"type": "command", "command": "motion.set", "ackRequired": true,
-		"payload": map[string]any{"controlSource": "lease", "mode": "stop", "frequency": 0.3, "amplitude": 0.0, "bias": 0.0},
+		"payload": map[string]any{"controlSource": "lease", "mode": "stop", "frequency": 0.3, "amplitude": 0.0, "bias": 0.0, "transitionMs": 100},
 	}})
 	select {
 	case e.outboundWake <- struct{}{}:
@@ -119,7 +119,7 @@ func (h *Hub) StopExpiredVisionMotion(now time.Time) []string {
 			order: e.nextOrder,
 			value: map[string]any{
 				"type": "command", "command": "motion.set", "ackRequired": true,
-				"payload": map[string]any{"mode": "stop", "frequency": 0.3, "amplitude": 0.0, "bias": 0.0, "controlSource": "vision-timeout"},
+				"payload": map[string]any{"mode": "stop", "frequency": 0.3, "amplitude": 0.0, "bias": 0.0, "transitionMs": 100, "controlSource": "vision-timeout"},
 			},
 		})
 		select {

@@ -99,12 +99,19 @@ func (l *leaseStore) admit(deviceID string, user authUser, clientID string, requ
 	if required && (!exists || lease.OwnerID != user.ID || lease.ClientID != clientID) {
 		return false
 	}
+	// Expiry is a hard motion boundary. The old browser may still send a
+	// queued frame after the watchdog has stopped the fish, but it must first
+	// acquire a new lease explicitly before motion can resume.
+	if required && (lease.MotionExpired || !now.Before(lease.ExpiresAt)) {
+		return false
+	}
 	if !queue() {
 		return false
 	}
 	if exists && lease.OwnerID == user.ID && lease.ClientID == clientID {
-		lease.MotionExpired = false
-		lease.ExpiresAt, lease.LastCommandAt = now.Add(l.ttl), now
+		if !lease.MotionExpired {
+			lease.ExpiresAt, lease.LastCommandAt = now.Add(l.ttl), now
+		}
 		l.leases[deviceID] = lease
 	}
 	return true
@@ -203,12 +210,34 @@ func (l *leaseStore) acquireExclusive(deviceID string, user authUser, mode strin
 	if mode == "" {
 		mode = "manual"
 	}
-	if current, ok := l.leases[deviceID]; ok &&
-		(current.OwnerID != user.ID || (current.ClientID != "" && current.ClientID != clientID)) && !force {
-		return current, nil, false
+	// A login may have several tabs, but only one live browser client may
+	// control that account at a time. Keep administrator takeover for other
+	// accounts, while preventing an admin's own stale/duplicate tab from
+	// repeatedly replacing the active lease and injecting STOP frames.
+	if clientID != "" {
+		for _, active := range l.leases {
+			if active.OwnerID != user.ID || active.ClientID == "" || active.ClientID == clientID ||
+				active.MotionExpired || !now.Before(active.ExpiresAt) {
+				continue
+			}
+			return active, nil, false
+		}
 	}
-	if current, ok := l.leases[deviceID]; !ok || current.OwnerID != user.ID || current.ClientID != clientID {
-		if force {
+	if current, ok := l.leases[deviceID]; ok && !force {
+		// A stopped/expired lease is only a reservation. Let the same account
+		// recover it from a new browser session, but keep active leases exclusive.
+		staleSameOwner := current.OwnerID == user.ID &&
+			(current.MotionExpired || !now.Before(current.ExpiresAt))
+		if !staleSameOwner && (current.OwnerID != user.ID || (current.ClientID != "" && current.ClientID != clientID)) {
+			return current, nil, false
+		}
+	}
+	if current, ok := l.leases[deviceID]; ok && (current.OwnerID != user.ID || current.ClientID != clientID) {
+		// cleanupLocked already queued the normal stop for an expired lease.
+		// Force a second stop only when the old browser had a protected deadman
+		// connection, because normal cleanup deliberately skips that redundant
+		// frame.
+		if force || (ok && current.OwnerID == user.ID && current.DeadmanProtected && (current.MotionExpired || !now.Before(current.ExpiresAt))) {
 			l.forceStopLocked(deviceID)
 		} else {
 			l.stopLocked(deviceID)
@@ -278,7 +307,7 @@ func (l *leaseStore) touch(deviceID string, user authUser) bool {
 	now := time.Now()
 	l.cleanupLocked(now)
 	current, ok := l.leases[deviceID]
-	if !ok || current.OwnerID != user.ID {
+	if !ok || current.OwnerID != user.ID || current.MotionExpired || !now.Before(current.ExpiresAt) {
 		return false
 	}
 	current.MotionExpired = false

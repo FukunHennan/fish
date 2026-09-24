@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-const discoveryDomain = "fish-discovery-v1"
+const discoveryDomain = "fish-discovery-v2"
 const deviceAnnouncementDomain = "fish-device-announce-v2"
 const controllerOfferDomain = "fish-controller-offer-v2"
 const Port = 30303
@@ -118,7 +118,7 @@ func (v *Verifier) NewRequest(now time.Time) Request {
 			delete(v.pending, id)
 		}
 	}
-	request := Request{Type: "discovery.request", ProtocolVersion: 1, RequestID: randomHex(8), Nonce: randomHex(16)}
+	request := Request{Type: "discovery.request", ProtocolVersion: 2, RequestID: randomHex(8), Nonce: randomHex(16)}
 	v.pending[request.RequestID] = &challenge{nonce: request.Nonce, expires: now.Add(v.ttl), seen: make(map[string]bool)}
 	return request
 }
@@ -127,7 +127,7 @@ func (v *Verifier) Accept(response Response, now time.Time) bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	item := v.pending[response.RequestID]
-	if item == nil || now.After(item.expires) || response.Type != "discovery.response" || response.ProtocolVersion != 1 || response.Nonce != item.nonce || item.seen[response.DeviceID] {
+	if item == nil || now.After(item.expires) || response.Type != "discovery.response" || response.ProtocolVersion != 2 || response.Nonce != item.nonce || item.seen[response.DeviceID] {
 		return false
 	}
 	if !identity.Verify(v.key, discoveryDomain, item.nonce, response.DeviceID, response.Proof) {

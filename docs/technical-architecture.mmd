@@ -1,0 +1,13 @@
+%%{init: {"flowchart": {"nodeSpacing": 18, "rankSpacing": 22, "padding": 4}, "themeVariables": {"fontSize": "11px"}}}%%
+flowchart TB
+    U["浏览器"] --> CF["Cloudflare"] --> G["Go 控制器"]
+
+    G --> V["视觉服务<br/>摄像头 · YOLO · 循迹"]
+    V --> G
+
+    G --> E["ESP32-C3<br/>MAC 标识"]
+    E --> S["舵机 GPIO2"]
+    E --> B["电池 GPIO4<br/>分压比 3"]
+
+    classDef n fill:#edf5fa,stroke:#66808c,color:#17313d,font-size:11px;
+    class U,CF,G,V,E,S,B n;
