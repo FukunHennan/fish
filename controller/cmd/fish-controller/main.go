@@ -11,10 +11,13 @@ import (
 	webapp "fish-controller/internal/web"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -34,6 +37,23 @@ func findProjectRoot() (string, error) {
 	return "", fmt.Errorf("无法定位项目根目录；请从 fish 或 fish/controller 目录启动")
 }
 
+func hotReloadEnabled() bool {
+	if configured, ok := os.LookupEnv("FISH_HOT_RELOAD"); ok {
+		enabled, err := strconv.ParseBool(strings.TrimSpace(configured))
+		return err == nil && enabled
+	}
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("FISH_DEVELOPMENT_MODE")), "true")
+}
+
+func isLoopbackRequest(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return false
+	}
+	address := net.ParseIP(host)
+	return address != nil && address.IsLoopback()
+}
+
 func main() {
 	projectRoot, err := findProjectRoot()
 	if err != nil {
@@ -43,6 +63,10 @@ func main() {
 	// competitors as logged in; deployments can opt out explicitly later.
 	if _, configured := os.LookupEnv("FISH_DEVELOPMENT_MODE"); !configured {
 		_ = os.Setenv("FISH_DEVELOPMENT_MODE", "true")
+	}
+	hotReload := hotReloadEnabled()
+	if hotReload && strings.TrimSpace(os.Getenv("FISH_FRONTEND_DIR")) == "" {
+		_ = os.Setenv("FISH_FRONTEND_DIR", filepath.Join(projectRoot, "controller", "frontend"))
 	}
 
 	diagnosticRoot := os.Getenv("FISH_DIAGNOSTIC_DIR")
@@ -87,6 +111,7 @@ func main() {
 		_ = os.Setenv("FISH_VISION_INTERNAL_TOKEN", fmt.Sprintf("%x", token))
 	}
 
+	controlHub := hub.New()
 	visionStart := time.Now()
 	visionManager, err := visionprocess.Ensure(
 		"http://127.0.0.1:8091",
@@ -112,6 +137,21 @@ func main() {
 		log.Printf("reusing running Python vision backend")
 		diag.Logger.Info("vision_backend_ready", "mode", "reused", "duration_ms", time.Since(visionStart).Milliseconds())
 	}
+	if hotReload {
+		err := visionManager.EnableSourceReload(visionDir, func() {
+			for _, device := range controlHub.List() {
+				controlHub.StopAndReset(device.ID)
+			}
+			controlHub.Notify()
+		})
+		if err != nil {
+			log.Printf("vision hot reload unavailable: %v", err)
+			diag.Logger.Warn("vision_hot_reload_unavailable", "error", err)
+		} else {
+			log.Printf("hot reload enabled for frontend and Python vision sources")
+			diag.Logger.Info("hot_reload_enabled", "frontend_dir", os.Getenv("FISH_FRONTEND_DIR"), "vision_dir", visionDir)
+		}
+	}
 
 	discoveryService := discovery.NewService(cfg.DeploymentKey, func(device discovery.Response) {
 		log.Printf("authenticated fish discovered: %s (%s)", device.DeviceID, device.IP)
@@ -125,7 +165,28 @@ func main() {
 	diag.Logger.Info("discovery_started")
 
 	address := ":8081"
-	handler := diag.HTTPMiddleware(webapp.NewHandlerWithDiagnostics(hub.New(), cfg.DeploymentKey, diag.Logger))
+	restartRequests := make(chan struct{}, 1)
+	applicationHandler := diag.HTTPMiddleware(webapp.NewHandlerWithDiagnostics(controlHub, cfg.DeploymentKey, diag.Logger))
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/__dev/restart-controller" {
+			applicationHandler.ServeHTTP(w, r)
+			return
+		}
+		if !hotReload || r.Method != http.MethodPost || !isLoopbackRequest(r) {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte("controller restart queued"))
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			select {
+			case restartRequests <- struct{}{}:
+			default:
+			}
+		}()
+	})
 	log.Printf("fish controller ready: http://localhost%s", address)
 	diag.Logger.Info("controller_ready", "address", address)
 	server := &http.Server{Addr: address, Handler: handler}
@@ -134,15 +195,14 @@ func main() {
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(signals)
-	select {
-	case err := <-serverErrors:
-		if err != nil && err != http.ErrServerClosed {
-			diag.Logger.Error("http_server_stopped", "error", err)
-			log.Printf("HTTP server stopped: %v", err)
+	shutdown := func(reason string) {
+		log.Printf("%s; stopping devices and shutting down", reason)
+		diag.Logger.Info("controller_shutdown_requested", "reason", reason)
+		for _, device := range controlHub.List() {
+			controlHub.StopAndReset(device.ID)
 		}
-	case sig := <-signals:
-		log.Printf("received %s; shutting down", sig)
-		diag.Logger.Info("controller_shutdown_requested", "signal", sig.String())
+		controlHub.Notify()
+		time.Sleep(250 * time.Millisecond)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := server.Shutdown(ctx); err != nil {
@@ -152,5 +212,16 @@ func main() {
 		if err := <-serverErrors; err != nil && err != http.ErrServerClosed {
 			diag.Logger.Error("http_server_stopped", "error", err)
 		}
+	}
+	select {
+	case err := <-serverErrors:
+		if err != nil && err != http.ErrServerClosed {
+			diag.Logger.Error("http_server_stopped", "error", err)
+			log.Printf("HTTP server stopped: %v", err)
+		}
+	case sig := <-signals:
+		shutdown("received " + sig.String())
+	case <-restartRequests:
+		shutdown("hot reload requested")
 	}
 }

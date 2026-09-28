@@ -33,6 +33,12 @@ CAMERA_STALL_RECOVERY_S = 2.0
 CAMERA_RECOVERY_RETRY_S = 1.0
 CAMERA_RECOVERY_MAX_INDEX = 8
 CAMERA_WATCHDOG_POLL_S = 0.25
+# DirectShow can remain nominally alive after a USB replug while delivering
+# only one stale frame per second. Treat several such intervals as a broken
+# capture even though frames have not stopped completely.
+CAMERA_LOW_FPS_INTERVAL_S = 0.5
+CAMERA_LOW_FPS_FRAME_COUNT = 3
+CAMERA_PROCESS_RESTART_GRACE_S = 8.0
 
 
 def _linux_v4l2_present_names(
@@ -240,6 +246,7 @@ class RestartSafeCameraStream:
         self._release_lock = threading.Lock()
         self._released = False
         self._recovering = False
+        self._process_fallback_started = None
         self.recovery_attempts = 0
         self.last_recovery_error = ""
 
@@ -266,6 +273,8 @@ class RestartSafeCameraStream:
         self.timestamp = time.time()
         self.sequence = 1
         self.last_success_monotonic = time.monotonic()
+        self._last_frame_monotonic = self.last_success_monotonic
+        self._slow_frame_count = 0
         self.consecutive_failures = 0
         # CAP_PROP_FPS is only a driver claim.  It is intentionally not used
         # as telemetry or scheduling input; measured_fps starts unknown and is
@@ -394,14 +403,16 @@ class RestartSafeCameraStream:
             return [self.src, *ordered]
         return [self.src]
 
-    def _start_recovery(self, force=False):
+    def _start_recovery(self, force=False, reason=None, process_fallback=False):
         with self.lock:
             self.ret = False
             if self._recovering:
                 return
             self._recovering = True
+            if force or process_fallback:
+                self._process_fallback_started = time.monotonic()
         print(
-            f"[Camera] No frame for {CAMERA_STALL_RECOVERY_S:.0f}s; "
+            f"[Camera] {reason or f'No frame for {CAMERA_STALL_RECOVERY_S:.0f}s'}; "
             f"rebuilding capture for index {self.src}"
         )
         self.recovery_attempts = 0
@@ -496,8 +507,11 @@ class RestartSafeCameraStream:
             self.sequence += 1
             self.last_success_monotonic = now_monotonic
             self.consecutive_failures = 0
+            self._process_fallback_started = None
         self.measured_fps = 0.0
         self._last_ts = now
+        self._last_frame_monotonic = now_monotonic
+        self._slow_frame_count = 0
         self._recovering = False
         print(
             f"[Camera] Recovered with {backend_name} at index {source}: "
@@ -600,6 +614,12 @@ class RestartSafeCameraStream:
                 self.rotation_ms = 0.8 * self.rotation_ms + 0.2 * transform_ms
                 now = time.time()
                 now_monotonic = time.monotonic()
+                frame_interval = now_monotonic - self._last_frame_monotonic
+                self._last_frame_monotonic = now_monotonic
+                if frame_interval >= CAMERA_LOW_FPS_INTERVAL_S:
+                    self._slow_frame_count += 1
+                else:
+                    self._slow_frame_count = 0
                 dt = now - self._last_ts
                 if dt > 0:
                     inst_fps = 1.0 / dt
@@ -616,6 +636,14 @@ class RestartSafeCameraStream:
                     self.sequence += 1
                     self.last_success_monotonic = now_monotonic
                     self.consecutive_failures = 0
+                if self._slow_frame_count >= CAMERA_LOW_FPS_FRAME_COUNT:
+                    self._start_recovery(
+                        reason=(
+                            f"{self._slow_frame_count} consecutive frames took "
+                            f"at least {CAMERA_LOW_FPS_INTERVAL_S:.2f}s"
+                        ),
+                        process_fallback=True,
+                    )
             else:
                 with self.lock:
                     self.ret = False
@@ -655,6 +683,11 @@ class RestartSafeCameraStream:
                 if last_success is None
                 else max(0.0, time.monotonic() - last_success)
             )
+            process_restart_required = bool(
+                self._process_fallback_started is not None
+                and time.monotonic() - self._process_fallback_started
+                >= CAMERA_PROCESS_RESTART_GRACE_S
+            )
             return {
                 "ok": bool(self.ret and frame is not None),
                 "frame": frame,
@@ -663,6 +696,8 @@ class RestartSafeCameraStream:
                 "age_s": age_s,
                 "consecutive_failures": self.consecutive_failures,
                 "backend": self.backend_name,
+                "recovering": self._recovering,
+                "process_restart_required": process_restart_required,
             }
 
     def _release_capture(self):

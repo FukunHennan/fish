@@ -94,6 +94,24 @@ def main():
         )
 
     service = VisionService(runner_factory=runner_factory)
+
+    def health_status():
+        session = service.current_session()
+        if session["state"] not in ("previewing", "processing", "tracking"):
+            return {"ok": True}
+        application = root_application[0]
+        camera = getattr(application, "cam", None) if application is not None else None
+        if camera is None:
+            return {"ok": True}
+        snapshot = camera.snapshot(copy_frame=False)
+        if snapshot.get("process_restart_required"):
+            return {
+                "ok": False,
+                "reason": "camera_capture_unresponsive",
+                "cameraAgeSeconds": snapshot["age_s"],
+            }
+        return {"ok": True}
+
     camera_catalog = CameraCatalog(enumerate_cameras)
     cameras = camera_catalog.list()
     if cameras:
@@ -122,6 +140,7 @@ def main():
         service,
         camera_catalog=camera_catalog,
         webrtc_server=webrtc,
+        health_provider=health_status,
     )
     from workspaces import WorkspaceDispatcher
     dispatcher = WorkspaceDispatcher(

@@ -1,8 +1,10 @@
 package visionprocess
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -23,16 +25,21 @@ type Process interface {
 type StartFunc func(visionDir string) (Process, error)
 
 type Manager struct {
-	baseURL          string
-	process          Process
-	client           *http.Client
-	start            StartFunc
-	startupTimeout   time.Duration
-	failureThreshold int
-	mu               sync.Mutex
-	stop             chan struct{}
-	done             chan struct{}
-	closing          bool
+	baseURL           string
+	process           Process
+	client            *http.Client
+	start             StartFunc
+	startupTimeout    time.Duration
+	failureThreshold  int
+	mu                sync.Mutex
+	stop              chan struct{}
+	done              chan struct{}
+	closing           bool
+	reloadDir         string
+	reloadFingerprint string
+	reloadCandidate   string
+	reloadCandidateAt time.Time
+	beforeReload      func()
 }
 
 type PythonCommand struct {
@@ -94,6 +101,151 @@ func (m *Manager) healthy() bool {
 
 func (m *Manager) OwnsProcess() bool { m.mu.Lock(); defer m.mu.Unlock(); return m.process != nil }
 
+// EnableSourceReload watches Python sources and restarts only a process owned
+// by this manager. The callback runs before termination so callers can queue a
+// safety stop for connected devices.
+func (m *Manager) EnableSourceReload(root string, beforeReload func()) error {
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return err
+	}
+	fingerprint, err := pythonSourceFingerprint(root)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.process == nil {
+		return fmt.Errorf("视觉后台不是由控制器启动，无法安全热重载")
+	}
+	m.reloadDir = root
+	m.reloadFingerprint = fingerprint
+	m.reloadCandidate = ""
+	m.reloadCandidateAt = time.Time{}
+	m.beforeReload = beforeReload
+	return nil
+}
+
+func pythonSourceFingerprint(root string) (string, error) {
+	hash := sha256.New()
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			switch entry.Name() {
+			case ".venv", "__pycache__", ".git":
+				if path != root {
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+		if !strings.EqualFold(filepath.Ext(entry.Name()), ".py") {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintf(hash, "%s\x00%d\x00%d\n", filepath.ToSlash(relative), info.Size(), info.ModTime().UnixNano())
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", hash.Sum(nil)), nil
+}
+
+func (m *Manager) sourceReloadReady(now time.Time) (bool, func(), error) {
+	m.mu.Lock()
+	root := m.reloadDir
+	baseline := m.reloadFingerprint
+	candidate := m.reloadCandidate
+	candidateAt := m.reloadCandidateAt
+	m.mu.Unlock()
+	if root == "" {
+		return false, nil, nil
+	}
+	current, err := pythonSourceFingerprint(root)
+	if err != nil {
+		return false, nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if current == baseline {
+		m.reloadCandidate = ""
+		m.reloadCandidateAt = time.Time{}
+		return false, nil, nil
+	}
+	if current != candidate {
+		m.reloadCandidate = current
+		m.reloadCandidateAt = now
+		return false, nil, nil
+	}
+	if now.Sub(candidateAt) < 750*time.Millisecond {
+		return false, nil, nil
+	}
+	m.reloadFingerprint = current
+	m.reloadCandidate = ""
+	m.reloadCandidateAt = time.Time{}
+	return true, m.beforeReload, nil
+}
+
+func (m *Manager) restartProcess() (bool, error) {
+	m.mu.Lock()
+	if m.closing {
+		m.mu.Unlock()
+		return false, nil
+	}
+	old := m.process
+	m.process = nil
+	m.mu.Unlock()
+	if old != nil {
+		response, _ := m.client.Post(m.baseURL+"/stop", "application/json", nil)
+		if response != nil {
+			response.Body.Close()
+		}
+		_ = old.Kill()
+		_ = old.Wait()
+	}
+	m.mu.Lock()
+	if m.closing {
+		m.mu.Unlock()
+		return false, nil
+	}
+	m.mu.Unlock()
+	process, err := m.start("")
+	if err != nil {
+		return false, err
+	}
+	m.mu.Lock()
+	if m.closing {
+		m.mu.Unlock()
+		_ = process.Kill()
+		_ = process.Wait()
+		return false, nil
+	}
+	m.process = process
+	m.mu.Unlock()
+	deadline := time.Now().Add(m.startupTimeout)
+	for time.Now().Before(deadline) {
+		if m.healthy() {
+			return true, nil
+		}
+		select {
+		case <-m.stop:
+			return false, nil
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	return false, nil
+}
+
 func (m *Manager) guard() {
 	defer close(m.done)
 	ticker := time.NewTicker(time.Second)
@@ -108,6 +260,28 @@ func (m *Manager) guard() {
 		}
 		if m.healthy() {
 			failures = 0
+			reload, beforeReload, err := m.sourceReloadReady(time.Now())
+			if err != nil {
+				log.Printf("vision hot reload: source scan failed: %v", err)
+				continue
+			}
+			if !reload {
+				continue
+			}
+			log.Printf("vision hot reload: Python source changed; stopping devices and restarting backend")
+			if beforeReload != nil {
+				beforeReload()
+			}
+			ready, err := m.restartProcess()
+			if err != nil {
+				log.Printf("vision hot reload: restart failed: %v", err)
+				continue
+			}
+			if ready {
+				log.Printf("vision hot reload: backend restored")
+			} else {
+				log.Printf("vision hot reload: restarted process did not become healthy")
+			}
 			continue
 		}
 		failures++
@@ -138,41 +312,13 @@ func (m *Manager) guard() {
 			return
 		case <-time.After(delay):
 		}
-		m.mu.Lock()
-		if m.closing {
-			m.mu.Unlock()
-			return
-		}
-		old := m.process
-		m.process = nil
-		m.mu.Unlock()
-		if old != nil {
-			_ = old.Kill()
-			_ = old.Wait()
-		}
-		process, err := m.start("")
+		ready, err := m.restartProcess()
 		if err != nil {
 			log.Printf("vision watchdog: restart failed: %v", err)
 			restarts = append(restarts, time.Now())
 			continue
 		}
-		m.mu.Lock()
-		m.process = process
-		m.mu.Unlock()
 		restarts = append(restarts, time.Now())
-		deadline := time.Now().Add(m.startupTimeout)
-		ready := false
-		for time.Now().Before(deadline) {
-			if m.healthy() {
-				ready = true
-				break
-			}
-			select {
-			case <-m.stop:
-				return
-			case <-time.After(100 * time.Millisecond):
-			}
-		}
 		if ready {
 			log.Printf("vision watchdog: backend restored")
 			failures = 0

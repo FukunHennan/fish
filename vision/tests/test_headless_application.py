@@ -6,10 +6,30 @@ from unittest.mock import patch
 import cv2
 import numpy as np
 
-from main import VisionApplication
+from main import VisionApplication, target_detection_blockers
 
 
 class HeadlessVisionApplicationTests(unittest.TestCase):
+    def test_single_fish_mode_does_not_block_on_stale_track_id(self):
+        blockers = target_detection_blockers(
+            {"ready": True, "detectionCount": 1},
+            selected_track_id=331,
+            single_fish_mode=True,
+            target_detected=True,
+        )
+
+        self.assertEqual(blockers, [])
+
+    def test_yolo_mode_still_blocks_when_selected_target_is_missing(self):
+        blockers = target_detection_blockers(
+            {"ready": True, "detectionCount": 1},
+            selected_track_id=331,
+            single_fish_mode=False,
+            target_detected=False,
+        )
+
+        self.assertEqual(blockers, ["目标 #331 暂未识别"])
+
     def test_effective_frame_is_calibrated_without_corner_markers(self):
         app = VisionApplication.__new__(VisionApplication)
         app.runtime = SimpleNamespace(calibration={

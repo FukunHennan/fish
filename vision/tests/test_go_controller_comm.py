@@ -145,7 +145,7 @@ class GoControllerCommTests(unittest.TestCase):
         finally:
             comm.close()
 
-    def test_large_steering_keeps_forward_propulsion_and_limits_bias(self):
+    def test_planned_steering_uses_full_turn_bias_while_moving_forward(self):
         comm = RoboFishComm(controller_url=self.url)
         try:
             left = comm._motion_pid.update(
@@ -170,10 +170,26 @@ class GoControllerCommTests(unittest.TestCase):
             )
             self.assertEqual(left["mode"], "forward")
             self.assertEqual(right["mode"], "forward")
-            self.assertLess(left["bias"], 0.0)
-            self.assertGreater(right["bias"], 0.0)
-            self.assertLessEqual(abs(left["bias"]), 18.0)
-            self.assertLessEqual(abs(right["bias"]), 18.0)
+            self.assertEqual(left["bias"], -22.5)
+            self.assertEqual(right["bias"], 22.5)
+        finally:
+            comm.close()
+
+    def test_full_planned_turn_is_not_reduced_to_old_guard(self):
+        comm = RoboFishComm(controller_url=self.url)
+        try:
+            motion = comm._motion_pid.update(
+                cross_track_error=0.0,
+                heading_error_deg=0.0,
+                distance_to_target=0.8,
+                curvature=0.0,
+                brake=False,
+                now=1.0,
+                speed_mps=0.1,
+                steering_demand=1.0,
+            )
+            self.assertEqual(motion["mode"], "forward")
+            self.assertEqual(motion["bias"], -45.0)
         finally:
             comm.close()
 

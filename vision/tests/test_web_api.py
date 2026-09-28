@@ -71,6 +71,25 @@ class VisionWebApiTests(unittest.TestCase):
             "invalid_tracking_mode",
         )
 
+    def test_health_provider_can_request_process_restart(self):
+        client = create_app(
+            self.service,
+            camera_provider=lambda: [],
+            health_provider=lambda: {
+                "ok": False,
+                "reason": "camera_capture_unresponsive",
+            },
+        ).test_client()
+
+        response = client.get("/health")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertFalse(response.get_json()["ok"])
+        self.assertEqual(
+            response.get_json()["reason"],
+            "camera_capture_unresponsive",
+        )
+
     def test_session_envelope_contains_server_clock(self):
         response = self.client.get("/sessions/current")
         body = response.get_json()

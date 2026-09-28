@@ -13,6 +13,7 @@ set "TUNNEL_CONFIG=%RUNTIME%\cloudflared-live.yml"
 set "TUNNEL_PID_FILE=%RUNTIME%\cloudflared.pid"
 set "STARTUP_TASK=%~dp0install-startup-task.ps1"
 set "TAKEOVER_SCRIPT=%~dp0takeover-running-instance.ps1"
+set "WATCH_CONTROLLER=%~dp0watch-controller.ps1"
 
 if not exist "%CONTROLLER%\go.mod" (
   echo [ERROR] controller\go.mod not found.
@@ -24,6 +25,11 @@ if not exist "%RUNTIME%" mkdir "%RUNTIME%"
 
 if not exist "%TAKEOVER_SCRIPT%" (
   echo [ERROR] Startup takeover helper is missing: %TAKEOVER_SCRIPT%
+  pause
+  exit /b 1
+)
+if not exist "%WATCH_CONTROLLER%" (
+  echo [ERROR] Hot reload helper is missing: %WATCH_CONTROLLER%
   pause
   exit /b 1
 )
@@ -115,16 +121,10 @@ if not defined TUNNEL_PID (
   goto :fail
 )
 pushd "%CONTROLLER%"
-echo [INFO] Fish Controller supervisor is active.
-:controller_loop
-"%EXE%"
+if not defined FISH_HOT_RELOAD set "FISH_HOT_RELOAD=true"
+echo [INFO] Fish Controller hot reload supervisor is active.
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%WATCH_CONTROLLER%" -ControllerDir "%CONTROLLER%" -Executable "%EXE%"
 set "EXIT_CODE=!errorlevel!"
-if "!EXIT_CODE!"=="0" goto controller_stopped
-echo [WARN] Fish Controller exited unexpectedly with code !EXIT_CODE!.
-echo [INFO] Restarting Fish Controller in 5 seconds. Close this window to stop supervision.
-timeout /t 5 /nobreak >nul
-goto controller_loop
-:controller_stopped
 popd
 if defined TUNNEL_PID powershell.exe -NoProfile -Command "Stop-Process -Id %TUNNEL_PID% -Force -ErrorAction SilentlyContinue"
 if exist "%TUNNEL_PID_FILE%" del /Q "%TUNNEL_PID_FILE%"

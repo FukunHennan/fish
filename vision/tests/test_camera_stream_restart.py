@@ -10,6 +10,8 @@ from config import TARGET_HEIGHT, TARGET_WIDTH
 
 
 class FakeFrame:
+    shape = (TARGET_HEIGHT, TARGET_WIDTH, 3)
+
     def copy(self):
         return self
 
@@ -22,12 +24,14 @@ class FakeCapture:
         first_frame=True,
         set_error_key=None,
         fail_after_reads=None,
+        read_delay=0.005,
     ):
         self.block_after_first = block_after_first
         self._opened = opened
         self.first_frame = first_frame
         self.set_error_key = set_error_key
         self.fail_after_reads = fail_after_reads
+        self.read_delay = read_delay
         self.read_count = 0
         self.released = False
         self.release_event = threading.Event()
@@ -56,7 +60,7 @@ class FakeCapture:
         if self.block_after_first:
             self.release_event.wait(timeout=1)
             return False, None
-        time.sleep(0.005)
+        time.sleep(self.read_delay)
         return True, FakeFrame()
 
     def release(self):
@@ -258,6 +262,62 @@ class RestartSafeCameraStreamTests(unittest.TestCase):
         self.assertTrue(healthy.released)
         self.assertFalse(stream.thread.is_alive())
         self.assertFalse(stream._watchdog_thread.is_alive())
+
+    def test_rebuilds_capture_when_driver_only_delivers_slow_frames(self):
+        slow = FakeCapture(read_delay=0.04)
+        healthy = FakeCapture()
+        opened = []
+
+        def fake_open(source):
+            opened.append(source)
+            if len(opened) == 1:
+                return slow, "DSHOW", FakeFrame()
+            return healthy, "DSHOW", FakeFrame()
+
+        with patch(
+            "camera_stream._open_working_capture",
+            side_effect=fake_open,
+        ), patch(
+            "camera_stream._read_fixed_resolution_frame",
+            return_value=FakeFrame(),
+        ), patch(
+            "camera_stream.CAMERA_LOW_FPS_INTERVAL_S",
+            0.02,
+        ), patch(
+            "camera_stream.CAMERA_LOW_FPS_FRAME_COUNT",
+            3,
+        ):
+            stream = RestartSafeCameraStream(1).start()
+            self.assertTrue(
+                wait_until(
+                    lambda: stream.cap is healthy and not stream._recovering
+                ),
+                "capture should be rebuilt after sustained slow frame delivery",
+            )
+            stream.release()
+
+        self.assertTrue(slow.released)
+        self.assertTrue(healthy.released)
+        self.assertFalse(stream.thread.is_alive())
+
+    def test_forced_recovery_requests_process_restart_after_grace_period(self):
+        capture = FakeCapture()
+        with patch(
+            "camera_stream._open_working_capture",
+            return_value=(capture, "DSHOW", FakeFrame()),
+        ), patch(
+            "camera_stream.CAMERA_PROCESS_RESTART_GRACE_S",
+            0.01,
+        ):
+            stream = RestartSafeCameraStream(1)
+            stream._start_recovery(force=True)
+            time.sleep(0.02)
+            self.assertTrue(
+                stream.snapshot(copy_frame=False, apply_crop=False)[
+                    "process_restart_required"
+                ]
+            )
+            stream.release()
 
     def test_recovery_finds_same_camera_at_new_v4l2_index(self):
         original = FakeCapture()

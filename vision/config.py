@@ -48,6 +48,17 @@ CAMERA_LATENCY_MAX_PREDICTION_M = 0.12
 CAMERA_STALE_TIMEOUT_S = 0.35
 ENABLE_CLAHE_DEFAULT = False
 
+# Keep propulsion alive through short detector gaps.  The fish is generally
+# easier to identify while swimming, so a transient miss should not
+# immediately remove the motion that helps the detector reacquire it.
+TARGET_LOSS_GRACE_S = float(os.environ.get("FISH_TARGET_LOSS_GRACE_S", "3.0"))
+TARGET_LOSS_PREDICTION_S = float(
+    os.environ.get("FISH_TARGET_LOSS_PREDICTION_S", "1.0")
+)
+TARGET_LOSS_MAX_PREDICTION_M = float(
+    os.environ.get("FISH_TARGET_LOSS_MAX_PREDICTION_M", "0.20")
+)
+
 # Pool dimensions used to map the cropped/rotated effective frame to metres.
 PHYSICAL_WIDTH = 3.14
 PHYSICAL_HEIGHT = 1.6

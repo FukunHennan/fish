@@ -20,7 +20,13 @@ from session import InvalidTransition, SessionMismatch
 from webrtc import WebRTCServer, WebRTCUnavailable
 
 
-def create_app(service, camera_provider=None, camera_catalog=None, webrtc_server=None):
+def create_app(
+    service,
+    camera_provider=None,
+    camera_catalog=None,
+    webrtc_server=None,
+    health_provider=None,
+):
     app = Flask(__name__)
     lifecycle_lock = Lock()
 
@@ -76,7 +82,18 @@ def create_app(service, camera_provider=None, camera_catalog=None, webrtc_server
 
     @app.get("/health")
     def health():
-        return jsonify({"ok": True})
+        if health_provider is None:
+            return jsonify({"ok": True})
+        try:
+            status = health_provider()
+        except Exception as error:
+            return jsonify({"ok": False, "reason": str(error)}), 503
+        if isinstance(status, dict):
+            body = dict(status)
+            body["ok"] = bool(body.get("ok", False))
+        else:
+            body = {"ok": bool(status)}
+        return jsonify(body), 200 if body["ok"] else 503
 
     @app.get("/yolo/models")
     def yolo_models():

@@ -2256,6 +2256,11 @@ input:focus,select:focus{
 .trackingActions{display:grid;grid-template-columns:1fr 1fr;gap:5px}
 .trackingActions .btn{min-width:0;padding-inline:4px}
 .trackingCalibrate{grid-column:1/-1}
+.trackingStartControl{position:relative;display:block;min-width:0}
+.trackingStartControl>.btn{width:100%}
+.trackingStartControl.blocked{cursor:help}
+.trackingStartTooltip{position:absolute;right:0;bottom:calc(100% + 7px);z-index:30;width:min(260px,calc(100vw - 34px));padding:9px 10px;border:1px solid rgba(255,210,122,.5);border-radius:7px;color:#ffe0a1;background:#071722;box-shadow:0 10px 26px rgba(0,0,0,.42);font-size:8px;font-weight:750;line-height:1.55;text-align:left;white-space:pre-line;pointer-events:none;opacity:0;visibility:hidden;transform:translateY(4px);transition:opacity .12s ease,transform .12s ease,visibility .12s ease}
+.trackingStartControl.blocked:hover .trackingStartTooltip,.trackingStartControl.blocked:focus-visible .trackingStartTooltip{opacity:1;visibility:visible;transform:translateY(0)}
 .trackingStatus{margin:0;color:#7fa9bd;font-size:8px;line-height:1.45}
 .trackingStatus.good{color:#82f5cc}.trackingStatus.warn{color:#ffd27a}.trackingStatus.error{color:#ff9f9f}
 .side{

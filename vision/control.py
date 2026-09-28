@@ -28,10 +28,10 @@ class MotionPidController:
     target_speed_mps: float = 0.18
     slow_distance: float = 0.50
     stop_distance: float = 0.10
-    # Path following must keep propulsion enabled while steering.  The
-    # controller's left/right modes are calibrated pivot-turn presets; using
-    # them for a transient path error makes the fish rotate in place.
-    max_tracking_bias_deg: float = 18.0
+    # The path planner already combines curvature, heading and cross-track
+    # feedback into a normalized steering demand.  Map a full request to the
+    # same 45-degree centre shift used by the default left/right presets.
+    full_tracking_bias_deg: float = 45.0
 
     def __post_init__(self):
         self.reset()
@@ -42,7 +42,7 @@ class MotionPidController:
         self.last_update = None
 
     def update(self, *, cross_track_error, heading_error_deg, distance_to_target,
-               curvature, brake, now, speed_mps=0.0, steering_demand=0.0):
+               curvature, brake, now, speed_mps=0.0, steering_demand=None):
         if self.last_update is None:
             dt = 0.1
         else:
@@ -59,6 +59,11 @@ class MotionPidController:
             + self.cross_kd * derivative
             + self.heading_kp * heading_error_deg
             + self.curve_feed_forward * curvature
+        )
+        planned_steering = (
+            None
+            if steering_demand is None
+            else float(max(-1.0, min(1.0, steering_demand)))
         )
         stopped = brake and distance_to_target <= self.stop_distance
         if stopped:
@@ -82,7 +87,11 @@ class MotionPidController:
                 0.0,
                 min(
                     1.0,
-                    abs(steering) / 45.0
+                    (
+                        abs(planned_steering)
+                        if planned_steering is not None
+                        else abs(steering) / 45.0
+                    )
                     + abs(float(curvature)) * 0.20,
                 ),
             )
@@ -101,12 +110,13 @@ class MotionPidController:
         ) * distance_scale
         # Keep the fish swimming forward for every tracking update.  A path
         # correction is a continuous shift of the tail's swing centre, not a
-        # switch to the calibrated left/right pivot presets.  Limit the shift
-        # so a bad frame or a sharp corner cannot command an in-place turn.
+        # switch to the calibrated left/right pivot presets.  Do not cap this
+        # at the old 18-degree guard: it made tight routes look almost straight.
         mode = "forward"
-        tracking_bias = max(
-            -float(self.max_tracking_bias_deg),
-            min(float(self.max_tracking_bias_deg), -steering),
+        tracking_bias = (
+            -planned_steering * float(self.full_tracking_bias_deg)
+            if planned_steering is not None
+            else -steering
         )
         return {
             "mode": mode,
@@ -449,7 +459,7 @@ class RoboFishComm:
         cross_track_m=0.0,
         heading_error_deg=0.0,
         path_curvature_per_m=0.0,
-        steering_demand=0.0,
+        steering_demand=None,
     ):
         """Calculate motion on the server and send final servo parameters."""
         self.vision_seq = (self.vision_seq + 1) & 0x7FFFFFFF
@@ -461,7 +471,9 @@ class RoboFishComm:
             brake=bool(brake_request),
             now=time.monotonic(),
             speed_mps=float(speed_mps),
-            steering_demand=float(steering_demand),
+            steering_demand=(
+                None if steering_demand is None else float(steering_demand)
+            ),
         )
         queued = self._send_async({
             "kind": "motion",
@@ -504,17 +516,24 @@ class VisionControlSession:
         self,
         path_guidance,
         command_interval_s: float = 0.10,
-        target_loss_grace_s: float = 1.5,
+        target_loss_grace_s: float = 3.0,
+        target_loss_prediction_s: float = 1.0,
+        target_loss_max_prediction_m: float = 0.20,
     ):
         self.path_guidance = path_guidance
         self.command_interval_s = float(command_interval_s)
         self.target_loss_grace_s = max(0.0, float(target_loss_grace_s))
+        self.target_loss_prediction_s = max(0.0, float(target_loss_prediction_s))
+        self.target_loss_max_prediction_m = max(
+            0.0, float(target_loss_max_prediction_m)
+        )
         self.active = False
         self.status = "READY"
         self.segment = 0
         self._last_control_t = float("-inf")
         self._last_position = None
         self._last_frame_time = None
+        self._last_speed_mps = 0.0
         self._target_lost_since = None
 
     def prepare(self, path_world, position, frame_time, heading):
@@ -523,6 +542,7 @@ class VisionControlSession:
         self.segment = 0
         self._last_position = None
         self._last_frame_time = None
+        self._last_speed_mps = 0.0
         self._target_lost_since = None
         return self.path_guidance.start(
             path_world, position, frame_time, heading
@@ -574,6 +594,7 @@ class VisionControlSession:
             )
 
         predicted_loss = position is None
+        control_speed_mps = float(speed_mps)
         if predicted_loss:
             if self._last_position is None:
                 self.stop("TARGET LOST")
@@ -594,19 +615,21 @@ class VisionControlSession:
                 )
             position = self._predict_lost_position(lost_for)
             frame_time = self._predict_lost_frame_time(lost_for)
+            control_speed_mps = self._last_speed_mps
             allow_course_update = False
             if self.status != "HYBRID TARGET HOLD":
                 self.status = "HYBRID TARGET HOLD"
         else:
             self._last_position = np.asarray(position, dtype=float).reshape(2).copy()
             self._last_frame_time = float(frame_time)
+            self._last_speed_mps = max(0.0, float(speed_mps))
             self._target_lost_since = None
 
         guidance = self.path_guidance.update(
             position,
             frame_time,
             allow_course_update=allow_course_update,
-            speed_mps=0.0 if predicted_loss else float(speed_mps),
+            speed_mps=control_speed_mps,
         )
         self.segment = int(guidance["seg_index"])
         if guidance["settled"]:
@@ -624,7 +647,7 @@ class VisionControlSession:
                 "cross_m": guidance["x_error_m"],
                 "along_m": guidance["along_m"],
                 "dist_m": guidance["drive_distance_m"],
-                "speed_mps": float(speed_mps),
+                "speed_mps": control_speed_mps,
                 "curve_severity": guidance["curve_severity"],
                 "brake_request": guidance["brake_request"],
                 "cross_track_m": guidance["cross_track_m"],
@@ -658,12 +681,15 @@ class VisionControlSession:
         velocity = np.asarray(velocity, dtype=float).reshape(2)
         if not np.isfinite(velocity).all():
             return position
-        # Limit dead-reckoning to a short camera gap; the grace timeout still
-        # guarantees that a genuinely lost fish is stopped by the session.
-        prediction = velocity * min(max(0.0, float(lost_for)), 0.35)
+        # Continue along the last measured motion long enough to help the
+        # detector reacquire a swimming fish.  Distance and time remain bounded
+        # independently from the final loss timeout.
+        prediction = velocity * min(
+            max(0.0, float(lost_for)), self.target_loss_prediction_s
+        )
         length = float(np.linalg.norm(prediction))
-        if length > 0.08:
-            prediction *= 0.08 / length
+        if length > self.target_loss_max_prediction_m:
+            prediction *= self.target_loss_max_prediction_m / length
         return position + prediction
 
     def _predict_lost_frame_time(self, lost_for):

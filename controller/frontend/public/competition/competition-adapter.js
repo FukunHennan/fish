@@ -2136,6 +2136,40 @@
     return (video.metrics && video.metrics.workflow) || {};
   }
 
+  function trackingStartBlockers(workflow) {
+    var blockers = [];
+    if (!video.sessionId) blockers.push("请先启动真实视频");
+    else if (!video.processing) blockers.push("请先开启 YOLO 识别");
+    if (!video.trackingPath.length) blockers.push("请先绘制有效循迹线");
+    if (!video.trackingDeviceId) blockers.push("请先选择目标设备");
+    if (video.trackingMode === "yolo" && video.trackingTrackId == null) blockers.push("请先选择 YOLO 识别目标");
+    if (Array.isArray(workflow.blockers)) blockers = blockers.concat(workflow.blockers);
+    if (trackingIsActive()) blockers.push("循迹已经在运行");
+    if (workflow.canStart !== true && !blockers.length) blockers.push("当前条件尚未满足");
+    return blockers.filter(function (reason, index, items) {
+      return typeof reason === "string" && reason && items.indexOf(reason) === index;
+    });
+  }
+
+  function ensureTrackingStartTooltip(start) {
+    if (!start) return {};
+    var control = start.parentElement;
+    if (!control || !control.classList.contains("trackingStartControl")) {
+      control = document.createElement("span");
+      control.className = "trackingStartControl";
+      start.parentNode.insertBefore(control, start);
+      control.appendChild(start);
+    }
+    var tooltip = control.querySelector(".trackingStartTooltip");
+    if (!tooltip) {
+      tooltip = document.createElement("span");
+      tooltip.className = "trackingStartTooltip";
+      tooltip.setAttribute("role", "tooltip");
+      control.appendChild(tooltip);
+    }
+    return { control: control, tooltip: tooltip };
+  }
+
   function renderTrackingControls() {
     var panel = document.getElementById("trackingPanel");
     if (!panel) return;
@@ -2213,7 +2247,20 @@
       draw.disabled = !video.sessionId || !video.processing || trackingIsActive();
     }
     if (clear) clear.disabled = !video.sessionId || !video.processing || trackingIsActive();
-    if (start) start.disabled = !video.sessionId || !video.processing || !video.trackingPath.length || !video.trackingDeviceId || (video.trackingMode === "yolo" && video.trackingTrackId == null) || workflow.canStart !== true || trackingIsActive();
+    if (start) {
+      var startBlockers = trackingStartBlockers(workflow);
+      var startTooltipParts = ensureTrackingStartTooltip(start);
+      start.disabled = startBlockers.length > 0;
+      var startExplanation = start.disabled ? "暂时不能启动循迹：\n• " + startBlockers.join("\n• ") : "";
+      start.title = startExplanation;
+      if (startTooltipParts.control) {
+        startTooltipParts.control.classList.toggle("blocked", start.disabled);
+        startTooltipParts.control.tabIndex = start.disabled ? 0 : -1;
+        if (start.disabled) startTooltipParts.control.setAttribute("aria-label", startExplanation);
+        else startTooltipParts.control.removeAttribute("aria-label");
+      }
+      if (startTooltipParts.tooltip) startTooltipParts.tooltip.textContent = startExplanation;
+    }
     if (stop) stop.disabled = !video.sessionId || !trackingIsActive();
     if (video.trackingEntryOpen && video.sessionId && video.processing && !trackingIsActive() && Array.isArray(workflow.blockers) && workflow.blockers.length) {
       var statusNode = document.getElementById("trackingStatus");
@@ -2330,6 +2377,7 @@
     var mode = document.getElementById("trackingModeSelect");
     if (mode && !mode.dataset.bound) mode.addEventListener("change", function (event) {
       video.trackingMode = event.target.value === "yolo" ? "yolo" : "single_fish";
+      if (video.trackingMode === "single_fish") video.trackingTrackId = null;
       sendTrackingAction("tracking.mode", { mode: video.trackingMode }).catch(function (error) { setTrackingStatus("切换循迹模式失败：" + error.message, "error"); });
       renderTrackingControls();
     });
@@ -2872,7 +2920,8 @@
     video.metrics = session.metrics || {};
     video.trackingMode = session.trackingMode || video.trackingMode || "single_fish";
     video.trackingDeviceId = session.targetDeviceId || video.trackingDeviceId || "";
-    video.trackingTrackId = session.targetTrackId == null ? null : Number(session.targetTrackId);
+    video.trackingTrackId = video.trackingMode === "single_fish" || session.targetTrackId == null
+      ? null : Number(session.targetTrackId);
     var sessionPath = video.metrics.overlayGeometry && video.metrics.overlayGeometry.plannedPath;
     if (Array.isArray(sessionPath) && sessionPath.length >= 2) video.trackingPath = sessionPath.slice();
     else if (video.metrics.overlayGeometry && Array.isArray(sessionPath)) video.trackingPath = [];

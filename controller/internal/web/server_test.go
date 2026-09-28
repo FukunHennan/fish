@@ -508,7 +508,7 @@ func TestVisionDeviceCommandNormalizesOutOfRangeMotion(t *testing.T) {
 	}
 	message := connection.sent[0].(map[string]any)
 	payload := message["payload"].(map[string]any)
-	if payload["frequency"] != 5.0 || payload["amplitude"] != 45.0 || payload["bias"] != -45.0 {
+	if payload["frequency"] != 5.0 || payload["amplitude"] != 90.0 || payload["bias"] != -45.0 {
 		t.Fatalf("视觉参数没有被控制器归一化: %#v", payload)
 	}
 }
@@ -991,7 +991,7 @@ func TestMotionCommandUsesCalibratedTurnCenter(t *testing.T) {
 		t.Fatalf("命令发送失败: %d %s", w.Code, w.Body.String())
 	}
 	payload := c.sent[0].(map[string]any)["payload"].(map[string]any)
-	if payload["bias"] != -35.0 || payload["amplitude"] != 35.0 {
+	if payload["bias"] != -35.0 || payload["amplitude"] != 50.0 {
 		t.Fatalf("左转没有围绕标定中心摆动: %#v", payload)
 	}
 }

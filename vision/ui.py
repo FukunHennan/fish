@@ -613,6 +613,7 @@ class VisionHud:
         "PROP TRACKING": "轨迹跟随",
         "HYBRID TRACKING": "混合轨迹跟随",
         "HYBRID BRAKING": "混合柔性制动",
+        "HYBRID TARGET HOLD": "目标暂失，继续运动",
         "TARGET LOST": "目标丢失",
         "ARRIVED": "已到终点",
         "UNCALIBRATED": "场地未标定",

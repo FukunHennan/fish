@@ -23,6 +23,9 @@ from config import (
     TABLET_TCP_PORT,
     TARGET_FPS,
     TARGET_HEIGHT,
+    TARGET_LOSS_GRACE_S,
+    TARGET_LOSS_MAX_PREDICTION_M,
+    TARGET_LOSS_PREDICTION_S,
     TARGET_WIDTH,
     TURN_CALIBRATION_PATH,
     WORK_DIR,
@@ -67,6 +70,19 @@ from web_actions import translate_web_action
 
 PATH_START_TOLERANCE_M = 0.40
 PATH_AUTO_ANCHOR_MAX_M = 1.00
+
+
+def target_detection_blockers(yolo, *, selected_track_id, single_fish_mode, target_detected):
+    blockers = []
+    if not bool(yolo.get("ready")):
+        blockers.append("等待 YOLO 就绪")
+    if int(yolo.get("detectionCount") or 0) == 0:
+        blockers.append("未检测到机器鱼")
+    elif not single_fish_mode and selected_track_id is not None and not target_detected:
+        blockers.append(f"目标 #{selected_track_id} 暂未识别")
+    elif not single_fish_mode and selected_track_id is None and int(yolo.get("detectionCount") or 0) > 1:
+        blockers.append("检测到多条鱼，请锁定单一目标")
+    return blockers
 
 
 def estimate_motion_heading(points, min_samples=20, min_distance_px=18.0):
@@ -281,7 +297,12 @@ class VisionApplication:
             ReferenceSource.INVALID,
         )
         path_guidance = self._create_path_guidance()
-        self.control = VisionControlSession(path_guidance)
+        self.control = VisionControlSession(
+            path_guidance,
+            target_loss_grace_s=TARGET_LOSS_GRACE_S,
+            target_loss_prediction_s=TARGET_LOSS_PREDICTION_S,
+            target_loss_max_prediction_m=TARGET_LOSS_MAX_PREDICTION_M,
+        )
         self.turn_session = TurnCalibrationSession()
         toolbar = VisionToolbar()
         self.presentation = VisionPresentation(
@@ -811,15 +832,12 @@ class VisionApplication:
         else:
             heading_calibration = dict(self._heading_calibration_result)
         tracking_active = bool(self.control.active)
-        blockers = []
-        if not bool(yolo.get("ready")):
-            blockers.append("等待 YOLO 就绪")
-        if yolo["detectionCount"] == 0:
-            blockers.append("未检测到机器鱼")
-        elif selected_track_id is not None and not target_detected:
-            blockers.append(f"目标 #{selected_track_id} 暂未识别")
-        elif not single_fish_mode and selected_track_id is None and yolo["detectionCount"] > 1:
-            blockers.append("检测到多条鱼，请锁定单一目标")
+        blockers = target_detection_blockers(
+            yolo,
+            selected_track_id=selected_track_id,
+            single_fish_mode=single_fish_mode,
+            target_detected=target_detected,
+        )
         if not calibration_ready:
             blockers.append("场地尚未标定")
         if not path_ready:

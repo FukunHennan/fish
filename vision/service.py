@@ -246,6 +246,10 @@ class VisionService:
         with self._lock:
             if self._stop_runner is not None:
                 return None
+            mode = TrackingMode(tracking_mode or TrackingMode.YOLO.value)
+            tracking_mode = mode.value
+            if mode == TrackingMode.SINGLE_FISH:
+                target_track_id = None
             session = VisionSession.new(
                 camera_id,
                 camera_index,
@@ -427,7 +431,11 @@ class VisionService:
                 target_device_id.strip() if target_device_id else None
             )
             if target_track_id is not UNSET:
-                session.target_track_id = target_track_id
+                session.target_track_id = (
+                    None
+                    if session.tracking_mode == TrackingMode.SINGLE_FISH
+                    else target_track_id
+                )
             target_changed = (
                 session.target_device_id != previous_device_id
                 or session.target_track_id != previous_track_id

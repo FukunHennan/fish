@@ -7,6 +7,17 @@ const adapter = readFileSync(
   "utf8",
 );
 
+test("裁判端禁用循迹按钮会汇总原因并提供悬停提示", () => {
+  assert.match(adapter, /function trackingStartBlockers\(workflow\)/);
+  assert.match(adapter, /暂时不能启动循迹/);
+  assert.match(adapter, /trackingStartTooltip/);
+});
+
+test("裁判端单鱼模式清除并忽略旧 Track ID", () => {
+  assert.match(adapter, /video\.trackingMode === "single_fish"\) video\.trackingTrackId = null/);
+  assert.match(adapter, /video\.trackingMode === "single_fish" \|\| session\.targetTrackId == null/);
+});
+
 test("锁场后的选手租约在空闲时持续续期并能重新申请", () => {
   assert.match(adapter, /function renew\(deviceId\)[\s\S]*?method: "PATCH"/);
   assert.match(adapter, /function startPlayerLeaseMaintenance[\s\S]*?setInterval\(maintainPlayerLeases, 15000\)/);

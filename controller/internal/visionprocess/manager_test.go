@@ -109,3 +109,81 @@ func TestWatchdogRestartsBackendAfterConsecutiveHealthFailures(t *testing.T) {
 		t.Fatalf("starts=%d healthy=%v", starts.Load(), healthy.Load())
 	}
 }
+
+func TestPythonSourceFingerprintOnlyTracksPythonSources(t *testing.T) {
+	root := t.TempDir()
+	pythonPath := filepath.Join(root, "main.py")
+	textPath := filepath.Join(root, "notes.txt")
+	if err := os.WriteFile(pythonPath, []byte("one"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(textPath, []byte("one"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := pythonSourceFingerprint(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(textPath, []byte("two-two"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	unchanged, err := pythonSourceFingerprint(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unchanged != before {
+		t.Fatal("non-Python source changed the fingerprint")
+	}
+	if err := os.WriteFile(pythonPath, []byte("two-two"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	after, err := pythonSourceFingerprint(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after == before {
+		t.Fatal("Python source did not change the fingerprint")
+	}
+}
+
+func TestSourceReloadStopsDevicesBeforeRestartingOwnedBackend(t *testing.T) {
+	root := t.TempDir()
+	pythonPath := filepath.Join(root, "main.py")
+	if err := os.WriteFile(pythonPath, []byte("one"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+	first := &fakeProcess{}
+	var starts atomic.Int32
+	var stopped atomic.Bool
+	manager := &Manager{
+		baseURL: server.URL, process: first, client: &http.Client{Timeout: 500 * time.Millisecond},
+		start: func(string) (Process, error) {
+			if !stopped.Load() {
+				t.Error("backend restarted before safety callback")
+			}
+			starts.Add(1)
+			return &fakeProcess{}, nil
+		},
+		startupTimeout: time.Second, failureThreshold: 20,
+		stop: make(chan struct{}), done: make(chan struct{}),
+	}
+	if err := manager.EnableSourceReload(root, func() { stopped.Store(true) }); err != nil {
+		t.Fatal(err)
+	}
+	go manager.guard()
+	defer manager.Close()
+	if err := os.WriteFile(pythonPath, []byte("two-two"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && starts.Load() == 0 {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if starts.Load() != 1 || !stopped.Load() || !first.killed.Load() {
+		t.Fatalf("starts=%d stopped=%v firstKilled=%v", starts.Load(), stopped.Load(), first.killed.Load())
+	}
+}

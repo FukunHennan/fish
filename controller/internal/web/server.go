@@ -14,7 +14,6 @@ import (
 	"fish-controller/internal/visionproxy"
 	"fmt"
 	"io"
-	"io/fs"
 	"log"
 	"log/slog"
 	"math"
@@ -218,16 +217,12 @@ func newHandler(h *hub.Hub, key []byte, apiAddress, streamAddress, firmwarePath 
 	if err != nil {
 		panic(err)
 	}
-	staticFiles, err := fs.Sub(frontendFiles, "dist")
-	if err != nil {
-		panic(err)
-	}
 	// Serve one public application. The competition shell is the canonical UI;
 	// old root/console/index aliases redirect there instead of exposing a
 	// second operator interface.
 	// http.FileServer resolves index.html for directories and rejects paths
 	// that escape the embedded FS.
-	embedded := http.FileServer(http.FS(staticFiles))
+	staticFrontend := frontendHandler()
 	m.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// The competition shell, iframe pages, and adapter script are deployed
 		// together. Do not let a public CDN/browser keep an older bundle after a
@@ -241,7 +236,7 @@ func newHandler(h *hub.Hub, key []byte, apiAddress, streamAddress, firmwarePath 
 		case "/", "/console.html", "/index.html":
 			http.Redirect(w, r, "/competition.html", http.StatusTemporaryRedirect)
 		default:
-			embedded.ServeHTTP(w, r)
+			staticFrontend.ServeHTTP(w, r)
 		}
 	})
 	m.HandleFunc("/api/status", s.status)
@@ -1295,10 +1290,6 @@ func (s *server) applyMotionGeometry(deviceID, mode string, frequency, amplitude
 	}
 	profile := s.motionProfileForDevice(deviceID)
 	straightCenter := motionStraightCenter(profile)
-	minimum, maximum := 0.0, 180.0
-	if profile.ServoMax != 0 || profile.StraightCenter != 0 || profile.ForwardFrequency != 0 {
-		minimum, maximum, _ = profileServoRange(profile)
-	}
 	center, maxSwing, ok := centerSwingForMode(profile, mode)
 	if !ok {
 		// Legacy profiles have no forward/idle geometry or calibrated limits.
@@ -1311,8 +1302,6 @@ func (s *server) applyMotionGeometry(deviceID, mode string, frequency, amplitude
 	} else if amplitudePercent != nil {
 		percent := clampMotionValue(*amplitudePercent, 0, 100, 40)
 		amplitude = maxSwing * percent / 100.0
-	} else if amplitude > maxSwing {
-		amplitude = maxSwing
 	}
 	if !hasBias {
 		// The firmware stores the straight center as its neutral position.
@@ -1322,12 +1311,12 @@ func (s *server) applyMotionGeometry(deviceID, mode string, frequency, amplitude
 	if mode == "stop" {
 		bias = 0
 	}
-	// Explicit PID/manual bias changes the actual swing center. Limit that
-	// center first, then fit the whole oscillation within the servo envelope.
-	bias = limitMotionValue(bias, math.Max(-90, minimum-straightCenter), math.Min(90, maximum-straightCenter))
-	actualCenter := straightCenter + bias
-	availableSwing := math.Max(0, math.Min(actualCenter-minimum, maximum-actualCenter))
-	amplitude = limitMotionValue(amplitude, 0, availableSwing)
+	// Explicit steering is authoritative. Do not shrink the requested centre
+	// shift or tail swing to fit the configured servo envelope; that protection
+	// made real turns collapse toward straight motion. Keep only the protocol's
+	// numeric bounds so malformed values cannot escape onto the device link.
+	bias = limitMotionValue(bias, -90, 90)
+	amplitude = limitMotionValue(amplitude, 0, 90)
 	return frequency, amplitude, bias, true
 }
 

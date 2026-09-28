@@ -335,6 +335,36 @@ class VisionServiceLifecycleTests(unittest.TestCase):
         self.assertEqual(snapshot["trackingMode"], "single_fish")
         self.assertEqual(service.current_session()["trackingMode"], "single_fish")
 
+    def test_single_fish_session_discards_stale_track_id(self):
+        service = VisionService(
+            runner_factory=lambda _index, _publish, yolo_model_path=None, tracking_mode="yolo": lambda: None
+        )
+        snapshot = service.create_session(
+            "camera-1",
+            1,
+            target_device_id="fish-1",
+            target_track_id=331,
+            tracking_mode=TrackingMode.SINGLE_FISH.value,
+        )
+
+        self.assertIsNone(snapshot["targetTrackId"])
+        self.assertIsNone(service.next_action())
+
+    def test_single_fish_target_update_ignores_track_id(self):
+        service = VisionService(
+            runner_factory=lambda _index, _publish, yolo_model_path=None, tracking_mode="yolo": lambda: None
+        )
+        snapshot = service.create_session(
+            "camera-1", 1, tracking_mode=TrackingMode.SINGLE_FISH.value
+        )
+
+        updated = service.set_target_device(
+            snapshot["sessionId"], "fish-1", target_track_id=331
+        )
+
+        self.assertIsNone(updated["targetTrackId"])
+        self.assertIsNone(service.next_action())
+
     def test_exposure_is_accepted_during_preview(self):
         service = VisionService(runner_factory=lambda _index, _publish: lambda: None)
         snapshot = service.create_session("camera-1", 1)

@@ -5,6 +5,7 @@ import { transitionVisionTool } from "./visionTools.js";
 import { canEditVision, visionEventUrl, visionRequest as rootVisionRequest } from "./visionSession.js";
 import { CONTROL_CLIENT_ID, leaseIsMine } from "./ui/devicePresentation.js";
 import { formatFrameLatency, formatServerClock, formatVideoClock } from "./videoTime.js";
+import { trackingStartBlockers } from "./trackingAvailability.js";
 import VideoStream from "./VideoStream.jsx";
 
 const TOOLS = [
@@ -164,7 +165,7 @@ export default function VisionPanel({
     : "";
   const effectiveTargetDeviceId = targetDeviceId || status.targetDeviceId || autoTargetDeviceId;
   const trackingModeLabel = TRACKING_MODES.find(([name]) => name === activeTrackingMode)?.[1] || "单鱼循迹";
-  const selectedTrackId = targetTrackId ?? status.targetTrackId ?? null;
+  const selectedTrackId = singleFishMode ? null : (targetTrackId ?? status.targetTrackId ?? null);
   const selectedDetection = detections.find((target) => target.trackId === selectedTrackId);
   const singleFishDetected = Boolean(workflow.targetDetected) || Boolean(yolo?.targetFound) || detections.length > 0;
   const targetRequiredForMotion = (
@@ -172,6 +173,20 @@ export default function VisionPanel({
     || (!singleFishMode && Number(yolo?.detectionCount) > 1 && selectedTrackId === null)
     || (!singleFishMode && selectedTrackId !== null && !yolo?.targetFound && processing)
   );
+  const trackingBlockers = trackingStartBlockers({
+    running,
+    workflow,
+    effectiveTargetDeviceId,
+    singleFishMode,
+    detectionCount: yolo?.detectionCount,
+    selectedTrackId,
+    targetFound: yolo?.targetFound,
+    processing,
+  });
+  const trackingStartDisabled = !running || !workflow.canStart || targetRequiredForMotion || workflow.trackingActive;
+  const trackingDisabledTitle = trackingStartDisabled
+    ? `暂时不能启动循迹：\n${trackingBlockers.map((reason) => `• ${reason}`).join("\n")}`
+    : "";
 
   useEffect(() => {
     if (
@@ -636,7 +651,7 @@ export default function VisionPanel({
       const payload = { cameraId: `camera-${cameraIndex}`, cameraIndex: Number(cameraIndex) };
       payload.trackingMode = trackingMode;
       if (effectiveTargetDeviceId) payload.targetDeviceId = effectiveTargetDeviceId;
-      if (selectedTrackId !== null) payload.targetTrackId = selectedTrackId;
+      if (!singleFishMode && selectedTrackId !== null) payload.targetTrackId = selectedTrackId;
       if (selectedYoloModel) payload.yoloModel = selectedYoloModel;
       const result = await sessionRequest("/sessions", { method: "POST", body: JSON.stringify(payload) });
       setStatus(result.data);
@@ -1014,7 +1029,18 @@ export default function VisionPanel({
             <button disabled={!running} onClick={() => sendAction({ type: "recording.toggle" })}>录像</button>
             <button disabled={!running} onClick={() => sendAction({ type: "snapshot.capture" })}>截图</button>
           </div>
-          <div className="tracking-actions"><button disabled={!running || !workflow.canStart || targetRequiredForMotion} onClick={() => sendAction({ type: "tracking.start" })}>{targetRequiredForMotion ? "选择鱼后循迹" : workflow.trackingActive ? "循迹运行中" : "启动循迹"}</button><button className="stop" disabled={!running} onClick={() => sendAction({ type: "tracking.stop" })}>停止循迹</button></div>
+          <div className="tracking-actions">
+            <span
+              className={`tracking-start-control ${trackingStartDisabled ? "blocked" : ""}`}
+              title={trackingDisabledTitle || undefined}
+              tabIndex={trackingStartDisabled ? 0 : undefined}
+              aria-label={trackingDisabledTitle || undefined}
+            >
+              <button disabled={trackingStartDisabled} onClick={() => sendAction({ type: "tracking.start" })}>{targetRequiredForMotion ? "选择鱼后循迹" : workflow.trackingActive ? "循迹运行中" : "启动循迹"}</button>
+              {trackingStartDisabled && <span className="tracking-start-tooltip" role="tooltip"><strong>暂时不能启动循迹</strong>{trackingBlockers.map((reason) => <span key={reason}>• {reason}</span>)}</span>}
+            </span>
+            <button className="stop" disabled={!running} onClick={() => sendAction({ type: "tracking.stop" })}>停止循迹</button>
+          </div>
           <p className="feedback" aria-live="polite">{streamFeedback || feedback || yolo?.error || yolo?.lastInferenceError || (running ? `摄像头 ${status.cameraIndex} 正在处理 · ${yoloLabel} · ${coordinateLabel}` : "视觉服务未启动")}</p>
         </aside>}
       </div>
