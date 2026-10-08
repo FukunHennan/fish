@@ -32,10 +32,11 @@ bash scripts/start.sh
 Windows：
 
 ```bat
+scripts\setup.bat --local --cpu
 scripts\start.bat
 ```
 
-启动脚本负责构建并启动 Go 控制器。控制器在当前窗口前台运行；关闭该窗口即可结束控制器及其附属服务，不再维护单独的停止脚本。
+新 Windows 电脑先安装带 npm 的 Node.js，并确保系统有 `winget` 和网络连接。`setup.bat` 会安装 Go、Python 3.12 和电脑端依赖并构建；示例中的 `--local --cpu` 会修改 `config/tunnel.json` 和 `config/program.json`，关闭公网隧道并使用 CPU，适合先验证本机运行。有隧道凭据和可用 GPU 后，可重新配置这两个文件。完整选项见[环境与构建](docs/程序/环境与构建.md)。启动脚本负责构建并启动 Go 控制器。控制器在当前窗口前台运行；关闭该窗口即可结束控制器及其附属服务。
 
 打开唯一正式电脑端界面：
 

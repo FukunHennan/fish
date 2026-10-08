@@ -20,7 +20,7 @@
 | `firmware/` | ESP32 固件、构建与测试 |
 | `config/` | 仅有三个日常手动配置入口：`firmware.json`、`program.json`、`tunnel.json` |
 | `protocol/` | 设备通信协议 |
-| `scripts/` | 启动、监督、构建和文档检查脚本 |
+| `scripts/` | 新电脑依赖安装、启动、监督、构建和文档检查脚本 |
 | `docs/程序/` | 启停、配置、构建、运行行为 |
 | `docs/硬件/` | ESP32、相机、接线和产品资料 |
 | `docs/概述/` | 架构、目录与整理规范 |

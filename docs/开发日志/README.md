@@ -10,10 +10,11 @@
 | 2026-10-08 | 手动配置收敛为 `firmware.json`、`program.json`、`tunnel.json`；JSON、Python 读取与隧道脚本检查通过 | [提交 `8051961`](https://github.com/FukunHennan/fish/commit/80519619d4b6b7b33ef6e80f685d62e71bc7ae87) |
 | 2026-10-08 | 文档重排为程序、硬件、概述、开发日志四类，并加入按变更范围检查的脚本与 GitHub Actions；构建验证受本机工具缺失限制 | [提交 `bbfb102`](https://github.com/FukunHennan/fish/commit/bbfb1029a13c97c5244c444a3718202034291597) |
 | 2026-10-09 | 增加 Windows 公网访问配置说明；本机 `tunnel.json` 已启用并填入隧道 ID 与凭据路径。安装 Go 和视觉 Python 依赖，前端构建、Go 构建及 `go test ./...` 通过；文档链接和检查脚本测试通过。公网连通性与视觉服务就绪仍未确认 | [Pro1 提交历史](https://github.com/FukunHennan/fish/commits/main/) |
+| 2026-10-09 | 新增 `scripts/setup.bat`、`setup.ps1` 和 Node 安装脚本，供仅预装 Node.js 的 Windows 电脑安装 Go、Python 与项目依赖；本机重复运行安装流程并完成前端、Go 构建。新电脑首次安装、隧道凭据、相机和 GPU 仍需现场验证 | [Pro1 提交历史](https://github.com/FukunHennan/fish/commits/main/) |
 
 ## 当前进度
 
-- 已完成：Pro1 三个手动配置入口、相机手册、四类文档导航及代码结构说明。
+- 已完成：Pro1 三个手动配置入口、相机手册、四类文档导航、代码结构说明及 Windows 新电脑依赖安装脚本。
 - 待现场核对：相机实际协商帧率与重复帧、ESP32 固件重新编译烧录、Cloudflare Tunnel 凭据与公网连通性。
 - 本机已安装 Go 与 `vision/.venv` 的 Python 依赖，前端和 Go 可构建；仍需验证视觉服务启动及相机画面。PlatformIO Core 尚未安装，ESP32 固件构建未验证。
 
