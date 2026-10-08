@@ -1,0 +1,26 @@
+name: Docs sync
+
+on:
+  push:
+    branches: ["**"]
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Test documentation checker
+        run: python3 -m unittest discover -s scripts -p 'test_check_docs.py'
+      - name: Check documentation for changed code
+        if: github.event_name == 'push'
+        run: python3 scripts/check_docs.py --mode push --base '${{ github.event.before }}' --head '${{ github.sha }}'
+      - name: Check long-term documentation drift
+        if: github.event_name != 'push'
+        run: python3 scripts/check_docs.py --mode stale --days 45

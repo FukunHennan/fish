@@ -2,9 +2,9 @@
 
 这是一个由电脑统一管理机器鱼、视觉识别、设备通信和学生赛事的项目。
 
-项目架构、账号、启动部署、设备控制、视觉、赛事、协议、OTA、测试和维护说明已收口到一份文档：
+文档按程序、硬件、概述和开发日志分类：
 
-- [机器鱼项目统一手册](docs/机器鱼项目统一手册.md)
+- [文档导航](docs/README.md)
 
 文档记录的 Cloudflare 公网入口：[https://fish.chenfukun.space](https://fish.chenfukun.space)。仓库无法确认当前隧道和域名是否在线。
 
@@ -50,8 +50,10 @@ http://127.0.0.1:8081/competition.html
 ## 文档入口
 
 - [文档导航](docs/README.md)
-- [机器鱼项目统一手册](docs/机器鱼项目统一手册.md)
-- [全局快门 USB 相机手册](docs/相机手册.md)
+- [程序：启动、停止和配置](docs/程序/README.md)
+- [硬件：ESP32 与相机](docs/硬件/README.md)
+- [概述：架构和目录规范](docs/概述/README.md)
+- [开发日志](docs/开发日志/README.md)
 
 ## 目录说明
 
