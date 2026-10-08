@@ -1,7 +1,7 @@
 {
-  "enabled": false,
-  "tunnelId": "",
-  "credentialsFile": "",
+  "enabled": true,
+  "tunnelId": "4205ed23-736d-4355-a1c4-63585f497a1a",
+  "credentialsFile": "C:\\Users\\chenfukun\\.cloudflared\\4205ed23-736d-4355-a1c4-63585f497a1a.json",
   "hostname": "fish.chenfukun.space",
   "service": "http://127.0.0.1:8081"
 }

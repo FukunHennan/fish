@@ -19,7 +19,7 @@
 
 先修改[三个配置文件](../../config/README.md)。Windows 从项目根目录运行 `scripts\start.bat`：脚本构建前端和 Go、启动控制器与视觉服务；仅当 `config/tunnel.json` 的 `enabled` 为 `true` 时启动 Cloudflare Tunnel。Linux/macOS 运行 `bash scripts/start.sh`，该脚本不启动 Tunnel。浏览器打开 `http://127.0.0.1:8081/competition.html`。
 
-Windows 登录启动任务名为 `FishStack`，由启动脚本安装；需要 Go、npm 和 Python 环境。编译和烧录步骤见[环境与构建](环境与构建.md)，完整运行行为见[系统运行手册](系统运行手册.md)。
+Windows 登录启动任务名为 `FishStack`，由启动脚本尝试安装；注册失败时需以管理员权限单独运行安装脚本，手动启动不受影响。首次公网配置按[公网访问配置](公网访问配置.md)操作；需要 Go、npm 和 Python 环境。编译和烧录步骤见[环境与构建](环境与构建.md)，完整运行行为见[系统运行手册](系统运行手册.md)。
 
 ## 停止
 
@@ -33,14 +33,14 @@ Windows 登录启动任务名为 `FishStack`，由启动脚本安装；需要 Go
 
 | 配置文件 | 字段 | 当前值或代码约束 | 调整后 |
 | --- | --- | --- | --- |
-| `config/program.json` | `FISH_AUTH_DISABLED` | `true` 关闭内建登录；设为 `false` 启用 | 重启 Go |
+| `config/program.json` | `FISH_AUTH_DISABLED` | 当前 `true` 关闭认证并赋予匿名管理员权限；`false` 启用登录 | 重启 Go |
 | 同上 | `FISH_CAMERA_INDEX` | 当前 `1`；应是实际相机枚举编号，代码未限制上界 | 重启视觉服务并核对画面 |
 | 同上 | `FISH_CAPTURE_WIDTH` / `HEIGHT` | 当前实测使用 `640×480`；代码按整数读取，未验证任意尺寸 | 重启视觉服务，核对设备返回尺寸与帧率 |
 | 同上 | `FISH_CAPTURE_FOURCC` | 四字符格式；长度不为 4 时退回 `YUY2` | 重启视觉服务 |
 | 同上 | `FISH_YOLO_IMGSZ` / `DEVICE` | 当前 `1920` / `0`；整数设备号要求对应 GPU，`cpu` 需显式设置 | 重启视觉服务 |
 | 同上 | `FISH_TARGET_LOSS_*` | 当前宽限 `3.0s`、预测 `1.0s`、最大位移 `0.20m`；代码未统一限制范围 | 重启视觉服务，重新验证循迹 |
 | 同上 | `FISH_WEBRTC_*` | STUN 有默认值；TURN 地址、账号、凭据当前为空 | 重启视觉服务，测试远程视频 |
-| `config/tunnel.json` | `enabled` | 布尔值；当前 `false` | 启用前填写隧道 ID、凭据路径、域名与本地服务，重启 Windows 脚本 |
+| `config/tunnel.json` | `enabled` | 布尔值；当前 `true` | 修改隧道 ID、凭据路径、域名与本地服务后重启 Windows 脚本 |
 | `config/firmware.json` | `deploymentKey` | 必须是 32 字节十六进制；Go 与固件必须一致 | 重新编译烧录固件并重启 Go |
 | 同上 | `settings` | 引脚、采样、超时及游泳默认值；`SWIM_SPEED` 注释建议 1.0–4.0，`SWIM_POWER` 建议 10–40 | 重新编译烧录固件，实机核对 |
 

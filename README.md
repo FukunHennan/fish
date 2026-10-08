@@ -6,7 +6,7 @@
 
 - [文档导航](docs/README.md)
 
-文档记录的 Cloudflare 公网入口：[https://fish.chenfukun.space](https://fish.chenfukun.space)。仓库无法确认当前隧道和域名是否在线。
+当前 Windows 配置的 Cloudflare 公网入口：[https://fish.chenfukun.space](https://fish.chenfukun.space)。在线状态需在运行机器和公网实际验证；首次配置参见[公网访问配置](docs/程序/公网访问配置.md)。
 
 ## 系统结构
 
@@ -45,12 +45,13 @@ http://127.0.0.1:8081/competition.html
 
 开发时可单独运行 Vite 预览赛事端；正式前端只有这一套赛事界面，由 Go 的 `8081` 端口提供。
 
-`GET http://127.0.0.1:8081/api/logs?limit=100` 返回当前启动会话的结构化日志尾部；日志文件保存在 `controller/diagnostics/runs/`。接口要求管理员身份，但当前代码在 `FISH_AUTH_DISABLED` 未设置、为空或为 `true` 时会给请求分配匿名管理员身份。要启用内建登录校验，建议显式设为 `false`。
+`GET http://127.0.0.1:8081/api/logs?limit=100` 返回当前启动会话的结构化日志尾部；日志文件保存在 `controller/diagnostics/runs/`。接口要求管理员身份，当前配置将 `FISH_AUTH_DISABLED` 设为 `true`，免登录访问会获得匿名管理员身份（包括公网）；已设置的进程环境变量会覆盖 JSON。公网链接只能分享给可信人员，必要时先关闭隧道。
 
 ## 文档入口
 
 - [文档导航](docs/README.md)
 - [程序：启动、停止和配置](docs/程序/README.md)
+- [Cloudflare 公网访问配置](docs/程序/公网访问配置.md)
 - [硬件：ESP32 与相机](docs/硬件/README.md)
 - [概述：架构和目录规范](docs/概述/README.md)
 - [开发日志](docs/开发日志/README.md)
@@ -83,7 +84,7 @@ USB 烧录需要连接设备后执行 PlatformIO Upload。仅修改电脑端 GUI
 ## 配置提醒
 
 - 日常配置统一修改 `config/firmware.json`、`config/program.json`、`config/tunnel.json`，字段和启动行为见[配置入口](config/README.md)。固件和控制器共用 `firmware.json` 中的 `deploymentKey`。
-- 项目保留 Cloudflare Tunnel 公网入口及启动配置。当前代码默认关闭登录校验；如果隧道对外开放，请先核对认证配置和实际访问边界。
+- 项目当前启用 Cloudflare Tunnel 并关闭内建登录：知道域名的人均可操作管理员功能。风险与配置步骤见[公网访问配置](docs/程序/公网访问配置.md)。
 - Windows 开发机通过 `scripts\start.bat` 构建并启动本地控制器；脚本会注册 `FishStack` 登录启动任务，统一守护控制器和 Cloudflare Tunnel。
 - OTA 只能由管理员发起。
 - 设备断线、控制器心跳超时、视觉异常和 OTA 开始时都应停止运动。

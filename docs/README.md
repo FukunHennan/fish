@@ -9,4 +9,4 @@
 | **概述** | 系统架构、文件系统结构、代码目录职责、文件与文档整理规范 | [概述文档](概述/README.md) |
 | **开发日志** | 本地/云端更新、进度、重大错误的原因和处理，以及文档同步检查规则 | [开发日志](开发日志/README.md) |
 
-设备通信协议单独保留在[`protocol/`](../protocol/README.md)，供固件和控制器共同引用。三个手动配置入口位于[`config/`](../config/README.md)。
+公网部署操作见[Windows Cloudflare Tunnel 配置](程序/公网访问配置.md)。设备通信协议单独保留在[`protocol/`](../protocol/README.md)，供固件和控制器共同引用。三个手动配置入口位于[`config/`](../config/README.md)。
