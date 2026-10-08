@@ -1,41 +1,43 @@
 # Fish 项目环境与构建/烧录说明
 
-本文档记录当前项目的实际软硬件环境、编译链、运行端口和 ESP32-C3 串口烧录流程。
+本文档根据仓库中的配置、代码和脚本记录构建与烧录流程。摄像头能力、串口号、Cloudflare Tunnel 和外部服务状态需在运行机器上核对。
 
 ## 1. 系统组成
 
 | 组件 | 目录 | 作用 | 地址/端口 |
 | --- | --- | --- | --- |
 | Go 控制器 | `controller/` | 设备注册、控制、租约、OTA、SSE | `0.0.0.0:8081` |
-| React 前端 | `controller/frontend/` | 唯一正式操作界面 | 由 `8081` 提供 |
+| 赛事前端 | `controller/frontend/competition.html`、`controller/frontend/public/competition/` | 原生 HTML/CSS/JavaScript 正式界面；`src/` 下 React 代码为历史实验 | 由 `8081` 提供 |
 | Python 视觉 | `vision/` | 摄像头、识别、WebRTC 信令 | `127.0.0.1:8091` |
 | ESP32-C3 固件 | `firmware/` | Wi-Fi、设备 WebSocket、运动、电池、配网、OTA | 连接控制器 `8081` |
 | 局域网发现 | 固件/控制器 | UDP 发现控制器 | `30303/UDP` |
-| Cloudflare Tunnel | `controller/.runtime/` | 公网转发到 Go 控制器 | 由隧道配置决定 |
+| Cloudflare Tunnel | Windows 启动脚本使用 `controller/.runtime/` 下的程序与配置；此前 Linux 部署使用仓库外的 systemd 用户服务 | 公网转发到 Go 控制器 | 由实际隧道配置决定 |
 
 控制命令使用浏览器到控制器的 `/ws/control`，再由控制器通过 `/ws/device` 下发到 ESP32；设备状态通过 `/api/events` SSE 推送。视频走视觉服务的 WebRTC 链路。
 
 ## 2. Windows 开发工具
 
-项目根目录：`C:\Users\LENOVO\Desktop\fish`。
+项目根目录以当前检出的 `Pro1/` 目录为准；下文命令均从该目录执行。
 
 - Python：视觉服务依赖由 `vision/requirements.txt` 管理。
 - Node.js/npm：前端依赖由 `controller/frontend/package-lock.json` 管理。
 - Go：`controller/go.mod` 要求 Go `1.23`。
-- PlatformIO：统一使用 `%USERPROFILE%\\.platformio\\penv\\Scripts\\pio.exe`，当前 Core 6.2.x。
+- PlatformIO：`environment-build.ps1` 优先使用 `PATH` 中的 `pio`，找不到时使用 `%USERPROFILE%\.platformio\penv\Scripts\pio.exe`。
 - Git：只用于版本管理；构建和烧录不会自动提交或推送。
 
-检查环境：
+在同一个 PowerShell 会话中先检查环境并设置 `$pio`，后续固件命令沿用该变量：
 
 ```powershell
 python --version
 node --version
 npm --version
 go version
-& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" --version
+$pio = (Get-Command pio -ErrorAction SilentlyContinue).Source
+if (-not $pio) { $pio = Join-Path $env:USERPROFILE '.platformio\penv\Scripts\pio.exe' }
+& $pio --version
 ```
 
-不要混用 Python 3.14 下的旧 `python -m platformio` 和标准 `pio.exe`。两套 Core 会切换不同 `tool-scons` 版本并清理 `.pio/build`，导致依赖文件消失。`environment-build.ps1` 已固定使用标准 `pio.exe`。
+不要在同一构建目录混用不同的 PlatformIO 安装。`environment-build.ps1` 使用 `PATH` 中的 `pio`，找不到时才使用用户目录下的 `pio.exe`；检查版本时应使用与构建时相同的可执行文件。
 
 ## 3. 软件编译
 
@@ -46,6 +48,8 @@ go version
 ```
 
 按需跳过阶段：`-SkipPython`、`-SkipFrontend`、`-SkipFirmware`、`-SkipController`。
+
+`environment-build.ps1` 将 Go 构建产物写为 `controller/fish-controller-v2.exe`；`scripts/start.bat` 另行构建并运行 `controller/.runtime/fish-controller.exe`。使用前者不会自动替换后者。
 
 前端：
 
@@ -67,7 +71,7 @@ ESP32 固件：
 
 ```powershell
 cd firmware
-& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e seeed_xiao_esp32c3
+& $pio run -e seeed_xiao_esp32c3
 ```
 
 固件产物位于 `firmware/.pio/build/seeed_xiao_esp32c3/`：`firmware.bin`、`bootloader.bin`、`partitions.bin`、`firmware.elf`。当前固件版本为 `2.0.0`，定义在 `firmware/include/AppConfig.h`。
@@ -91,14 +95,14 @@ cd firmware
 
 ```powershell
 Get-CimInstance Win32_SerialPort | Select-Object DeviceID,Name,Description
-& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" device list
+& $pio device list
 ```
 
 编译并烧录（将 `COM19` 替换为实际端口）：
 
 ```powershell
 cd firmware
-& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e seeed_xiao_esp32c3 -t upload --upload-port COM19
+& $pio run -e seeed_xiao_esp32c3 -t upload --upload-port COM19
 ```
 
 PlatformIO 会写入 bootloader、分区表和应用镜像，并逐段校验。成功标志是 `Hash of data verified.` 和 `SUCCESS`。烧录后设备会自动复位；烧录时关闭串口监视器和其他 PlatformIO 进程。
@@ -107,7 +111,7 @@ OTA 接口只接受与当前源码一致的应用 `firmware.bin`，不能上传 
 
 ## 6. 运行检查
 
-`start.bat` 是唯一启动入口，也是控制器监督进程。再次启动时，入口会先接管并关闭上一实例的启动监督窗口、控制器、视觉服务和 Tunnel，等待 `8081` 与 `8091` 释放后只启动一个新实例；不属于本工作区的端口占用不会被强制关闭。控制器异常退出时，入口等待 5 秒并重新启动；控制器以退出码 0 正常结束时，入口停止它启动的 Cloudflare Tunnel 并退出。项目不再使用独立 watchdog 或 stop 脚本。
+Windows 的 `scripts/start.bat` 是启动入口，需要先在 `controller/.runtime/` 准备 `cloudflared.exe` 与 `cloudflared-live.yml`，并通过 `watch-controller.ps1` 监督 Go 控制器。再次启动时，入口会先接管并关闭上一实例的启动监督窗口、控制器、视觉服务和 Tunnel，等待 `8081` 与 `8091` 释放后只启动一个新实例；不属于本工作区的端口占用不会被强制关闭。监督脚本在控制器退出后等待 5 秒重新启动；关闭启动窗口时，入口停止它启动的 Cloudflare Tunnel 并退出。脚本会临时写入 `controller/.runtime/cloudflared.pid`，用于跟踪隧道进程。
 
 ```powershell
 scripts\start.bat
@@ -126,7 +130,7 @@ Get-NetTCPConnection -State Listen | Where-Object { $_.LocalPort -in 8081,8091 }
 
 ```powershell
 python -m platformio --version
-& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" --version
+& $pio --version
 ```
 
 如果来源不同，停止使用旧命令，只使用标准 `pio.exe`，再执行一次完整构建。

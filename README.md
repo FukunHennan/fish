@@ -6,7 +6,7 @@
 
 - [机器鱼项目统一手册](docs/机器鱼项目统一手册.md)
 
-公网入口：[https://fish.chenfukun.space](https://fish.chenfukun.space)
+文档记录的 Cloudflare 公网入口：[https://fish.chenfukun.space](https://fish.chenfukun.space)。仓库无法确认当前隧道和域名是否在线。
 
 ## 系统结构
 
@@ -43,13 +43,15 @@ scripts\start.bat
 http://127.0.0.1:8081/competition.html
 ```
 
-开发时可用 Vite 运行赛事端热更新，但正式前端只有这一套赛事界面，生产入口仍是 `8081`。
+开发时可单独运行 Vite 预览赛事端；正式前端只有这一套赛事界面，由 Go 的 `8081` 端口提供。
 
-管理员可通过 `GET http://127.0.0.1:8081/api/logs?limit=100` 查看当前启动会话的结构化日志尾部；日志文件保存在 `controller/diagnostics/runs/`，公网环境必须使用管理员会话访问。
+`GET http://127.0.0.1:8081/api/logs?limit=100` 返回当前启动会话的结构化日志尾部；日志文件保存在 `controller/diagnostics/runs/`。接口要求管理员身份，但当前代码在 `FISH_AUTH_DISABLED` 未设置、为空或为 `true` 时会给请求分配匿名管理员身份。要启用内建登录校验，建议显式设为 `false`。
 
 ## 文档入口
 
+- [文档导航](docs/README.md)
 - [机器鱼项目统一手册](docs/机器鱼项目统一手册.md)
+- [全局快门 USB 相机手册](docs/相机手册.md)
 
 ## 目录说明
 
@@ -58,7 +60,7 @@ firmware/    ESP32 固件
 controller/  Go 控制器和赛事前端（React 源码仅作历史实验保留）
 vision/      Python、YOLO、OpenCV 和视频服务
 protocol/    ESP32 与 Go 的当前 v2 通信协议
-config/      本机配置，不提交密钥和密码
+config/      本机部署配置与模板；deployment.json 含设备认证密钥
 scripts/     唯一启动入口、上传和诊断脚本
 docs/        技术文档和展示文件
 ```
@@ -78,8 +80,8 @@ USB 烧录需要连接设备后执行 PlatformIO Upload。仅修改电脑端 GUI
 
 ## 配置提醒
 
-- `config/deployment.json` 是本机设备部署配置，当前按项目约定纳入版本管理。
-- 当前平台面向内部研发和受控环境，暂不以公网或商用部署为目标，也不把相关安全性作为当前开发重点。
+- `config/deployment.json` 是本机设备部署配置，包含 `deploymentKey`；固件构建脚本和 Go 控制器都会读取该值。仓库快照不能证明该文件当前是否纳入版本管理，分享或提交前应核对其内容与项目约定。
+- 项目保留 Cloudflare Tunnel 公网入口及启动配置。当前代码默认关闭登录校验；如果隧道对外开放，请先核对认证配置和实际访问边界。
 - Windows 开发机通过 `scripts\start.bat` 构建并启动本地控制器；脚本会注册 `FishStack` 登录启动任务，统一守护控制器和 Cloudflare Tunnel。
 - OTA 只能由管理员发起。
 - 设备断线、控制器心跳超时、视觉异常和 OTA 开始时都应停止运动。
