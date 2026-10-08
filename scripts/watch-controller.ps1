@@ -29,7 +29,12 @@ function Get-ControllerRevision {
     $sha = [Security.Cryptography.SHA256]::Create()
     try {
         $bytes = [Text.Encoding]::UTF8.GetBytes($description)
-        return [Convert]::ToHexString($sha.ComputeHash($bytes))
+        # Windows PowerShell 5.1 runs on .NET Framework, which does not expose
+        # Convert.ToHexString(). Keep the supervisor compatible with both the
+        # built-in powershell.exe and modern pwsh.
+        return -join ($sha.ComputeHash($bytes) | ForEach-Object {
+            $_.ToString("X2")
+        })
     }
     finally {
         $sha.Dispose()
