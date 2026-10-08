@@ -1,9 +1,5 @@
 #pragma once
 
-#if __has_include("FactoryWifi.local.h")
-#include "FactoryWifi.local.h"
-#endif
-
 #ifndef FISH_FACTORY_WIFI_SSID
 #define FISH_FACTORY_WIFI_SSID ""
 #endif

@@ -60,7 +60,7 @@ firmware/    ESP32 固件
 controller/  Go 控制器和赛事前端（React 源码仅作历史实验保留）
 vision/      Python、YOLO、OpenCV 和视频服务
 protocol/    ESP32 与 Go 的当前 v2 通信协议
-config/      本机部署配置与模板；deployment.json 含设备认证密钥
+config/      三个手动配置入口：firmware.json、program.json、tunnel.json
 scripts/     唯一启动入口、上传和诊断脚本
 docs/        技术文档和展示文件
 ```
@@ -80,7 +80,7 @@ USB 烧录需要连接设备后执行 PlatformIO Upload。仅修改电脑端 GUI
 
 ## 配置提醒
 
-- `config/deployment.json` 是本机设备部署配置，包含 `deploymentKey`；固件构建脚本和 Go 控制器都会读取该值。仓库快照不能证明该文件当前是否纳入版本管理，分享或提交前应核对其内容与项目约定。
+- 日常配置统一修改 `config/firmware.json`、`config/program.json`、`config/tunnel.json`，字段和启动行为见[配置入口](config/README.md)。固件和控制器共用 `firmware.json` 中的 `deploymentKey`。
 - 项目保留 Cloudflare Tunnel 公网入口及启动配置。当前代码默认关闭登录校验；如果隧道对外开放，请先核对认证配置和实际访问边界。
 - Windows 开发机通过 `scripts\start.bat` 构建并启动本地控制器；脚本会注册 `FishStack` 登录启动任务，统一守护控制器和 Cloudflare Tunnel。
 - OTA 只能由管理员发起。

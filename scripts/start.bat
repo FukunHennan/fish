@@ -11,6 +11,7 @@ set "EXE=%RUNTIME%\fish-controller.exe"
 set "CLOUDFLARED=%RUNTIME%\cloudflared.exe"
 set "TUNNEL_CONFIG=%RUNTIME%\cloudflared-live.yml"
 set "TUNNEL_PID_FILE=%RUNTIME%\cloudflared.pid"
+set "PREPARE_TUNNEL=%~dp0prepare-tunnel.ps1"
 set "STARTUP_TASK=%~dp0install-startup-task.ps1"
 set "TAKEOVER_SCRIPT=%~dp0takeover-running-instance.ps1"
 set "WATCH_CONTROLLER=%~dp0watch-controller.ps1"
@@ -64,15 +65,11 @@ if errorlevel 1 (
   exit /b 1
 )
 
-if not exist "%ROOT%\config\deployment.json" (
-  if not exist "%ROOT%\config\deployment.example.json" (
-    echo [ERROR] config\deployment.example.json is missing.
-    pause
-    exit /b 1
+for %%C in (firmware.json program.json tunnel.json) do (
+  if not exist "%ROOT%\config\%%C" (
+    echo [ERROR] config\%%C is missing.
+    goto :fail
   )
-  echo [INFO] Creating config\deployment.json from the example preset...
-  copy /Y "%ROOT%\config\deployment.example.json" "%ROOT%\config\deployment.json" >nul
-  if errorlevel 1 goto :fail
 )
 
 if not exist "%FRONTEND%\node_modules" (
@@ -95,13 +92,15 @@ go build -o "%EXE%" ./cmd/fish-controller
 if errorlevel 1 goto :fail
 popd
 
-if not exist "%CLOUDFLARED%" (
-  echo [ERROR] cloudflared.exe is missing: %CLOUDFLARED%
-  goto :fail
-)
-if not exist "%TUNNEL_CONFIG%" (
-  echo [ERROR] Cloudflare tunnel config is missing: %TUNNEL_CONFIG%
-  goto :fail
+set "TUNNEL_MODE="
+for /f "usebackq delims=" %%T in (`powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%PREPARE_TUNNEL%" -Root "%ROOT%"`) do set "TUNNEL_MODE=%%T"
+if not defined TUNNEL_MODE goto :fail
+if /I "%TUNNEL_MODE%"=="enabled" (
+  if not exist "%CLOUDFLARED%" (
+    echo [ERROR] cloudflared.exe is missing: %CLOUDFLARED%
+    goto :fail
+  )
+  if not exist "%TUNNEL_CONFIG%" goto :fail
 )
 
 echo [4/4] Updating the FishStack logon task...
@@ -110,15 +109,17 @@ if errorlevel 1 (
   echo [WARN] Could not update the FishStack logon task. Run this script from an elevated terminal once.
 )
 
-echo [5/5] Starting Cloudflare Tunnel and Fish Controller...
+echo [5/5] Starting Fish Controller and configured tunnel...
 echo Close this window to stop the services started from this window.
 echo Open: http://localhost:8081
-if exist "%TUNNEL_PID_FILE%" del /Q "%TUNNEL_PID_FILE%"
-powershell.exe -NoProfile -Command "$p = Start-Process -FilePath '%CLOUDFLARED%' -ArgumentList @('--config','%TUNNEL_CONFIG%','tunnel','run') -PassThru -WindowStyle Hidden -RedirectStandardOutput '%RUNTIME%\cloudflared.out.log' -RedirectStandardError '%RUNTIME%\cloudflared.err.log'; Set-Content -LiteralPath '%TUNNEL_PID_FILE%' -Value $p.Id"
-if exist "%TUNNEL_PID_FILE%" set /p TUNNEL_PID=<"%TUNNEL_PID_FILE%"
-if not defined TUNNEL_PID (
-  echo [ERROR] Failed to start Cloudflare Tunnel.
-  goto :fail
+if /I "%TUNNEL_MODE%"=="enabled" (
+  if exist "%TUNNEL_PID_FILE%" del /Q "%TUNNEL_PID_FILE%"
+  powershell.exe -NoProfile -Command "$p = Start-Process -FilePath '%CLOUDFLARED%' -ArgumentList @('--config','%TUNNEL_CONFIG%','tunnel','run') -PassThru -WindowStyle Hidden -RedirectStandardOutput '%RUNTIME%\cloudflared.out.log' -RedirectStandardError '%RUNTIME%\cloudflared.err.log'; Set-Content -LiteralPath '%TUNNEL_PID_FILE%' -Value $p.Id"
+  if exist "%TUNNEL_PID_FILE%" set /p TUNNEL_PID=<"%TUNNEL_PID_FILE%"
+  if not defined TUNNEL_PID (
+    echo [ERROR] Failed to start Cloudflare Tunnel.
+    goto :fail
+  )
 )
 pushd "%CONTROLLER%"
 if not defined FISH_HOT_RELOAD set "FISH_HOT_RELOAD=true"

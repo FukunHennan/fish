@@ -8,7 +8,7 @@ import (
 
 func writeConfig(t *testing.T, content string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "deployment.json")
+	path := filepath.Join(t.TempDir(), "firmware.json")
 	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
 		t.Fatal(err)
 	}

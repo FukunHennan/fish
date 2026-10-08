@@ -15,13 +15,12 @@ fi
 command -v go >/dev/null || { echo "[ERROR] Go was not found in PATH."; exit 1; }
 command -v npm >/dev/null || { echo "[ERROR] npm was not found in PATH."; exit 1; }
 
-if [[ ! -f "$ROOT/config/deployment.json" ]]; then
-  if [[ ! -f "$ROOT/config/deployment.example.json" ]]; then
-    echo "[ERROR] config/deployment.example.json is missing."
+for config in firmware.json program.json tunnel.json; do
+  if [[ ! -f "$ROOT/config/$config" ]]; then
+    echo "[ERROR] config/$config is missing."
     exit 1
   fi
-  cp "$ROOT/config/deployment.example.json" "$ROOT/config/deployment.json"
-fi
+done
 
 if [[ ! -d "$FRONTEND/node_modules" ]]; then
   echo "[1/4] Installing frontend dependencies..."

@@ -7,10 +7,21 @@ services from importing the main UI module just to read constants.
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 
 
 WORK_DIR = os.path.dirname(os.path.abspath(__file__))
+PROGRAM_CONFIG_PATH = Path(WORK_DIR).parent / "config" / "program.json"
+with PROGRAM_CONFIG_PATH.open("r", encoding="utf-8-sig") as program_file:
+    _program_environment = json.load(program_file)["environment"]
+if not isinstance(_program_environment, dict):
+    raise ValueError("program.json 的 environment 必须是对象")
+for _name, _value in _program_environment.items():
+    if not isinstance(_value, str) or not _name.startswith(("FISH_", "ROBOFISH_")):
+        raise ValueError("program.json 包含无效环境变量")
+    os.environ.setdefault(_name, _value)
+
 ASSET_DIR = os.path.join(WORK_DIR, "assets")
 OUTPUT_DIR = os.path.join(os.path.dirname(WORK_DIR), "output", "vision")
 CACHE_DIR = os.path.join(

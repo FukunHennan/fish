@@ -111,7 +111,7 @@ OTA 接口只接受与当前源码一致的应用 `firmware.bin`，不能上传 
 
 ## 6. 运行检查
 
-Windows 的 `scripts/start.bat` 是启动入口，需要先在 `controller/.runtime/` 准备 `cloudflared.exe` 与 `cloudflared-live.yml`，并通过 `watch-controller.ps1` 监督 Go 控制器。再次启动时，入口会先接管并关闭上一实例的启动监督窗口、控制器、视觉服务和 Tunnel，等待 `8081` 与 `8091` 释放后只启动一个新实例；不属于本工作区的端口占用不会被强制关闭。监督脚本在控制器退出后等待 5 秒重新启动；关闭启动窗口时，入口停止它启动的 Cloudflare Tunnel 并退出。脚本会临时写入 `controller/.runtime/cloudflared.pid`，用于跟踪隧道进程。
+Windows 的 `scripts/start.bat` 是启动入口，读取 `config/firmware.json`、`program.json` 和 `tunnel.json`，并通过 `watch-controller.ps1` 监督 Go 控制器。只有 `tunnel.json` 启用时才需要在 `controller/.runtime/` 准备 `cloudflared.exe`；启动脚本会从 JSON 生成 `cloudflared-live.yml`。再次启动时，入口会先接管并关闭上一实例的启动监督窗口、控制器、视觉服务和 Tunnel，等待 `8081` 与 `8091` 释放后只启动一个新实例；不属于本工作区的端口占用不会被强制关闭。监督脚本在控制器退出后等待 5 秒重新启动；关闭启动窗口时，入口停止它启动的 Cloudflare Tunnel 并退出。启用隧道时脚本会临时写入 `controller/.runtime/cloudflared.pid`，用于跟踪隧道进程。
 
 ```powershell
 scripts\start.bat

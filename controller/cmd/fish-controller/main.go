@@ -59,6 +59,10 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	programPath := filepath.Join(projectRoot, "config", "program.json")
+	if err := config.ApplyProgramEnvironment(programPath); err != nil {
+		log.Fatalf("failed to load program config: %v", err)
+	}
 	// Local commissioning is the current default. It seeds the four known
 	// competitors as logged in; deployments can opt out explicitly later.
 	if _, configured := os.LookupEnv("FISH_DEVELOPMENT_MODE"); !configured {
@@ -84,7 +88,7 @@ func main() {
 
 	configPath := os.Getenv("FISH_CONFIG")
 	if configPath == "" {
-		configPath = filepath.Join(projectRoot, "config", "deployment.json")
+		configPath = filepath.Join(projectRoot, "config", "firmware.json")
 	}
 	cfg, err := config.Load(configPath)
 	if err != nil {
