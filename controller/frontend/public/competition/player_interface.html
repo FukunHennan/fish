@@ -3703,17 +3703,23 @@ p {
 }
 .v3Score em{align-self:start;color:#729ab1;font-style:normal;font-weight:900}
 .hudTimer{
-  display:grid;
-  place-content:center;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
   text-align:center;
 }
 .hudTimer strong{
-  margin-top:.12em;
+  margin-top:.06em;
   color:#fff;
-  font-size:1.65em;
+  font-size:1.5em;
   line-height:1;
   font-variant-numeric:tabular-nums;
 }
+.matchTimerState{display:inline-flex;align-items:center;gap:.36em;margin-top:.28em;color:#ff9da6;font-size:.72em;font-weight:800;white-space:nowrap}
+.matchTimerState i{display:block;width:.62em;height:.62em;border-radius:50%;background:#ff586c;box-shadow:0 0 8px rgba(255,88,108,.65)}
+.matchTimerState[data-state="running"]{color:#8af5ca}
+.matchTimerState[data-state="running"] i{background:#32e9a4;box-shadow:0 0 8px rgba(50,233,164,.65)}
 .playerOnline i,
 .liveBadge i{
   width:.55em;
@@ -5664,12 +5670,14 @@ p {
   const root = document.getElementById("competition-root");
   const finishedNotice = document.getElementById('matchFinishedNotice');
   let shownFinishedMatch = '';
+  let activeFinishedMatchId = '';
   document.addEventListener('fish-match-finished', (event) => {
     const detail = event && event.detail;
     if (!detail || !detail.matchId || !finishedNotice) return;
     const noticeKey = String(detail.matchId) + ':' + String(detail.account || '');
     if (shownFinishedMatch === noticeKey) return;
     shownFinishedMatch = noticeKey;
+    activeFinishedMatchId = String(detail.matchId);
     const elapsed = Math.max(0, Math.floor(Number(detail.elapsedMs || 0) / 1000));
     const clock = String(Math.floor(elapsed / 60)).padStart(2, '0') + ':' + String(elapsed % 60).padStart(2, '0');
     finishedNotice.querySelector('[data-finish-match-name]').textContent = String(detail.matchNo || '本场比赛');
@@ -5679,13 +5687,19 @@ p {
     finishedNotice.querySelector('[data-finish-summary]').textContent = '比赛用时 ' + clock + '。已分配且在线的机器鱼仍可控制。';
     finishedNotice.hidden = false;
   });
-  finishedNotice.querySelector('[data-finish-close]').addEventListener('click', () => { finishedNotice.hidden = true; });
-  finishedNotice.querySelector('[data-finish-records]').addEventListener('click', () => {
+  function dismissFinishedNotice() {
     finishedNotice.hidden = true;
+    if (typeof window.fishCompetitionDismissFinishedNotice === 'function') {
+      window.fishCompetitionDismissFinishedNotice(activeFinishedMatchId);
+    }
+  }
+  finishedNotice.querySelector('[data-finish-close]').addEventListener('click', dismissFinishedNotice);
+  finishedNotice.querySelector('[data-finish-records]').addEventListener('click', () => {
+    dismissFinishedNotice();
     window.location.hash = 'records';
   });
   finishedNotice.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') finishedNotice.hidden = true;
+    if (event.key === 'Escape') dismissFinishedNotice();
   });
   const DEFAULT_KEY_BINDINGS = {
     b1: { forward: 'w', left: 'a', right: 'd' },
@@ -5969,7 +5983,7 @@ p {
       '<div class="matchIdentity"><span>当前比赛</span><h2 data-live-match-title>等待服务器</h2><p data-live-match-meta>暂无真实比赛数据</p></div>' +
       '<div class="matchOpponent"><span>我方</span><b data-live-blue-team>蓝队</b><em>VS</em><b class="enemy" data-live-red-team>红队</b></div>' +
       '<div class="hudScore v3Score"><small>实时比分</small><b class="blue" data-live-blue-score>0</b><em>:</em><b class="red" data-live-red-score>0</b></div>' +
-      '<div class="hudTimer"><small>比赛计时</small><strong data-live-match-clock>00:00</strong></div>' +
+      '<div class="hudTimer"><small>比赛计时</small><strong data-live-match-clock>00:00</strong><span class="matchTimerState" data-live-timer-state data-state="idle"><i aria-hidden="true"></i><span data-live-timer-state-text>暂无比赛</span></span></div>' +
       '<button type="button" class="keyConfigOpen v3KeyConfig">' + keyboardIcon() + '<span>按键设置</span></button>' +
       '</section>';
   }

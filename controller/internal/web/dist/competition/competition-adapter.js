@@ -3414,6 +3414,7 @@
     state.devices = [];
     state.match = null;
     finishedMatchEventId = null;
+    dismissedFinishedMatchId = null;
     state.bound = {};
     state.sequence = {};
     state.ready = false;
@@ -3725,11 +3726,34 @@
 
   var playerMatchTimer = null;
   var finishedMatchEventId = null;
+  var dismissedFinishedMatchId = null;
+
+  function setPlayerMatchHud(match, elapsedMs) {
+    function setAll(selector, value) {
+      document.querySelectorAll(selector).forEach(function (node) { node.textContent = String(value); });
+    }
+    var cleared = !match || (match.state === "finished" && dismissedFinishedMatchId === match.id);
+    setAll("[data-live-blue-score]", cleared ? 0 : Number(match.blue && match.blue.score) || 0);
+    setAll("[data-live-red-score]", cleared ? 0 : Number(match.red && match.red.score) || 0);
+    setAll("[data-live-match-clock]", cleared ? "00:00" : fmtClock(elapsedMs || 0));
+    var status = !match ? "暂无比赛" : match.state === "running" ? "比赛中" : stateText(match.state);
+    setAll("[data-live-timer-state-text]", status);
+    document.querySelectorAll("[data-live-timer-state]").forEach(function (node) {
+      node.dataset.state = match && match.state === "running" ? "running" : "idle";
+    });
+  }
+
+  window.fishCompetitionDismissFinishedNotice = function (matchId) {
+    if (!state.match || state.match.state !== "finished" || state.match.id !== matchId) return;
+    dismissedFinishedMatchId = matchId;
+    setPlayerMatchHud(state.match, 0);
+  };
 
   function paintPlayerMatch(payload) {
     if (isRefereePage() || !payload) return;
     state.match = payload.match || null;
     if (document.body) document.body.dataset.fishMatchState = state.match ? (state.match.state || "") : "";
+    setPlayerMatchHud(state.match, payload.elapsedMs || 0);
     if (!state.match) return;
     var match = payload.match;
     syncPlayerReadiness(match);
@@ -3744,9 +3768,6 @@
     setAll("[data-live-blue-team]", blueName);
     setAll("[data-live-red-team]", redName);
     setAll("[data-live-current-team]", currentName);
-    setAll("[data-live-blue-score]", Number(match.blue && match.blue.score) || 0);
-    setAll("[data-live-red-score]", Number(match.red && match.red.score) || 0);
-    setAll("[data-live-match-clock]", fmtClock(payload.elapsedMs || 0));
     setAll("[data-live-match-state]", stateText(match.state));
     setAll("[data-live-summary-state]", stateText(match.state));
     if (match.state === "finished") {
@@ -3757,8 +3778,12 @@
         api("/api/competition/match/finish-notice", {
           method: "POST", body: { matchId: matchId },
         }).then(function (notice) {
-          if (!notice || !notice.show || !state.user || state.user.email !== account ||
+          if (!notice || !state.user || state.user.email !== account ||
               !state.match || state.match.id !== matchId) return;
+          if (!notice.show) {
+            window.fishCompetitionDismissFinishedNotice(matchId);
+            return;
+          }
           document.dispatchEvent(new CustomEvent("fish-match-finished", { detail: {
             matchId: matchId,
             account: account,

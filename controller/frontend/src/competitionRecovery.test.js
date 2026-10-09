@@ -143,24 +143,33 @@ test("HTTPS 兼容画面在重绘和请求超时后继续轮询", async () => {
 });
 
 test("选手端结束比赛后保持控制并按账号领取一次通知", async () => {
-  const begin = adapter.indexOf("  function paintPlayerMatch(payload) {");
+  const begin = adapter.indexOf("  function setPlayerMatchHud(match, elapsedMs) {");
   const end = adapter.indexOf("  function refreshPlayerMatch() {", begin);
   assert.ok(begin >= 0 && end > begin);
   const events = [];
+  const nodes = new Map();
+  function elements(selector) {
+    if (!nodes.has(selector)) nodes.set(selector, [{ textContent: "", dataset: {} }]);
+    return nodes.get(selector);
+  }
+  function value(selector) { return elements(selector)[0]; }
   const activeMotion = { b1: { action: "forward" } };
   const requests = [];
+  let claimShow = true;
   const state = { match: null, user: { email: "1" } };
   const context = {
-    isRefereePage: () => false, lastObservedFieldLocked: null,
+    isRefereePage: () => false, dismissedFinishedMatchId: null,
     state, document: {
-      body: { dataset: {} }, querySelectorAll: () => [],
+      body: { dataset: {} }, querySelectorAll: elements,
       dispatchEvent: (event) => events.push(event),
     },
+    window: {},
     CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
     syncPlayerReadiness() {}, currentTeamSide: () => "blue",
-    stateText: (value) => value, fmtClock: () => "00:10",
+    stateText: (state) => ({ running: "进行中", finished: "已结束" })[state] || state,
+    fmtClock: (elapsed) => elapsed ? "00:10" : "00:00",
     PLAYERS: ["b1", "b2"], activeMotion,
-    api(path, options) { requests.push({ path, options }); return Promise.resolve({ show: true }); },
+    api(path, options) { requests.push({ path, options }); return Promise.resolve({ show: claimShow }); },
     finishedMatchEventId: null,
   };
   const paint = runInNewContext(adapter.slice(begin, end) + "\npaintPlayerMatch", context);
@@ -170,6 +179,8 @@ test("选手端结束比赛后保持控制并按账号领取一次通知", async
   };
   paint({ match, elapsedMs: 9000 });
   assert.equal(events.length, 0);
+  assert.equal(value("[data-live-timer-state]").dataset.state, "running");
+  assert.equal(value("[data-live-timer-state-text]").textContent, "比赛中");
   paint({ match: { ...match, state: "finished" }, elapsedMs: 10000 });
   paint({ match: { ...match, state: "finished" }, elapsedMs: 10000 });
   await new Promise((resolve) => setImmediate(resolve));
@@ -180,6 +191,27 @@ test("选手端结束比赛后保持控制并按账号领取一次通知", async
   assert.equal(events[0].type, "fish-match-finished");
   assert.equal(events[0].detail.blueScore, 2);
   assert.equal(context.document.body.dataset.fishMatchState, "finished");
+  assert.equal(value("[data-live-timer-state]").dataset.state, "idle");
+  assert.equal(value("[data-live-timer-state-text]").textContent, "已结束");
+  assert.equal(value("[data-live-blue-score]").textContent, "2");
+  context.window.fishCompetitionDismissFinishedNotice("match-1");
+  assert.equal(value("[data-live-blue-score]").textContent, "0");
+  assert.equal(value("[data-live-red-score]").textContent, "0");
+  assert.equal(value("[data-live-match-clock]").textContent, "00:00");
+  paint({ match: { ...match, state: "finished" }, elapsedMs: 10000 });
+  assert.equal(value("[data-live-blue-score]").textContent, "0", "轮询不得恢复已清除比分");
+  assert.equal(value("[data-live-match-clock]").textContent, "00:00", "轮询不得恢复已清除计时");
+  paint({ match: null, elapsedMs: 0 });
+  assert.equal(value("[data-live-timer-state-text]").textContent, "暂无比赛");
+  paint({ match: { ...match, id: "match-2", state: "running" }, elapsedMs: 9000 });
+  assert.equal(value("[data-live-blue-score]").textContent, "2", "新比赛应显示新比分");
+  assert.equal(value("[data-live-timer-state]").dataset.state, "running");
+  claimShow = false;
+  paint({ match: { ...match, id: "match-2", state: "finished" }, elapsedMs: 10000 });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(value("[data-live-blue-score]").textContent, "0", "已领取提示的刷新页面不应显示旧比分");
+  assert.equal(value("[data-live-match-clock]").textContent, "00:00");
+  assert.equal(events.length, 1, "已领取提示的账号不能重复弹窗");
   assert.match(playerPage, /id="matchFinishedNotice"[\s\S]*?data-finish-records/);
   assert.match(playerPage, /addEventListener\('fish-match-finished'/);
   assert.match(adapter, /quality: isRefereePage\(\) \? "full" : "smooth"/);
@@ -203,6 +235,8 @@ test("比赛结束提示显示比分，关闭后不被轮询重复打开", () =>
   };
   const listeners = {};
   const window = { location: { hash: "#control" } };
+  const dismissed = [];
+  window.fishCompetitionDismissFinishedNotice = (matchId) => dismissed.push(matchId);
   let stoppedPrograms = 0;
   let releasedKeys = 0;
   runInNewContext(playerPage.slice(begin, end), {
@@ -225,10 +259,12 @@ test("比赛结束提示显示比分，关闭后不被轮询重复打开", () =>
   assert.equal(node("[data-finish-score]").textContent, "2 : 1");
   assert.match(node("[data-finish-summary]").textContent, /00:10/);
   node("[data-finish-close]").listeners.click();
+  assert.deepEqual(dismissed, ["match-1"]);
   listeners["fish-match-finished"]({ detail });
   assert.equal(notice.hidden, true);
   listeners["fish-match-finished"]({ detail: { ...detail, matchId: "match-2" } });
   assert.equal(notice.hidden, false);
   node("[data-finish-records]").listeners.click();
   assert.equal(window.location.hash, "records");
+  assert.deepEqual(dismissed, ["match-1", "match-2"]);
 });
