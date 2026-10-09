@@ -62,6 +62,16 @@ class WebRTCFrameTests(unittest.TestCase):
         self.assertEqual(server._source._sequence, 3)
         server.close()
 
+    def test_jpeg_fallback_still_receives_frames_if_webrtc_is_unavailable(self):
+        server = WebRTCServer()
+        server.available = False
+        server.update(np.zeros((48, 64, 3), dtype=np.uint8), time.time())
+        snapshot = server.jpeg_snapshot()
+        self.assertIsNotNone(snapshot)
+        self.assertEqual(snapshot[0], 1)
+        self.assertTrue(snapshot[1].startswith(b"\xff\xd8"))
+        server.close()
+
 
 @unittest.skipIf(_LatestVideoTrack is None, "aiortc is not installed")
 class WebRTCTrackTests(unittest.IsolatedAsyncioTestCase):

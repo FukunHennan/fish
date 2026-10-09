@@ -1466,6 +1466,7 @@
     connectionStartedAt: 0, connectedAt: 0, lastFrameAt: 0,
     connectionGeneration: 0,
     frameWatchTimer: null, frameCallbackId: null, frameElement: null,
+    fallback: false, fallbackTimer: null, fallbackElement: null, fallbackErrors: 0,
     events: null,
     statusText: "视觉未启用", source: "server", cameras: [], cameraIndex: "",
     cameraLoading: false, controls: null,
@@ -1497,15 +1498,74 @@
   }
 
   function waitForIce(peer) {
-    return new Promise(function (resolve) {
+    return new Promise(function (resolve, reject) {
       if (peer.iceGatheringState === "complete") return resolve();
       var settled = false;
-      function finish() { if (settled) return; settled = true; resolve(); }
-      peer.addEventListener("icegatheringstatechange", function () {
+      var timer = setTimeout(function () { finish(new Error("ICE 候选收集超时")); }, 10000);
+      function changed() {
         if (peer.iceGatheringState === "complete") finish();
-      });
-      setTimeout(finish, 1500);
+      }
+      function finish(error) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        peer.removeEventListener("icegatheringstatechange", changed);
+        if (error) reject(error); else resolve();
+      }
+      peer.addEventListener("icegatheringstatechange", changed);
+      changed();
     });
+  }
+
+  function requestFallbackFrame() {
+    if (!video.fallback || !video.sessionId) return;
+    if (document.hidden) {
+      video.fallbackTimer = setTimeout(requestFallbackFrame, 500);
+      return;
+    }
+    var stage = videoSurface();
+    if (!stage) {
+      video.fallbackTimer = setTimeout(requestFallbackFrame, 500);
+      return;
+    }
+    if (!stage.querySelector("img[data-fish-fallback-frame]")) mountVideoSurface();
+    var image = stage.querySelector("img[data-fish-fallback-frame]");
+    if (!image) return;
+    video.fallbackElement = image;
+    var generation = video.connectionGeneration;
+    function current() {
+      return video.fallback && video.connectionGeneration === generation && video.fallbackElement === image;
+    }
+    image.onload = function () {
+      if (!current()) return;
+      video.fallbackErrors = 0;
+      video.lastFrameAt = Date.now();
+      video.statusText = "视觉画面已接入（公网兼容模式）";
+      setVisionStatus(video.statusText, "ok");
+      if (lastDeviceBadge) setBadge(lastDeviceBadge, lastDeviceTone);
+      renderCropEditor();
+      renderPlayerDetectionOverlay();
+      video.fallbackTimer = setTimeout(requestFallbackFrame, 80);
+    };
+    image.onerror = function () {
+      if (!current()) return;
+      video.fallbackErrors += 1;
+      if (!video.lastFrameAt) setVisionStatus("正在等待摄像头首帧（公网兼容模式）", "warn");
+      video.fallbackTimer = setTimeout(requestFallbackFrame, Math.min(3000, 400 * video.fallbackErrors));
+    };
+    image.src = "/api/vision/frame.jpg?sessionId=" + encodeURIComponent(video.sessionId) +
+      "&view=" + (isRefereePage() ? "full" : "cropped") + "&t=" + Date.now();
+  }
+
+  function startFrameFallback(reason) {
+    if (!video.sessionId || video.fallback) return;
+    closeVideoPeer();
+    video.fallback = true;
+    video.fallbackErrors = 0;
+    video.statusText = "正在通过公网兼容画面连接：" + reason;
+    setVisionStatus(video.statusText, "warn");
+    mountVideoSurface();
+    requestFallbackFrame();
   }
 
   function scheduleVideoReconnect(reason, delay) {
@@ -1525,7 +1585,7 @@
   }
 
   function connectVideo() {
-    if (video.connecting || video.peer) return;
+    if (video.fallback || video.connecting || video.peer) return;
     var generation = video.connectionGeneration;
     function current() { return generation === video.connectionGeneration; }
     function staleConnection() {
@@ -1565,22 +1625,21 @@
           if (!current() || video.peer !== peer) return;
           video.stream = (event.streams && event.streams[0]) || new window.MediaStream([event.track]);
           event.track.onended = function () {
-            if (video.peer === peer) scheduleVideoReconnect("视频轨道已结束", 100);
+            if (video.peer === peer) startFrameFallback("视频轨道已结束");
           };
           mountVideoSurface();
         };
         peer.onconnectionstatechange = function () {
           if (!current() || video.peer !== peer) return;
-          if (peer.connectionState === "failed") scheduleVideoReconnect("连接失败");
+          if (peer.connectionState === "failed") startFrameFallback("WebRTC 连接失败");
           else if (peer.connectionState === "disconnected") {
             setTimeout(function () {
-              if (peer.connectionState === "disconnected") scheduleVideoReconnect("连接中断");
+              if (video.peer === peer && peer.connectionState === "disconnected") startFrameFallback("WebRTC 连接中断");
             }, 4000);
           } else if (peer.connectionState === "connected") {
             video.connectedAt = Date.now();
-            video.statusText = "视觉画面已接入";
-            setVisionStatus(video.statusText, "ok");
-            if (lastDeviceBadge) setBadge(lastDeviceBadge, lastDeviceTone);
+            video.statusText = "视频连接已建立，正在等待首帧…";
+            setVisionStatus(video.statusText, "info");
           }
         };
         return peer.createOffer()
@@ -1612,7 +1671,8 @@
         video.statusText = waiting ? "视觉未启动（手动操控可用）" : "视觉接入失败：" + error.message;
         setVisionStatus(video.statusText, waiting ? "info" : "error");
         if (lastDeviceBadge) setBadge(lastDeviceBadge, lastDeviceTone);
-        scheduleVideoReconnect(waiting ? null : error.message, waiting ? 10000 : 3000);
+        if (waiting) scheduleVideoReconnect(null, 10000);
+        else startFrameFallback(error.message);
       })
       .then(function () {
         if (current()) video.connecting = false;
@@ -1620,6 +1680,11 @@
   }
 
   function markVideoFrame() {
+    if (!video.lastFrameAt && !video.fallback) {
+      video.statusText = "视觉画面已接入";
+      setVisionStatus(video.statusText, "ok");
+      if (lastDeviceBadge) setBadge(lastDeviceBadge, lastDeviceTone);
+    }
     video.lastFrameAt = Date.now();
   }
 
@@ -1639,7 +1704,7 @@
       });
       ["error", "stalled", "emptied"].forEach(function (name) {
         element.addEventListener(name, function () {
-          if (video.peer) scheduleVideoReconnect("视频媒体流中断", 300);
+          if (video.peer) startFrameFallback("视频媒体流中断");
         });
       });
       if (typeof element.requestVideoFrameCallback === "function") {
@@ -1658,7 +1723,7 @@
         var baseline = video.lastFrameAt || video.connectedAt || video.connectionStartedAt;
         var timeout = video.peer.connectionState === "connected" ? 5000 : 12000;
         if (baseline && now - baseline > timeout) {
-          scheduleVideoReconnect(video.lastFrameAt ? "画面超过 5 秒未更新" : "视频首帧超时", 100);
+          startFrameFallback(video.lastFrameAt ? "画面超过 5 秒未更新" : "视频首帧超时");
         }
       }, 1000);
     }
@@ -1732,12 +1797,21 @@
       if (played && played.catch) played.catch(function () { /* 自动播放被拦截时忽略 */ });
     }
     watchVideoFrames(element);
+    var fallbackImage = stage.querySelector("img[data-fish-fallback-frame]");
+    if (video.fallback && !fallbackImage) {
+      fallbackImage = document.createElement("img");
+      fallbackImage.setAttribute("data-fish-fallback-frame", "1");
+      fallbackImage.alt = "实时赛场画面";
+      fallbackImage.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-index:1;pointer-events:none";
+      stage.insertBefore(fallbackImage, stage.firstChild);
+    }
+    if (fallbackImage) fallbackImage.hidden = !video.fallback;
     if (backdrop && video.stream && backdrop.srcObject !== video.stream) {
       backdrop.srcObject = video.stream;
       var backdropPlayed = backdrop.play();
       if (backdropPlayed && backdropPlayed.catch) backdropPlayed.catch(function () {});
     }
-    element.hidden = false;
+    element.hidden = video.fallback;
     renderCropEditor();
     renderPlayerDetectionOverlay();
   }
@@ -1772,11 +1846,11 @@
 
   function cropSourceSize() {
     var stage = document.getElementById("refereeLiveStage");
-    var element = stage && stage.querySelector("video[data-fish-video]");
+    var element = stage && stage.querySelector(video.fallback ? "img[data-fish-fallback-frame]" : "video[data-fish-video]");
     var frame = (video.metrics && (video.metrics.cameraFrame || video.metrics.frame)) || {};
     return {
-      width: element && element.videoWidth || finiteNumber(frame.width) || 4,
-      height: element && element.videoHeight || finiteNumber(frame.height) || 3,
+      width: element && (element.videoWidth || element.naturalWidth) || finiteNumber(frame.width) || 4,
+      height: element && (element.videoHeight || element.naturalHeight) || finiteNumber(frame.height) || 3,
     };
   }
 
@@ -2492,7 +2566,7 @@
     if (isRefereePage()) return;
     var stage = videoSurface();
     if (!stage || !stage.classList.contains("matchPool")) return;
-    var element = stage.querySelector("video[data-fish-video]");
+    var element = stage.querySelector(video.fallback ? "img[data-fish-fallback-frame]" : "video[data-fish-video]");
     var canvas = stage.querySelector("canvas[data-player-detection-overlay]");
     if (!element || !canvas) return;
 
@@ -2513,8 +2587,8 @@
 
     var metrics = video.metrics || {};
     var frame = metrics.frame || {};
-    var sourceWidth = finiteNumber(element.videoWidth) || finiteNumber(frame.width);
-    var sourceHeight = finiteNumber(element.videoHeight) || finiteNumber(frame.height);
+    var sourceWidth = finiteNumber(element.videoWidth || element.naturalWidth) || finiteNumber(frame.width);
+    var sourceHeight = finiteNumber(element.videoHeight || element.naturalHeight) || finiteNumber(frame.height);
     var coordinateWidth = finiteNumber(frame.width) || sourceWidth;
     var coordinateHeight = finiteNumber(frame.height) || sourceHeight;
     if (!sourceWidth || !sourceHeight || !coordinateWidth || !coordinateHeight) return;
@@ -2954,6 +3028,19 @@
     if (video.timer) {
       clearTimeout(video.timer);
       video.timer = null;
+    }
+    if (video.fallbackTimer) {
+      clearTimeout(video.fallbackTimer);
+      video.fallbackTimer = null;
+    }
+    video.fallback = false;
+    video.fallbackErrors = 0;
+    if (video.fallbackElement) {
+      video.fallbackElement.onload = null;
+      video.fallbackElement.onerror = null;
+      video.fallbackElement.removeAttribute("src");
+      video.fallbackElement.hidden = true;
+      video.fallbackElement = null;
     }
     if (video.peer) {
       try { video.peer.close(); } catch (e) { /* 忽略关闭异常 */ }

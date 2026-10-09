@@ -42,13 +42,16 @@ func TestPlayerCanOpenVisionVideoWithoutChangingSharedSettings(t *testing.T) {
 	if got := request(http.MethodPost, "/api/vision/webrtc/offer", nil).Code; got != http.StatusUnauthorized {
 		t.Fatalf("未登录的 WebRTC 请求状态 = %d", got)
 	}
+	if got := request(http.MethodGet, "/api/vision/frame.jpg", nil).Code; got != http.StatusUnauthorized {
+		t.Fatalf("未登录的兼容视频请求状态 = %d", got)
+	}
 	login := httptest.NewRecorder()
 	handler.ServeHTTP(login, httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"email":"1","password":"1"}`)))
 	if login.Code != http.StatusOK || len(login.Result().Cookies()) == 0 {
 		t.Fatalf("选手登录失败: %d %s", login.Code, login.Body.String())
 	}
 	cookie := login.Result().Cookies()[0]
-	for _, path := range []string{"/api/vision/sessions/current", "/api/vision/webrtc/config"} {
+	for _, path := range []string{"/api/vision/sessions/current", "/api/vision/webrtc/config", "/api/vision/frame.jpg"} {
 		if got := request(http.MethodGet, path, cookie).Code; got != http.StatusOK {
 			t.Fatalf("选手读取 %s 状态 = %d", path, got)
 		}

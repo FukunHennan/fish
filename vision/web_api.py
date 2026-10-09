@@ -188,6 +188,27 @@ def create_app(
             "iceServers": webrtc_server.browser_ice_servers(),
         })
 
+    @app.get("/frame.jpg")
+    def current_frame_jpeg():
+        current = service.current_session()
+        if (
+            webrtc_server is None
+            or current.get("state") not in ("previewing", "processing", "tracking")
+            or request.args.get("sessionId") != current.get("sessionId")
+        ):
+            return jsonify({"message": "视觉会话无效"}), 409
+        view = request.args.get("view", "cropped")
+        if view not in ("cropped", "full"):
+            return jsonify({"message": "无效的视频视图"}), 400
+        frame = webrtc_server.jpeg_snapshot(view=view, quality="smooth")
+        if frame is None:
+            return jsonify({"message": "暂无新鲜摄像头画面"}), 503
+        sequence, jpeg = frame
+        return Response(jpeg, mimetype="image/jpeg", headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, private, max-age=0, no-transform",
+            "X-Fish-Frame-Sequence": str(sequence),
+        })
+
     @app.post("/recordings")
     def start_recording():
         if webrtc_server is None:

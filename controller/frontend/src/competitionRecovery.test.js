@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { runInNewContext } from "node:vm";
 
 const adapter = readFileSync(
   new URL("../public/competition/competition-adapter.js", import.meta.url),
@@ -36,4 +37,34 @@ test("WebRTC 连接假在线但无新帧时主动重连", () => {
   assert.match(adapter, /画面超过 5 秒未更新/);
   assert.match(adapter, /视频首帧超时/);
   assert.match(adapter, /event\.track\.onended/);
+});
+
+test("非 trickle 信令等待 ICE 候选完成才提交 Offer", async () => {
+  const begin = adapter.indexOf("  function waitForIce(peer) {");
+  const end = adapter.indexOf("  function requestFallbackFrame() {", begin);
+  assert.ok(begin >= 0 && end > begin);
+  const timers = [];
+  const waitForIce = runInNewContext(adapter.slice(begin, end) + "\nwaitForIce", {
+    setTimeout(callback, delay) { timers.push({ callback, delay }); return timers.length; },
+    clearTimeout() {},
+  });
+  const peer = {
+    iceGatheringState: "gathering",
+    addEventListener(_name, callback) { this.changed = callback; },
+    removeEventListener() {},
+  };
+  let completed = false;
+  const pending = waitForIce(peer).then(() => { completed = true; });
+  await Promise.resolve();
+  assert.equal(completed, false);
+  assert.equal(timers[0].delay, 10000);
+  peer.iceGatheringState = "complete";
+  peer.changed();
+  await pending;
+  assert.equal(completed, true);
+
+  const stalled = { iceGatheringState: "gathering", addEventListener() {}, removeEventListener() {} };
+  const timedOut = waitForIce(stalled);
+  timers[1].callback();
+  await assert.rejects(timedOut, /ICE 候选收集超时/);
 });

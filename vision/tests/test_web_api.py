@@ -1,10 +1,15 @@
 import unittest
+import time
 from queue import Empty
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import cv2
+import numpy as np
+
 from service import CameraInfo, VisionService
 from web_api import create_app
+from webrtc import WebRTCServer
 
 
 class VisionWebApiTests(unittest.TestCase):
@@ -101,6 +106,28 @@ class VisionWebApiTests(unittest.TestCase):
             body["data"]["serverUtcOffsetMinutes"],
             body["serverUtcOffsetMinutes"],
         )
+
+    def test_https_fallback_serves_fresh_cropped_jpeg_for_current_session(self):
+        video = WebRTCServer()
+        self.addCleanup(video.close)
+        client = create_app(self.service, camera_provider=lambda: [], webrtc_server=video).test_client()
+        started = client.post("/sessions", json={"cameraId": "camera-1", "cameraIndex": 1}).get_json()
+        session_id = started["sessionId"]
+        path = f"/frame.jpg?sessionId={session_id}&view=cropped"
+
+        self.assertEqual(client.get(path).status_code, 503)
+        self.assertEqual(client.get("/frame.jpg?sessionId=wrong").status_code, 409)
+        self.assertEqual(client.get(f"/frame.jpg?sessionId={session_id}&view=other").status_code, 400)
+
+        video.set_crop_region({"x": 0.25, "y": 0.25, "width": 0.5, "height": 0.5})
+        video.update(np.full((80, 120, 3), 128, dtype=np.uint8), time.time())
+        response = client.get(path)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.mimetype, "image/jpeg")
+        self.assertIn("no-store", response.headers["Cache-Control"])
+        self.assertEqual(response.headers["X-Fish-Frame-Sequence"], "1")
+        frame = cv2.imdecode(np.frombuffer(response.data, dtype=np.uint8), cv2.IMREAD_COLOR)
+        self.assertEqual(frame.shape[:2], (40, 60))
 
     def test_service_subscribers_receive_status_updates(self):
         updates, unsubscribe = self.service.subscribe()
