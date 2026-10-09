@@ -1043,6 +1043,10 @@
   }
 
   function pressInput(player, action, token) {
+    if (state.match && state.match.state === "finished") {
+      setBadge("比赛已结束，选手控制已停止", "warn");
+      return;
+    }
     if (!heldInputs[player]) heldInputs[player] = {};
     heldInputs[player][token] = { player: player, action: action, token: token, order: ++inputOrder };
     reconcileInputs(player);
@@ -1713,7 +1717,7 @@
               method: "POST",
               body: {
                 sessionId: video.sessionId,
-                quality: "full",
+                quality: isRefereePage() ? "full" : "smooth",
                 view: isRefereePage() ? "full" : "cropped",
                 type: peer.localDescription.type,
                 sdp: peer.localDescription.sdp,
@@ -3419,6 +3423,7 @@
     state.authenticated = false;
     state.devices = [];
     state.match = null;
+    finishedMatchEventId = null;
     state.bound = {};
     state.sequence = {};
     state.ready = false;
@@ -3729,6 +3734,7 @@
   }
 
   var playerMatchTimer = null;
+  var finishedMatchEventId = null;
 
   function paintPlayerMatch(payload) {
     if (isRefereePage() || !payload) return;
@@ -3765,6 +3771,25 @@
     setAll("[data-live-match-clock]", fmtClock(payload.elapsedMs || 0));
     setAll("[data-live-match-state]", stateText(match.state));
     setAll("[data-live-summary-state]", stateText(match.state));
+    if (match.state === "finished") {
+      if (PLAYERS.some(function (player) { return !!activeMotion[player]; })) stopAll();
+      var matchId = String(match.id || [match.matchNo, match.startedAt].join("|"));
+      if (finishedMatchEventId !== matchId) {
+        finishedMatchEventId = matchId;
+        document.dispatchEvent(new CustomEvent("fish-match-finished", {
+          detail: {
+            matchId: matchId,
+            account: state.user && state.user.email || "",
+            matchNo: match.matchNo || "本场比赛",
+            blueName: blueName,
+            redName: redName,
+            blueScore: Number(match.blue && match.blue.score) || 0,
+            redScore: Number(match.red && match.red.score) || 0,
+            elapsedMs: payload.elapsedMs || match.elapsedMs || 0,
+          },
+        }));
+      }
+    }
   }
 
   function refreshPlayerMatch() {

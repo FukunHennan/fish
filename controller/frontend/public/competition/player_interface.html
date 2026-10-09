@@ -5576,6 +5576,19 @@ p {
   font-weight:900;
 }
 
+.matchFinishedNotice{position:fixed;inset:0;z-index:2147482980;display:grid;place-items:center;padding:20px;background:rgba(1,10,22,.78);backdrop-filter:blur(7px)}
+.matchFinishedNotice[hidden]{display:none}
+.matchFinishedCard{width:min(480px,100%);padding:26px;border:1px solid rgba(61,217,255,.48);border-radius:18px;background:linear-gradient(145deg,#092d49,#071525);box-shadow:0 24px 70px rgba(0,0,0,.55);color:#f2fbff;text-align:center}
+.matchFinishedCard small{color:#55e1ff;font-weight:800;letter-spacing:.12em}
+.matchFinishedCard h2{margin:10px 0;font-size:28px}
+.matchFinishedCard p{color:#a8c8d9;font-size:13px;line-height:1.6}
+.matchFinishedScore{display:flex;justify-content:center;align-items:center;gap:16px;margin:20px 0;font-size:15px;font-weight:800}
+.matchFinishedScore strong{font-size:30px;color:#fff}
+.matchFinishedCard footer{display:flex;gap:10px;margin-top:22px}
+.matchFinishedCard button{flex:1;padding:12px;border:1px solid rgba(79,200,244,.4);border-radius:9px;background:#103954;color:#fff;font-weight:800;cursor:pointer}
+.matchFinishedCard button[data-finish-records]{background:#0b8eac;border-color:#36d2e9}
+body[data-fish-match-state="finished"] [data-control-player][data-control-action]{opacity:.5;pointer-events:none}
+
 </style>
 </head>
 <body>
@@ -5622,6 +5635,17 @@ p {
   </div>
 </section>
 
+<div class="matchFinishedNotice" id="matchFinishedNotice" role="dialog" aria-modal="true" aria-labelledby="matchFinishedTitle" hidden>
+  <div class="matchFinishedCard">
+    <small>赛事通知</small>
+    <h2 id="matchFinishedTitle">比赛已结束</h2>
+    <p data-finish-match-name></p>
+    <div class="matchFinishedScore"><span data-finish-blue></span><strong data-finish-score></strong><span data-finish-red></span></div>
+    <p data-finish-summary></p>
+    <footer><button type="button" data-finish-close>关闭提示</button><button type="button" data-finish-records>查看比赛记录</button></footer>
+  </div>
+</div>
+
 <script>
 (function () {
   const pages = [
@@ -5639,6 +5663,38 @@ p {
   ];
   const validPageIds = new Set(pages.map((item) => item.id));
   const root = document.getElementById("competition-root");
+  const finishedNotice = document.getElementById('matchFinishedNotice');
+  let shownFinishedMatch = '';
+  document.addEventListener('fish-match-finished', (event) => {
+    const detail = event && event.detail;
+    if (!detail || !detail.matchId || !finishedNotice) return;
+    stopAutoSimulation('match-finished');
+    releaseAllActiveControlKeys();
+    const noticeKey = String(detail.matchId) + ':' + String(detail.account || '');
+    if (shownFinishedMatch === noticeKey) return;
+    shownFinishedMatch = noticeKey;
+    try {
+      if (sessionStorage.getItem('fish-finished-match-notice') === noticeKey) return;
+      sessionStorage.setItem('fish-finished-match-notice', noticeKey);
+    } catch (_) { /* 会话存储不可用时仍在当前页面去重 */ }
+    const elapsed = Math.max(0, Math.floor(Number(detail.elapsedMs || 0) / 1000));
+    const clock = String(Math.floor(elapsed / 60)).padStart(2, '0') + ':' + String(elapsed % 60).padStart(2, '0');
+    finishedNotice.querySelector('[data-finish-match-name]').textContent = String(detail.matchNo || '本场比赛');
+    finishedNotice.querySelector('[data-finish-blue]').textContent = String(detail.blueName || '蓝队');
+    finishedNotice.querySelector('[data-finish-red]').textContent = String(detail.redName || '红队');
+    finishedNotice.querySelector('[data-finish-score]').textContent = Number(detail.blueScore || 0) + ' : ' + Number(detail.redScore || 0);
+    finishedNotice.querySelector('[data-finish-summary]').textContent = '比赛用时 ' + clock + '，选手控制已停止。';
+    finishedNotice.hidden = false;
+    finishedNotice.querySelector('[data-finish-records]').focus();
+  });
+  finishedNotice.querySelector('[data-finish-close]').addEventListener('click', () => { finishedNotice.hidden = true; });
+  finishedNotice.querySelector('[data-finish-records]').addEventListener('click', () => {
+    finishedNotice.hidden = true;
+    window.location.hash = 'records';
+  });
+  finishedNotice.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') finishedNotice.hidden = true;
+  });
   const DEFAULT_KEY_BINDINGS = {
     b1: { forward: 'w', left: 'a', right: 'd' },
     b2: { forward: 'ArrowUp', left: 'ArrowLeft', right: 'ArrowRight' },

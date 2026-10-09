@@ -7,6 +7,10 @@ const adapter = readFileSync(
   new URL("../public/competition/competition-adapter.js", import.meta.url),
   "utf8",
 );
+const playerPage = readFileSync(
+  new URL("../public/competition/player_interface.html", import.meta.url),
+  "utf8",
+);
 
 test("裁判端禁用循迹按钮会汇总原因并提供悬停提示", () => {
   assert.match(adapter, /function trackingStartBlockers\(workflow\)/);
@@ -136,4 +140,97 @@ test("HTTPS 兼容画面在重绘和请求超时后继续轮询", async () => {
   assert.equal(video.fallbackErrors, 1);
   assert.ok(timers.some((timer) => timer.delay === 400 && !timer.cleared));
   assert.deepEqual(revoked, []);
+});
+
+test("选手端收到比赛结束快照后停止控制并只通知一次", () => {
+  const begin = adapter.indexOf("  function paintPlayerMatch(payload) {");
+  const end = adapter.indexOf("  function refreshPlayerMatch() {", begin);
+  assert.ok(begin >= 0 && end > begin);
+  const events = [];
+  const activeMotion = { b1: { action: "forward" } };
+  let stops = 0;
+  const state = { match: null };
+  const context = {
+    isRefereePage: () => false, lastObservedFieldLocked: null,
+    state, document: {
+      body: { dataset: {} }, querySelectorAll: () => [],
+      dispatchEvent: (event) => events.push(event),
+    },
+    CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
+    syncPlayerReadiness() {}, currentTeamSide: () => "blue",
+    stateText: (value) => value, fmtClock: () => "00:10",
+    PLAYERS: ["b1", "b2"], activeMotion,
+    stopAll() { stops += 1; delete activeMotion.b1; },
+    finishedMatchEventId: null,
+  };
+  const paint = runInNewContext(adapter.slice(begin, end) + "\npaintPlayerMatch", context);
+  const match = {
+    id: "match-1", matchNo: "第 1 场", state: "running", fieldLocked: false,
+    blue: { name: "蓝队", score: 2 }, red: { name: "红队", score: 1 },
+  };
+  paint({ match, elapsedMs: 9000 });
+  assert.equal(events.length, 0);
+  paint({ match: { ...match, state: "finished" }, elapsedMs: 10000 });
+  paint({ match: { ...match, state: "finished" }, elapsedMs: 10000 });
+  assert.equal(stops, 1);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].type, "fish-match-finished");
+  assert.equal(events[0].detail.blueScore, 2);
+  assert.equal(context.document.body.dataset.fishMatchState, "finished");
+  assert.match(playerPage, /id="matchFinishedNotice"[\s\S]*?data-finish-records/);
+  assert.match(playerPage, /addEventListener\('fish-match-finished'/);
+  assert.match(adapter, /quality: isRefereePage\(\) \? "full" : "smooth"/);
+});
+
+test("比赛结束提示显示比分，关闭后不被轮询重复打开", () => {
+  const begin = playerPage.indexOf("  const finishedNotice = document.getElementById('matchFinishedNotice');");
+  const end = playerPage.indexOf("  const DEFAULT_KEY_BINDINGS = {", begin);
+  assert.ok(begin >= 0 && end > begin);
+  const nodes = new Map();
+  function node(selector) {
+    if (!nodes.has(selector)) nodes.set(selector, {
+      textContent: "", listeners: {}, focus() { this.focused = true; },
+      addEventListener(type, handler) { this.listeners[type] = handler; },
+    });
+    return nodes.get(selector);
+  }
+  const notice = {
+    hidden: true, listeners: {}, querySelector: node,
+    addEventListener(type, handler) { this.listeners[type] = handler; },
+  };
+  const listeners = {};
+  const saved = new Map();
+  const window = { location: { hash: "#control" } };
+  let stoppedPrograms = 0;
+  let releasedKeys = 0;
+  runInNewContext(playerPage.slice(begin, end), {
+    document: {
+      getElementById: () => notice,
+      addEventListener: (type, handler) => { listeners[type] = handler; },
+    },
+    sessionStorage: {
+      getItem: (key) => saved.get(key) || null,
+      setItem: (key, value) => saved.set(key, value),
+    },
+    window,
+    stopAutoSimulation() { stoppedPrograms += 1; },
+    releaseAllActiveControlKeys() { releasedKeys += 1; },
+  });
+  const detail = {
+    matchId: "match-1", account: "1", matchNo: "第一场", blueName: "蓝队", redName: "红队",
+    blueScore: 2, redScore: 1, elapsedMs: 10000,
+  };
+  listeners["fish-match-finished"]({ detail });
+  assert.equal(notice.hidden, false);
+  assert.equal(stoppedPrograms, 1);
+  assert.equal(releasedKeys, 1);
+  assert.equal(node("[data-finish-score]").textContent, "2 : 1");
+  assert.match(node("[data-finish-summary]").textContent, /00:10/);
+  node("[data-finish-close]").listeners.click();
+  listeners["fish-match-finished"]({ detail });
+  assert.equal(notice.hidden, true);
+  listeners["fish-match-finished"]({ detail: { ...detail, matchId: "match-2" } });
+  assert.equal(notice.hidden, false);
+  node("[data-finish-records]").listeners.click();
+  assert.equal(window.location.hash, "records");
 });
