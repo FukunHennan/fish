@@ -1472,10 +1472,12 @@
     cameraLoading: false, controls: null,
     processing: false, sessionRefreshing: false, lastSessionRefresh: 0, metrics: {},
     overlays: { detections: false, plannedPath: false, trajectory: false },
-    // Once the referee touches the slider, keep its thumb on the requested
-    // value. Camera telemetry is asynchronous and may briefly contain an old
-    // value; it must only update the separate "actual value" readout.
+    // Keep an unsaved slider draft separate from asynchronous camera telemetry.
     exposureDesired: null,
+    exposureDirty: false, exposureSaving: false,
+    exposurePendingActionId: null, exposurePendingValue: null,
+    exposureSaveTimeout: null, exposurePollTimer: null,
+    exposureSaveMessage: "调整后点击保存", exposureSaveTone: "info",
     cropRegion: { x: 0, y: 0, width: 1, height: 1 }, cropDraft: null,
     cropDragging: false, cropDirty: false, cropLoaded: false, cropResizeObserver: null,
     rotationAngle: 0, rotationDraft: null, rotationLoaded: false,
@@ -2941,9 +2943,17 @@
       var desired = video.exposureDesired === null ? finiteNumber(range.value) : video.exposureDesired;
       setpoint.textContent = desired === null ? "—" : formatNumber(desired);
     }
-    range.disabled = !video.sessionId || exposure.supported === false;
+    range.disabled = !video.sessionId || exposure.supported === false || video.exposureSaving;
     value.textContent = exposure.supported === false
       ? "当前相机不支持" : actual === null ? "等待相机回报" : formatNumber(actual);
+    var saveButton = document.getElementById("saveExposureBtn");
+    var saveStatus = document.getElementById("exposureSaveStatus");
+    if (saveButton) saveButton.disabled = range.disabled || !video.exposureDirty || video.exposureSaving;
+    if (saveStatus) {
+      saveStatus.textContent = !video.sessionId ? "启动相机后可保存" : exposure.supported === false
+        ? "当前相机不支持手动曝光" : video.exposureSaveMessage;
+      saveStatus.dataset.tone = video.exposureSaveTone;
+    }
     var reportedCrop = normalizeCropRegion(metrics.crop);
     if (reportedCrop && !video.cropDirty && !video.cropDragging) video.cropRegion = reportedCrop;
     var reportedRotation = normalizeRotation(metrics.rotationAngle);
@@ -2952,13 +2962,63 @@
     renderRotationControls();
   }
 
+  function resetExposureEditor() {
+    if (video.exposureSaveTimeout) clearTimeout(video.exposureSaveTimeout);
+    if (video.exposurePollTimer) clearTimeout(video.exposurePollTimer);
+    video.exposureDesired = null;
+    video.exposureDirty = false;
+    video.exposureSaving = false;
+    video.exposurePendingActionId = null;
+    video.exposurePendingValue = null;
+    video.exposureSaveTimeout = null;
+    video.exposurePollTimer = null;
+    video.exposureSaveMessage = "调整后点击保存";
+    video.exposureSaveTone = "info";
+  }
+
+  function finishExposureSave(actionId, result) {
+    if (!actionId || video.exposurePendingActionId !== actionId) return;
+    if (video.exposureSaveTimeout) clearTimeout(video.exposureSaveTimeout);
+    if (video.exposurePollTimer) clearTimeout(video.exposurePollTimer);
+    video.exposureSaveTimeout = null;
+    video.exposurePollTimer = null;
+    video.exposureSaving = false;
+    video.exposurePendingActionId = null;
+    var actual = result && result.actualValue != null ? finiteNumber(result.actualValue) : null;
+    if (result && result.status === "completed" && actual !== null) {
+      video.exposureDirty = false;
+      video.exposureDesired = null;
+      video.exposureSaveMessage = "已保存至 program.json · 实际值 " + formatNumber(actual);
+      video.exposureSaveTone = "ok";
+      setVisionStatus("曝光已保存，实际值 " + formatNumber(actual), "ok");
+    } else {
+      video.exposureDirty = true;
+      video.exposureDesired = video.exposurePendingValue;
+      var reason = result && result.errorCode ? result.errorCode : "未收到相机确认";
+      video.exposureSaveMessage = "保存失败：" + reason;
+      video.exposureSaveTone = "error";
+      setVisionStatus("曝光保存失败：" + reason, "error");
+    }
+    video.exposurePendingValue = null;
+    renderCameraTelemetry();
+  }
+
   function applyCameraExposure(rawValue) {
     var value = finiteNumber(rawValue);
-    if (!video.sessionId || value === null) return;
+    if (!video.sessionId || value === null || !video.exposureDirty || video.exposureSaving) return Promise.resolve();
     video.exposureDesired = value;
-    var actionId = "referee-exposure-" + Date.now();
-    setVisionStatus("正在设置相机曝光…", "info");
-    api("/api/vision/sessions/" + encodeURIComponent(video.sessionId) + "/actions", {
+    video.exposureSaving = true;
+    var actionId = "referee-exposure-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+    video.exposurePendingActionId = actionId;
+    video.exposurePendingValue = value;
+    video.exposureSaveMessage = "正在保存，等待相机确认…";
+    video.exposureSaveTone = "info";
+    renderCameraTelemetry();
+    setVisionStatus("正在保存相机曝光…", "info");
+    video.exposureSaveTimeout = setTimeout(function () {
+      finishExposureSave(actionId, { status: "failed", errorCode: "相机确认超时，可重试" });
+    }, 12000);
+    return api("/api/vision/sessions/" + encodeURIComponent(video.sessionId) + "/actions", {
       method: "POST",
       body: {
         type: "camera.exposure",
@@ -2967,14 +3027,19 @@
         actionId: actionId,
       },
     }).then(function () {
-      setTimeout(function () { refreshVisionSession(true); }, 350);
-      setVisionStatus("曝光设置已发送，等待相机确认", "ok");
+      function pollConfirmation() {
+        if (video.exposurePendingActionId !== actionId) return;
+        refreshVisionSession(true).finally(function () {
+          if (video.exposurePendingActionId === actionId) {
+            video.exposurePollTimer = setTimeout(pollConfirmation, 700);
+          }
+        });
+      }
+      if (video.exposurePendingActionId === actionId) {
+        video.exposurePollTimer = setTimeout(pollConfirmation, 350);
+      }
     }).catch(function (error) {
-      // Only return control to telemetry when the requested value failed.
-      if (video.exposureDesired === value) video.exposureDesired = null;
-      renderCameraTelemetry();
-      setVisionStatus("曝光设置失败：" + error.message, "error");
-      refreshVisionSession(true);
+      finishExposureSave(actionId, { status: "failed", errorCode: error.message });
     });
   }
 
@@ -3055,15 +3120,20 @@
         });
         var exposureRange = document.getElementById("exposureRange");
         var exposureSetpoint = document.getElementById("exposureSetpoint");
+        var saveExposure = document.getElementById("saveExposureBtn");
         if (exposureRange) {
           exposureRange.addEventListener("input", function (event) {
             video.exposureDesired = finiteNumber(event.target.value);
+            video.exposureDirty = video.exposureDesired !== null;
+            video.exposureSaveMessage = "尚未保存 · 点击保存曝光";
+            video.exposureSaveTone = "info";
             if (exposureSetpoint) exposureSetpoint.textContent = formatNumber(event.target.value);
-          });
-          exposureRange.addEventListener("change", function (event) {
-            applyCameraExposure(event.target.value);
+            renderCameraTelemetry();
           });
         }
+        if (saveExposure) saveExposure.addEventListener("click", function () {
+          applyCameraExposure(exposureRange && exposureRange.value);
+        });
       }
       bindCropEditor();
       bindTrackingControls();
@@ -3140,9 +3210,16 @@
   }
 
   function applyVisionSession(session) {
+    var priorSessionId = video.sessionId;
     video.sessionId = session.sessionId || null;
+    if (priorSessionId && priorSessionId !== video.sessionId) resetExposureEditor();
     video.processing = session.state === "processing" || session.state === "tracking";
     video.metrics = session.metrics || {};
+    var exposureAction = session.lastAction;
+    if (video.exposurePendingActionId && exposureAction && exposureAction.actionId === video.exposurePendingActionId &&
+        (exposureAction.status === "completed" || exposureAction.status === "failed")) {
+      finishExposureSave(exposureAction.actionId, exposureAction);
+    }
     video.trackingMode = session.trackingMode || video.trackingMode || "single_fish";
     video.trackingDeviceId = session.targetDeviceId || video.trackingDeviceId || "";
     video.trackingTrackId = video.trackingMode === "single_fish" || session.targetTrackId == null
@@ -3253,7 +3330,7 @@
       setVisionStatus("请先选择服务器摄像头", "warn");
       return;
     }
-    video.exposureDesired = null;
+    resetExposureEditor();
     setVisionStatus("正在启动真实摄像头视频…", "info");
     return api("/api/vision/sessions", {
       method: "POST",
@@ -3282,7 +3359,7 @@
       .then(function () {
         video.sessionId = null;
         video.processing = false;
-        video.exposureDesired = null;
+        resetExposureEditor();
         closeVideoPeer();
         renderVideoControls();
         setVisionStatus("服务器视频已停止；手动操控仍可用", "info");
@@ -3293,7 +3370,7 @@
 
   function switchServerCamera(index) {
     video.cameraIndex = String(index || "");
-    video.exposureDesired = null;
+    resetExposureEditor();
     renderVideoControls();
     if (!video.sessionId || !video.cameraIndex) return;
     return api("/api/vision/sessions/" + encodeURIComponent(video.sessionId) + "/camera", {

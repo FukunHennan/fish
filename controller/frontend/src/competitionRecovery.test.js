@@ -11,6 +11,10 @@ const playerPage = readFileSync(
   new URL("../public/competition/player_interface.html", import.meta.url),
   "utf8",
 );
+const refereePage = readFileSync(
+  new URL("../public/competition/referee_interface.html", import.meta.url),
+  "utf8",
+);
 
 test("裁判端禁用循迹按钮会汇总原因并提供悬停提示", () => {
   assert.match(adapter, /function trackingStartBlockers\(workflow\)/);
@@ -267,4 +271,101 @@ test("比赛结束提示显示比分，关闭后不被轮询重复打开", () =>
   node("[data-finish-records]").listeners.click();
   assert.equal(window.location.hash, "records");
   assert.deepEqual(dismissed, ["match-1", "match-2"]);
+});
+
+test("曝光只在点击保存后提交，并等待相机确认写回", async () => {
+  const renderStart = adapter.indexOf("  function renderCameraTelemetry() {");
+  const renderEnd = adapter.indexOf("  function renderVideoControls() {", renderStart);
+  const sessionStart = adapter.indexOf("  function applyVisionSession(session) {");
+  const sessionEnd = adapter.indexOf("  function startVisionEvents() {", sessionStart);
+  assert.ok(renderStart >= 0 && renderEnd > renderStart && sessionStart >= 0 && sessionEnd > sessionStart);
+  assert.match(refereePage, /id="saveExposureBtn"/);
+  assert.match(adapter, /saveExposure\.addEventListener\("click"/);
+  assert.doesNotMatch(adapter, /exposureRange\.addEventListener\("change"/);
+
+  const elements = {
+    exposureRange: { value: "-6", disabled: false },
+    exposureSetpoint: { textContent: "" },
+    exposureValue: { textContent: "" },
+    saveExposureBtn: { disabled: true },
+    exposureSaveStatus: { textContent: "", dataset: {} },
+  };
+  const requests = [];
+  const timers = [];
+  const video = {
+    sessionId: "session-1", metrics: { exposure: { supported: true, actualValue: -6, minimum: -13, maximum: -1, step: 1 } },
+    exposureDesired: null, exposureDirty: false, exposureSaving: false,
+    exposurePendingActionId: null, exposurePendingValue: null,
+    exposureSaveTimeout: null, exposureSaveMessage: "调整后点击保存", exposureSaveTone: "info",
+    rotationDraft: null, cropDirty: false, cropDragging: false, overlays: {},
+  };
+  const controls = runInNewContext(
+    adapter.slice(renderStart, renderEnd) + adapter.slice(sessionStart, sessionEnd) +
+      "\n({ renderCameraTelemetry, applyCameraExposure, applyVisionSession })",
+    {
+      video,
+      document: { querySelector: () => null, getElementById: (id) => elements[id] || null },
+      finiteNumber(value) { const number = Number(value); return Number.isFinite(number) ? number : null; },
+      formatNumber: String,
+      normalizeCropRegion: () => null, normalizeRotation: () => null,
+      renderCropEditor() {}, renderRotationControls() {}, renderVideoControls() {}, renderPlayerDetectionOverlay() {},
+      setVisionStatus() {}, refreshVisionSession: async () => {},
+      api(path, options) { requests.push({ path, options }); return Promise.resolve({ accepted: true }); },
+      setTimeout(callback, delay) { const timer = { callback, delay }; timers.push(timer); return timer; },
+      clearTimeout(timer) { timer.cleared = true; },
+    },
+  );
+  controls.renderCameraTelemetry();
+  assert.equal(elements.saveExposureBtn.disabled, true);
+  video.exposureDesired = -3;
+  video.exposureDirty = true;
+  video.exposureSaveMessage = "尚未保存 · 点击保存曝光";
+  elements.exposureRange.value = "-3";
+  controls.renderCameraTelemetry();
+  assert.equal(requests.length, 0, "拖动滑块不应立即提交");
+  assert.equal(elements.saveExposureBtn.disabled, false);
+  await controls.applyCameraExposure(elements.exposureRange.value);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].options.body.type, "camera.exposure");
+  assert.equal(requests[0].options.body.value, -3);
+  assert.equal(elements.saveExposureBtn.disabled, true, "等待确认时不得重复提交");
+  assert.equal(elements.exposureRange.disabled, true, "等待确认时不得修改待保存值");
+  timers.find((timer) => timer.delay === 350).callback();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(timers.some((timer) => timer.delay === 700), "SSE 延迟时仍应轮询确认结果");
+  const actionId = requests[0].options.body.actionId;
+  controls.applyVisionSession({
+    sessionId: "session-1", state: "previewing",
+    metrics: { exposure: { supported: true, actualValue: -3 } },
+    lastAction: { actionId, status: "completed", actualValue: -3 },
+  });
+  assert.equal(video.exposureDirty, false);
+  assert.equal(video.exposureSaving, false);
+  assert.equal(elements.exposureRange.disabled, false);
+  assert.match(elements.exposureSaveStatus.textContent, /已保存至 program\.json/);
+  assert.equal(elements.exposureRange.value, "-3");
+  assert.ok(timers.some((timer) => timer.delay === 12000 && timer.cleared));
+  assert.ok(timers.some((timer) => timer.delay === 700 && timer.cleared));
+
+  video.exposureDesired = -2;
+  video.exposureDirty = true;
+  elements.exposureRange.value = "-2";
+  await controls.applyCameraExposure("-2");
+  controls.applyVisionSession({
+    sessionId: "session-1", state: "previewing",
+    metrics: { exposure: { supported: true, actualValue: -3 } },
+    lastAction: { actionId: requests[1].options.body.actionId, status: "failed", errorCode: "exposure_not_applied" },
+  });
+  assert.equal(video.exposureDirty, true);
+  assert.equal(elements.exposureRange.disabled, false);
+  assert.equal(elements.saveExposureBtn.disabled, false, "相机拒绝时允许重新保存");
+  assert.match(elements.exposureSaveStatus.textContent, /保存失败/);
+  await controls.applyCameraExposure("-2");
+  controls.applyVisionSession({
+    sessionId: "session-1", state: "previewing",
+    metrics: { exposure: { supported: true, actualValue: -3 } },
+    lastAction: { actionId: requests[2].options.body.actionId, status: "completed", actualValue: null },
+  });
+  assert.equal(video.exposureDirty, true, "没有相机实际值时不得显示保存成功");
+  assert.match(elements.exposureSaveStatus.textContent, /保存失败/);
 });
