@@ -1466,7 +1466,8 @@
     connectionStartedAt: 0, connectedAt: 0, lastFrameAt: 0,
     connectionGeneration: 0,
     frameWatchTimer: null, frameCallbackId: null, frameElement: null,
-    fallback: false, fallbackTimer: null, fallbackElement: null, fallbackErrors: 0,
+    fallback: false, fallbackTimer: null, fallbackRequest: null,
+    fallbackElement: null, fallbackObjectUrl: null, fallbackErrors: 0,
     events: null,
     statusText: "视觉未启用", source: "server", cameras: [], cameraIndex: "",
     cameraLoading: false, controls: null,
@@ -1517,44 +1518,105 @@
     });
   }
 
+  function scheduleFallbackFrame(delay) {
+    if (video.fallbackTimer) clearTimeout(video.fallbackTimer);
+    video.fallbackTimer = setTimeout(function () {
+      video.fallbackTimer = null;
+      requestFallbackFrame();
+    }, delay);
+  }
+
   function requestFallbackFrame() {
-    if (!video.fallback || !video.sessionId) return;
-    if (document.hidden) {
-      video.fallbackTimer = setTimeout(requestFallbackFrame, 500);
-      return;
-    }
+    if (!video.fallback || !video.sessionId || video.fallbackRequest) return;
     var stage = videoSurface();
-    if (!stage) {
-      video.fallbackTimer = setTimeout(requestFallbackFrame, 500);
+    if (document.hidden || !stage) {
+      scheduleFallbackFrame(500);
       return;
     }
-    if (!stage.querySelector("img[data-fish-fallback-frame]")) mountVideoSurface();
-    var image = stage.querySelector("img[data-fish-fallback-frame]");
-    if (!image) return;
-    video.fallbackElement = image;
-    var generation = video.connectionGeneration;
-    function current() {
-      return video.fallback && video.connectionGeneration === generation && video.fallbackElement === image;
+    if (!stage.querySelector("img[data-fish-fallback-frame]")) {
+      mountVideoSurface();
+      stage = videoSurface();
     }
-    image.onload = function () {
-      if (!current()) return;
-      video.fallbackErrors = 0;
-      video.lastFrameAt = Date.now();
-      video.statusText = "视觉画面已接入（公网兼容模式）";
-      setVisionStatus(video.statusText, "ok");
-      if (lastDeviceBadge) setBadge(lastDeviceBadge, lastDeviceTone);
-      renderCropEditor();
-      renderPlayerDetectionOverlay();
-      video.fallbackTimer = setTimeout(requestFallbackFrame, 80);
-    };
-    image.onerror = function () {
-      if (!current()) return;
-      video.fallbackErrors += 1;
-      if (!video.lastFrameAt) setVisionStatus("正在等待摄像头首帧（公网兼容模式）", "warn");
-      video.fallbackTimer = setTimeout(requestFallbackFrame, Math.min(3000, 400 * video.fallbackErrors));
-    };
-    image.src = "/api/vision/frame.jpg?sessionId=" + encodeURIComponent(video.sessionId) +
+    var generation = video.connectionGeneration;
+    var sessionId = video.sessionId;
+    var controller = new AbortController();
+    var request = { controller: controller };
+    video.fallbackRequest = request;
+    var timeout = setTimeout(function () { controller.abort(); }, 6000);
+    function current() {
+      return video.fallback && video.connectionGeneration === generation && video.sessionId === sessionId;
+    }
+    var path = "/api/vision/frame.jpg?sessionId=" + encodeURIComponent(sessionId) +
       "&view=" + (isRefereePage() ? "full" : "cropped") + "&t=" + Date.now();
+    fetch(path, { credentials: "same-origin", cache: "no-store", signal: controller.signal })
+      .then(function (response) {
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        return response.blob();
+      })
+      .then(function (blob) {
+        return new Promise(function (resolve, reject) {
+          var url = URL.createObjectURL(blob);
+          var preview = new Image();
+          var settled = false;
+          var decodeTimeout = setTimeout(function () { finish(new Error("JPEG 解码超时")); }, 3000);
+          function finish(error) {
+            if (settled) return;
+            settled = true;
+            clearTimeout(decodeTimeout);
+            preview.onload = null;
+            preview.onerror = null;
+            if (error) {
+              URL.revokeObjectURL(url);
+              reject(error);
+            } else {
+              resolve({ url: url, width: preview.naturalWidth, height: preview.naturalHeight });
+            }
+          }
+          preview.onload = function () { finish(); };
+          preview.onerror = function () { finish(new Error("JPEG 解码失败")); };
+          preview.src = url;
+        });
+      })
+      .then(function (frame) {
+        if (!current()) {
+          URL.revokeObjectURL(frame.url);
+          return;
+        }
+        // The page may have replaced the stage while the request was in flight.
+        // Resolve the current element only after the complete frame is decoded.
+        var stage = videoSurface();
+        if (stage && !stage.querySelector("img[data-fish-fallback-frame]")) {
+          mountVideoSurface();
+          stage = videoSurface();
+        }
+        var image = stage && stage.querySelector("img[data-fish-fallback-frame]");
+        if (!image) {
+          URL.revokeObjectURL(frame.url);
+          return;
+        }
+        image.src = frame.url;
+        video.fallbackElement = image;
+        if (video.fallbackObjectUrl) URL.revokeObjectURL(video.fallbackObjectUrl);
+        video.fallbackObjectUrl = frame.url;
+        video.fallbackErrors = 0;
+        video.lastFrameAt = Date.now();
+        video.statusText = "视觉画面已接入（公网兼容模式）";
+        setVisionStatus(video.statusText, "ok");
+        if (lastDeviceBadge) setBadge(lastDeviceBadge, lastDeviceTone);
+        renderCropEditor();
+        renderPlayerDetectionOverlay();
+      })
+      .catch(function () {
+        if (!current()) return;
+        video.fallbackErrors += 1;
+        if (!video.lastFrameAt) setVisionStatus("正在等待摄像头首帧（公网兼容模式）", "warn");
+        else if (Date.now() - video.lastFrameAt > 5000) setVisionStatus("公网兼容画面中断，正在重试", "warn");
+      })
+      .finally(function () {
+        clearTimeout(timeout);
+        if (video.fallbackRequest === request) video.fallbackRequest = null;
+        if (current()) scheduleFallbackFrame(video.fallbackErrors ? Math.min(3000, 400 * video.fallbackErrors) : 80);
+      });
   }
 
   function startFrameFallback(reason) {
@@ -1804,8 +1866,12 @@
       fallbackImage.alt = "实时赛场画面";
       fallbackImage.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-index:1;pointer-events:none";
       stage.insertBefore(fallbackImage, stage.firstChild);
+      if (video.fallbackObjectUrl) fallbackImage.src = video.fallbackObjectUrl;
     }
-    if (fallbackImage) fallbackImage.hidden = !video.fallback;
+    if (fallbackImage) {
+      fallbackImage.hidden = !video.fallback;
+      if (video.fallback) video.fallbackElement = fallbackImage;
+    }
     if (backdrop && video.stream && backdrop.srcObject !== video.stream) {
       backdrop.srcObject = video.stream;
       var backdropPlayed = backdrop.play();
@@ -3033,6 +3099,10 @@
       clearTimeout(video.fallbackTimer);
       video.fallbackTimer = null;
     }
+    if (video.fallbackRequest) {
+      video.fallbackRequest.controller.abort();
+      video.fallbackRequest = null;
+    }
     video.fallback = false;
     video.fallbackErrors = 0;
     if (video.fallbackElement) {
@@ -3041,6 +3111,10 @@
       video.fallbackElement.removeAttribute("src");
       video.fallbackElement.hidden = true;
       video.fallbackElement = null;
+    }
+    if (video.fallbackObjectUrl) {
+      URL.revokeObjectURL(video.fallbackObjectUrl);
+      video.fallbackObjectUrl = null;
     }
     if (video.peer) {
       try { video.peer.close(); } catch (e) { /* 忽略关闭异常 */ }

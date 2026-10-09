@@ -68,3 +68,72 @@ test("非 trickle 信令等待 ICE 候选完成才提交 Offer", async () => {
   timers[1].callback();
   await assert.rejects(timedOut, /ICE 候选收集超时/);
 });
+
+test("HTTPS 兼容画面在重绘和请求超时后继续轮询", async () => {
+  const begin = adapter.indexOf("  function scheduleFallbackFrame(delay) {");
+  const end = adapter.indexOf("  function startFrameFallback(reason) {", begin);
+  assert.ok(begin >= 0 && end > begin);
+  const timers = [];
+  const requests = [];
+  const revoked = [];
+  function makeStage() { return { image: { src: "" }, querySelector() { return this.image; } }; }
+  let stage = makeStage();
+  let nextBlob = 0;
+  const video = {
+    fallback: true, sessionId: "session-1", connectionGeneration: 1,
+    fallbackRequest: null, fallbackTimer: null, fallbackErrors: 0,
+    fallbackElement: null, fallbackObjectUrl: null, lastFrameAt: 0,
+  };
+  class FakeAbortController {
+    constructor() {
+      this.listeners = [];
+      this.signal = { addEventListener: (_name, callback) => this.listeners.push(callback) };
+    }
+    abort() { this.listeners.forEach((callback) => callback()); }
+  }
+  class FakeImage {
+    set src(value) {
+      this.value = value;
+      this.naturalWidth = 640;
+      this.naturalHeight = 480;
+      queueMicrotask(() => this.onload?.());
+    }
+  }
+  const requestFallbackFrame = runInNewContext(adapter.slice(begin, end) + "\nrequestFallbackFrame", {
+    video, document: { hidden: false }, videoSurface: () => stage,
+    mountVideoSurface: () => { video.fallbackElement = stage.image; },
+    fetch: (_url, options) => new Promise((resolve, reject) => {
+      requests.push({ resolve, reject });
+      options.signal.addEventListener("abort", () => reject(new Error("aborted")));
+    }),
+    AbortController: FakeAbortController, Image: FakeImage,
+    URL: { createObjectURL: () => `blob:${++nextBlob}`, revokeObjectURL: (url) => revoked.push(url) },
+    setTimeout: (callback, delay) => {
+      const timer = { callback, delay, cleared: false };
+      timers.push(timer);
+      return timer;
+    },
+    clearTimeout: (timer) => { timer.cleared = true; },
+    isRefereePage: () => false, setVisionStatus() {}, setBadge() {},
+    lastDeviceBadge: null, renderCropEditor() {}, renderPlayerDetectionOverlay() {},
+  });
+
+  requestFallbackFrame();
+  requestFallbackFrame();
+  assert.equal(requests.length, 1, "only one image request may be active");
+  stage = makeStage(); // The application rerendered the video stage.
+  requests[0].resolve({ ok: true, blob: async () => ({}) });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(stage.image.src, "blob:1", "decoded frame must attach to the new stage");
+  const next = timers.find((timer) => timer.delay === 80 && !timer.cleared);
+  assert.ok(next, "a successful frame must schedule another request");
+  next.callback();
+  assert.equal(requests.length, 2);
+  const networkTimeout = timers.findLast((timer) => timer.delay === 6000 && !timer.cleared);
+  networkTimeout.callback();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(video.fallbackRequest, null);
+  assert.equal(video.fallbackErrors, 1);
+  assert.ok(timers.some((timer) => timer.delay === 400 && !timer.cleared));
+  assert.deepEqual(revoked, []);
+});
