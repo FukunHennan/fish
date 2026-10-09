@@ -1,10 +1,10 @@
 $ErrorActionPreference = "Stop"
 
-$root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $runtime = Join-Path $root "controller\.runtime"
 $controllerExe = [IO.Path]::GetFullPath((Join-Path $runtime "fish-controller.exe"))
 $cloudflaredExe = [IO.Path]::GetFullPath((Join-Path $runtime "cloudflared.exe"))
-$launcher = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "start.bat"))
+$launcher = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\start.bat"))
 $currentLauncherPid = (Get-CimInstance Win32_Process -Filter "ProcessId=$PID").ParentProcessId
 
 function Get-ProcessPath($process) {

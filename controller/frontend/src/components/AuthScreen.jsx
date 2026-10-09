@@ -1,9 +1,7 @@
 import { useState } from "react";
 
 function normalizeLoginAccount(value) {
-  const account = String(value || "").trim();
-  if (!account || account.includes("@")) return account;
-  return `${account}@fish.local`;
+  return String(value || "").trim();
 }
 
 export default function AuthScreen({ onAuthenticated, bootstrap }) {
@@ -79,8 +77,8 @@ export default function AuthScreen({ onAuthenticated, bootstrap }) {
             <form className="auth-form" onSubmit={submitAuth}>
               {mode === "bootstrap" ? <div className="auth-two-col">
                 <label className="auth-field"><span>姓名</span><input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" placeholder="请输入姓名" /></label>
-                <label className="auth-field"><span>邮箱</span><input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" placeholder="请输入账号邮箱" /></label>
-              </div> : <label className="auth-field"><span>账号</span><input value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="username" placeholder="referee 或 team-blue" /></label>}
+                <label className="auth-field"><span>账号</span><input value={email} maxLength={20} onChange={(event) => setEmail(event.target.value)} autoComplete="username" placeholder="最多 20 个字符" /></label>
+              </div> : <label className="auth-field"><span>账号</span><input value={email} maxLength={20} onChange={(event) => setEmail(event.target.value)} autoComplete="username" placeholder="1、2 或 3" /></label>}
               {mode === "bootstrap" ? <div className="auth-two-col">
                 <label className="auth-field"><span>设置密码</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" /></label>
                 <label className="auth-field"><span>确认密码</span><input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" /></label>

@@ -46,7 +46,7 @@ http://127.0.0.1:8081/competition.html
 
 开发时可单独运行 Vite 预览赛事端；正式前端只有这一套赛事界面，由 Go 的 `8081` 端口提供。
 
-`GET http://127.0.0.1:8081/api/logs?limit=100` 返回当前启动会话的结构化日志尾部；日志文件保存在 `controller/diagnostics/runs/`。接口要求管理员身份，当前配置将 `FISH_AUTH_DISABLED` 设为 `true`，免登录访问会获得匿名管理员身份（包括公网）；已设置的进程环境变量会覆盖 JSON。公网链接只能分享给可信人员，必要时先关闭隧道。
+`GET http://127.0.0.1:8081/api/logs?limit=100` 返回当前启动会话的结构化日志尾部；日志文件保存在 `controller/diagnostics/runs/`。接口要求管理员身份，当前配置将 `FISH_AUTH_DISABLED` 设为 `false`；已设置的进程环境变量会覆盖 JSON。裁判页面仅账号 `3` 可访问。
 
 ## 文档入口
 
@@ -64,7 +64,7 @@ firmware/    ESP32 固件
 controller/  Go 控制器和赛事前端（React 源码仅作历史实验保留）
 vision/      Python、YOLO、OpenCV 和视频服务
 protocol/    ESP32 与 Go 的当前 v2 通信协议
-config/      三个手动配置入口：firmware.json、program.json、tunnel.json
+config/      三个手动部署配置，以及按 MAC 保存的 device-motion.json
 scripts/     唯一启动入口、上传和诊断脚本
 docs/        技术文档和展示文件
 ```
@@ -84,7 +84,7 @@ USB 烧录需要连接设备后执行 PlatformIO Upload。仅修改电脑端 GUI
 
 ## 配置提醒
 
-- 日常配置统一修改 `config/firmware.json`、`config/program.json`、`config/tunnel.json`，字段和启动行为见[配置入口](config/README.md)。固件和控制器共用 `firmware.json` 中的 `deploymentKey`。
+- 部署配置统一修改 `config/firmware.json`、`config/program.json`、`config/tunnel.json`；设备运动参数保存在 `config/device-motion.json`，按 MAC 继承和更新。字段与启动行为见[配置入口](config/README.md)。固件和控制器共用 `firmware.json` 中的 `deploymentKey`。
 - 项目当前启用 Cloudflare Tunnel 并关闭内建登录：知道域名的人均可操作管理员功能。风险与配置步骤见[公网访问配置](docs/程序/公网访问配置.md)。
 - Windows 开发机通过 `scripts\start.bat` 构建并启动本地控制器；脚本会注册 `FishStack` 登录启动任务，统一守护控制器和 Cloudflare Tunnel。
 - OTA 只能由管理员发起。

@@ -34,10 +34,11 @@ Windows 登录启动任务名为 `FishStack`，由启动脚本尝试安装；注
 
 | 配置文件 | 字段 | 当前值或代码约束 | 调整后 |
 | --- | --- | --- | --- |
-| `config/program.json` | `FISH_AUTH_DISABLED` | 当前 `true` 关闭认证并赋予匿名管理员权限；`false` 启用登录 | 重启 Go |
+| `config/program.json` | `FISH_AUTH_DISABLED` | 当前 `false`；账号 `1`、`2` 进入选手端，`3` 进入裁判端，同账号仅保留最新会话 | 重启 Go |
 | 同上 | `FISH_CAMERA_INDEX` | 当前 `1`；应是实际相机枚举编号，代码未限制上界 | 重启视觉服务并核对画面 |
 | 同上 | `FISH_CAPTURE_WIDTH` / `HEIGHT` | 当前实测使用 `640×480`；代码按整数读取，未验证任意尺寸 | 重启视觉服务，核对设备返回尺寸与帧率 |
 | 同上 | `FISH_CAPTURE_FOURCC` | 四字符格式；长度不为 4 时退回 `YUY2` | 重启视觉服务 |
+| 同上 | `camera.rotationAngle` / `camera.exposure` | 当前 `0°` / `-9`；角度限制 -180°～180°，曝光可调范围取决于相机驱动 | 裁判端保存后立即重开预览；手工修改后重新打开预览 |
 | 同上 | `FISH_YOLO_IMGSZ` / `DEVICE` | 当前 `1920` / `0`；整数设备号要求对应 GPU，`cpu` 需显式设置 | 重启视觉服务 |
 | 同上 | `FISH_TARGET_LOSS_*` | 当前宽限 `3.0s`、预测 `1.0s`、最大位移 `0.20m`；代码未统一限制范围 | 重启视觉服务，重新验证循迹 |
 | 同上 | `FISH_WEBRTC_*` | STUN 有默认值；TURN 地址、账号、凭据当前为空 | 重启视觉服务，测试远程视频 |
@@ -45,4 +46,4 @@ Windows 登录启动任务名为 `FishStack`，由启动脚本尝试安装；注
 | `config/firmware.json` | `deploymentKey` | 必须是 32 字节十六进制；Go 与固件必须一致 | 重新编译烧录固件并重启 Go |
 | 同上 | `settings` | 引脚、采样、超时及游泳默认值；`SWIM_SPEED` 注释建议 1.0–4.0，`SWIM_POWER` 建议 10–40 | 重新编译烧录固件，实机核对 |
 
-`program.json` 的值是进程环境变量的默认值；已设置的同名环境变量优先。视觉标定文件由程序生成，账号、比赛和运动标定在用户配置目录中保存，均不要求手工修改。完整字段见[配置说明](../../config/README.md)。
+`program.json` 中 `environment` 的值是进程环境变量的默认值，已设置的同名环境变量优先；`camera` 的两个字段由视觉服务直接读写。其他视觉标定文件由程序生成，账号、比赛和运动标定在用户配置目录中保存，均不要求手工修改。完整字段见[配置说明](../../config/README.md)。

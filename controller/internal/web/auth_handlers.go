@@ -3,6 +3,7 @@ package web
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -75,6 +76,17 @@ func (s *server) requireAdmin(w http.ResponseWriter, r *http.Request) (authUser,
 }
 
 func (s *server) authMe(w http.ResponseWriter, r *http.Request) {
+	if s.auth.userCount() == 0 {
+		if err := s.auth.load(); err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				log.Printf("auth users retry failed: %v", err)
+			}
+		}
+	}
+	if err := s.auth.readinessError(); err != nil {
+		writeAuthError(w, http.StatusServiceUnavailable, "账号库读取失败，请检查服务日志")
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	if !s.authActive() {
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -103,6 +115,10 @@ func (s *server) authMe(w http.ResponseWriter, r *http.Request) {
 func (s *server) authRegister(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "仅支持 POST", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := s.auth.readinessError(); err != nil {
+		writeAuthError(w, http.StatusServiceUnavailable, "账号库读取失败，请检查服务日志")
 		return
 	}
 	var input struct {
@@ -142,6 +158,10 @@ func (s *server) authLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "仅支持 POST", http.StatusMethodNotAllowed)
 		return
 	}
+	if err := s.auth.readinessError(); err != nil {
+		writeAuthError(w, http.StatusServiceUnavailable, "账号库读取失败，请检查服务日志")
+		return
+	}
 	var input struct {
 		Email, Password string
 	}
@@ -152,7 +172,7 @@ func (s *server) authLogin(w http.ResponseWriter, r *http.Request) {
 	user, ok := s.auth.authenticate(input.Email, input.Password)
 	if !ok {
 		w.WriteHeader(http.StatusUnauthorized)
-		_ = json.NewEncoder(w).Encode(map[string]any{"authenticated": false, "message": "邮箱、密码或账号状态不正确"})
+		_ = json.NewEncoder(w).Encode(map[string]any{"authenticated": false, "message": "账号、密码或账号状态不正确"})
 		return
 	}
 	session, err := s.auth.createSession(user)
@@ -160,6 +180,14 @@ func (s *server) authLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "无法创建会话", http.StatusInternalServerError)
 		return
 	}
+	if previousCookie, cookieErr := r.Cookie(sessionCookieName); cookieErr == nil {
+		if previousUser, exists := s.auth.userBySession(previousCookie.Value); exists && previousUser.ID != user.ID {
+			_ = s.auth.clearSession(previousCookie.Value)
+			s.leases.releaseOwner(previousUser.ID)
+		}
+	}
+	s.leases.releaseOwner(user.ID)
+	s.hub.Notify()
 	setSessionCookie(w, session)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"authenticated": true, "user": publicUser(user)})
@@ -171,9 +199,14 @@ func (s *server) authLogout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if cookie, err := r.Cookie(sessionCookieName); err == nil {
+		user, active := s.auth.userBySession(cookie.Value)
 		if err := s.auth.clearSession(cookie.Value); err != nil {
 			writeAuthError(w, http.StatusInternalServerError, "退出保存失败，请重试")
 			return
+		}
+		if active {
+			s.leases.releaseOwner(user.ID)
+			s.hub.Notify()
 		}
 	}
 	clearSessionCookie(w)
@@ -200,9 +233,9 @@ func (s *server) authUsers(w http.ResponseWriter, r *http.Request) {
 		}
 		created, err := s.auth.createUser(input.Name, input.Email, input.Password, input.Role)
 		if err != nil {
-			status, message := http.StatusBadRequest, "账户信息无效，密码至少 8 位"
+			status, message := http.StatusBadRequest, "账号不能为空且最多 20 个字符"
 			if errors.Is(err, os.ErrExist) {
-				status, message = http.StatusConflict, "该邮箱已经存在"
+				status, message = http.StatusConflict, "该账号已经存在"
 			}
 			writeAuthError(w, status, message)
 			return

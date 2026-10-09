@@ -1,12 +1,34 @@
 package web
 
 import (
+	"bytes"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestUnreadableAuthStoreReportsServiceError(t *testing.T) {
+	t.Setenv("FISH_AUTH_DISABLED", "false")
+	path := filepath.Join(t.TempDir(), "users.json")
+	if err := os.WriteFile(path, []byte("invalid JSON"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s := &server{auth: newAuthStore(path)}
+	me := httptest.NewRecorder()
+	s.authMe(me, httptest.NewRequest(http.MethodGet, "/api/auth/me", nil))
+	if me.Code != http.StatusServiceUnavailable {
+		t.Fatalf("auth/me status = %d, want 503: %s", me.Code, me.Body.String())
+	}
+	login := httptest.NewRecorder()
+	s.authLogin(login, httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBufferString(`{"email":"1","password":"1"}`)))
+	if login.Code != http.StatusServiceUnavailable {
+		t.Fatalf("auth/login status = %d, want 503: %s", login.Code, login.Body.String())
+	}
+}
 
 func TestLegacyRolesMigrateToAdminAndUser(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "users.json")
@@ -72,5 +94,46 @@ func TestAuthenticateAcceptsShortAccountName(t *testing.T) {
 	}
 	if _, ok := store.authenticate("team-red", "123456789"); ok {
 		t.Fatal("未建立的短账号不应登录成功")
+	}
+}
+
+func TestNewLoginInvalidatesOnlyPreviousSessionForSameAccount(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "users.json")
+	store := newAuthStore(path)
+	blue, err := store.createUser("蓝队", "1@fish.local", "12345678", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	red, err := store.createUser("红队", "2@fish.local", "12345678", "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldBlue, err := store.createSession(blue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	redSession, err := store.createSession(red)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newBlue, err := store.createSession(blue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := store.userBySession(oldBlue.Token); ok {
+		t.Fatal("旧蓝队会话仍有效")
+	}
+	if _, ok := store.userBySession(newBlue.Token); !ok {
+		t.Fatal("新蓝队会话无效")
+	}
+	if _, ok := store.userBySession(redSession.Token); !ok {
+		t.Fatal("红队会话被错误撤销")
+	}
+	reloaded := newAuthStore(path)
+	if _, ok := reloaded.userBySession(oldBlue.Token); ok {
+		t.Fatal("重启后旧会话恢复")
+	}
+	if _, ok := reloaded.userBySession(newBlue.Token); !ok {
+		t.Fatal("重启后新会话丢失")
 	}
 }

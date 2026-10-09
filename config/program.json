@@ -1,6 +1,7 @@
 {
   "environment": {
-    "FISH_AUTH_DISABLED": "true",
+    "FISH_AUTH_DISABLED": "false",
+    "FISH_AUTH_USERS": "../Pro1-runtime/users.json",
     "FISH_DEVELOPMENT_MODE": "true",
     "FISH_HOT_RELOAD": "true",
     "FISH_TRUST_CF_ACCESS": "false",
@@ -17,5 +18,9 @@
     "FISH_WEBRTC_TURN_URL": "",
     "FISH_WEBRTC_TURN_USERNAME": "",
     "FISH_WEBRTC_TURN_CREDENTIAL": ""
+  },
+  "camera": {
+    "rotationAngle": -90.0,
+    "exposure": -6.0
   }
 }

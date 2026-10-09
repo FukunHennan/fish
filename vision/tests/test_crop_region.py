@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import crop_region as roi
 import video_transform as transform
+import camera_settings
 from types import SimpleNamespace
 from service import VisionService
 from web_api import create_app
@@ -43,9 +44,13 @@ class CropTests(unittest.TestCase):
         frame[1, 2] = (10, 20, 30)
         rotated = transform.rotate(frame, 180)
         np.testing.assert_array_equal(rotated[3, 2], (10, 20, 30))
-        with tempfile.TemporaryDirectory() as folder, patch.object(transform, "PATH", Path(folder) / "transform.json"):
+        with tempfile.TemporaryDirectory() as folder, patch.object(camera_settings, "PATH", Path(folder) / "program.json"):
+            camera_settings.PATH.write_text('{"environment":{},"camera":{"rotationAngle":0,"exposure":-9}}', encoding="utf-8")
             self.assertEqual(transform.load(), transform.DEFAULT)
             self.assertEqual(transform.save({"angle": 12.5}), {"angle": 12.5})
+            self.assertEqual(transform.load(), {"angle": 12.5})
+            self.assertEqual(camera_settings.load()["exposure"], -9.0)
+            camera_settings.save(exposure=-8.0)
             self.assertEqual(transform.load(), {"angle": 12.5})
 
     def test_invalid_rotation_is_rejected(self):
@@ -57,7 +62,8 @@ class CropTests(unittest.TestCase):
         stopped = []
         service = VisionService(runner_factory=lambda *_: lambda: stopped.append(True))
         service.create_session("camera-3", 3)
-        with tempfile.TemporaryDirectory() as folder, patch.object(transform, "PATH", Path(folder) / "transform.json"):
+        with tempfile.TemporaryDirectory() as folder, patch.object(camera_settings, "PATH", Path(folder) / "program.json"):
+            camera_settings.PATH.write_text('{"environment":{},"camera":{"rotationAngle":0,"exposure":-9}}', encoding="utf-8")
             client = create_app(service, camera_provider=lambda: []).test_client()
             response = client.put("/rotation", json={"angle": -7.5})
             self.assertEqual(response.status_code, 200)

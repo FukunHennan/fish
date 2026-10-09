@@ -7,7 +7,7 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-node "%~dp0setup-windows.mjs" %*
+node "%~dp0bootstrap\setup-windows.mjs" %*
 if errorlevel 1 (
   echo [ERROR] Setup did not complete. Read the message above.
   pause

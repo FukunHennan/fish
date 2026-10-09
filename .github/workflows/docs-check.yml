@@ -17,14 +17,19 @@ jobs:
         with:
           fetch-depth: 0
       - name: Test documentation checker
-        run: python3 -m unittest discover -s scripts -p 'test_check_docs.py'
+        run: python3 -m unittest discover -s scripts/docs -p 'test_check_docs.py'
       - name: Validate Windows setup script syntax
         run: |
-          node --check scripts/setup-windows.mjs
-          node scripts/setup-windows.mjs --help
+          node --check scripts/bootstrap/setup-windows.mjs
+          node scripts/bootstrap/setup-windows.mjs --help
+      - name: Verify diagnostic archives
+        run: |
+          node scripts/diagnostics/test-compact-runtime-logs.mjs
+          node scripts/diagnostics/compact-runtime-logs.mjs --check
+          node scripts/diagnostics/check-repository-content.mjs
       - name: Check documentation for changed code
         if: github.event_name == 'push'
-        run: python3 scripts/check_docs.py --mode push --base '${{ github.event.before }}' --head '${{ github.sha }}'
+        run: python3 scripts/docs/check_docs.py --mode push --base '${{ github.event.before }}' --head '${{ github.sha }}'
       - name: Check long-term documentation drift
         if: github.event_name != 'push'
-        run: python3 scripts/check_docs.py --mode stale --days 45
+        run: python3 scripts/docs/check_docs.py --mode stale --days 45

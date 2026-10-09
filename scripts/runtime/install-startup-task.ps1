@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
-$root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$launcher = Join-Path $PSScriptRoot "start.bat"
+$root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$launcher = Join-Path $PSScriptRoot "..\start.bat"
 
 foreach ($path in @($launcher, (Join-Path $root 'config\firmware.json'), (Join-Path $root 'config\program.json'), (Join-Path $root 'config\tunnel.json'))) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {

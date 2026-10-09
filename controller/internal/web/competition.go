@@ -99,6 +99,28 @@ type competitionStore struct {
 	running bool
 }
 
+// 已结束比赛允许裁判更正名称和比分，对应的历史记录也要保持一致。
+func (c *competitionStore) syncFinishedRecordLocked() {
+	match := c.Match
+	if match == nil || match.State != matchStateFinished {
+		return
+	}
+	for i := range c.Records {
+		record := &c.Records[i]
+		if record.ID != match.ID {
+			continue
+		}
+		record.MatchNo = match.MatchNo
+		record.Group = match.Group
+		record.Venue = match.Venue
+		record.BlueName = match.Blue.Name
+		record.RedName = match.Red.Name
+		record.BlueScore = match.Blue.Score
+		record.RedScore = match.Red.Score
+		return
+	}
+}
+
 func newCompetitionStore(path string) *competitionStore {
 	store := &competitionStore{path: path}
 	if data, err := os.ReadFile(path); err == nil {
@@ -150,13 +172,13 @@ func (c *competitionStore) elapsedLocked() int64 {
 
 func newMatchBlueRed(matchNo, group, venue string) *competitionMatch {
 	return &competitionMatch{
-		ID:        fmt.Sprintf("match-%d", time.Now().UnixNano()),
-		MatchNo:   matchNo,
-		Group:     group,
-		Venue:     venue,
+		ID:         fmt.Sprintf("match-%d", time.Now().UnixNano()),
+		MatchNo:    matchNo,
+		Group:      group,
+		Venue:      venue,
 		State:      matchStateSignup,
 		DurationMs: 180000,
-		UpdatedAt: time.Now().Format(time.RFC3339),
+		UpdatedAt:  time.Now().Format(time.RFC3339),
 		Blue: competitionTeam{Side: "blue", Name: "蓝队", Players: []competitionPlayer{
 			{Slot: "B1"}, {Slot: "B2"},
 		}},
@@ -169,14 +191,14 @@ func newMatchBlueRed(matchNo, group, venue string) *competitionMatch {
 func newDevelopmentMatch() *competitionMatch {
 	now := time.Now().Format(time.RFC3339)
 	return &competitionMatch{
-		ID:        fmt.Sprintf("dev-match-%d", time.Now().UnixNano()),
-		MatchNo:   "第 08 场",
-		Group:     "学生组",
-		Venue:     "A 赛场",
+		ID:         fmt.Sprintf("dev-match-%d", time.Now().UnixNano()),
+		MatchNo:    "第 08 场",
+		Group:      "学生组",
+		Venue:      "A 赛场",
 		State:      matchStateReady,
 		DurationMs: 180000,
-		UpdatedAt: now,
-		Operator:  "local@fish",
+		UpdatedAt:  now,
+		Operator:   "local@fish",
 		Blue: competitionTeam{Side: "blue", Name: "海洋先锋队", Players: []competitionPlayer{
 			{Slot: "B1", Name: "陈同学", Email: "stu-24018@fish.local", SignedIn: true, SignedAt: now},
 			{Slot: "B2", Name: "李同学", Email: "stu-24027@fish.local", SignedIn: true, SignedAt: now},
@@ -283,6 +305,16 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if s.authActive() && !isRefereeAccount(user) {
+		if action != "ready" {
+			http.Error(w, "该操作需要裁判账号", http.StatusForbidden)
+			return
+		}
+		if side := competitionSideForUser(user); side == "" || !strings.EqualFold(side, input.Side) {
+			http.Error(w, "只能设置所属战队的准备状态", http.StatusForbidden)
+			return
+		}
+	}
 
 	switch action {
 	case "match":
@@ -325,6 +357,7 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		match.Operator = user.Email
 		match.UpdatedAt = time.Now().Format(time.RFC3339)
+		store.syncFinishedRecordLocked()
 		store.saveLocked()
 		writeJSONValue(w, s.matchSnapshotLocked(store))
 
@@ -446,27 +479,35 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "该机器鱼当前不在线", http.StatusConflict)
 			return
 		}
+		slotIndex := -1
+		for i := range team.Players {
+			if strings.EqualFold(team.Players[i].Slot, input.Slot) {
+				slotIndex = i
+				break
+			}
+		}
+		if slotIndex < 0 {
+			http.Error(w, "未找到该席位", http.StatusBadRequest)
+			return
+		}
+		previousDeviceID := team.Players[slotIndex].DeviceID
 		// 换绑是幂等操作：新席位接管机器鱼时，旧席位自动释放。
 		// 这样裁判不需要先手动解除，再重新分配，设备归属始终只有一个来源。
+		assignmentChanged := !strings.EqualFold(previousDeviceID, deviceID)
 		if side, slot, taken := match.assignmentOwner(deviceID); taken {
 			sameSlot := strings.EqualFold(side, team.Side) && strings.EqualFold(slot, input.Slot)
 			if !sameSlot {
+				assignmentChanged = true
 				match.clearDeviceAssignment(deviceID)
 			}
 		}
-		assigned := false
-		for i := range team.Players {
-			if strings.EqualFold(team.Players[i].Slot, input.Slot) {
-				if !strings.EqualFold(team.Players[i].DeviceID, deviceID) {
-					team.Players[i].clearReady()
-				}
-				team.Players[i].DeviceID = deviceID
-				assigned = true
-			}
+		if assignmentChanged {
+			team.Players[slotIndex].clearReady()
 		}
-		if !assigned {
-			http.Error(w, "未找到该席位", http.StatusBadRequest)
-			return
+		team.Players[slotIndex].DeviceID = deviceID
+		if assignmentChanged {
+			s.leases.releaseBrowserDevices(deviceID, previousDeviceID)
+			s.hub.Notify()
 		}
 		match.Operator = user.Email
 		match.UpdatedAt = time.Now().Format(time.RFC3339)
@@ -484,11 +525,17 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "队伍或席位参数无效", http.StatusBadRequest)
 			return
 		}
+		previousDeviceID := ""
 		for i := range team.Players {
 			if strings.EqualFold(team.Players[i].Slot, input.Slot) {
+				previousDeviceID = team.Players[i].DeviceID
 				team.Players[i].DeviceID = ""
 				team.Players[i].clearReady()
 			}
+		}
+		if previousDeviceID != "" {
+			s.leases.releaseBrowserDevices(previousDeviceID)
+			s.hub.Notify()
 		}
 		match.Operator = user.Email
 		match.UpdatedAt = time.Now().Format(time.RFC3339)
@@ -618,6 +665,7 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		match.Operator = user.Email
 		match.UpdatedAt = time.Now().Format(time.RFC3339)
+		store.syncFinishedRecordLocked()
 		store.saveLocked()
 		writeJSONValue(w, s.matchSnapshotLocked(store))
 

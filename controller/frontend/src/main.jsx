@@ -120,6 +120,7 @@ function App() {
   const [calibrationProfiles, setCalibrationProfiles] = useState(loadCalibrationProfiles);
   const keyboardRef = useRef({ sequence: 0, lastErrorAt: 0 });
   const manualControlRef = useRef(null);
+  const manualMotionSaveTimers = useRef({});
   const devicesRef = useRef([]);
   const deviceSignatureRef = useRef("");
   const visionStateSignatureRef = useRef("");
@@ -214,6 +215,7 @@ function App() {
     }
   }, []);
 
+  const motionDeviceIds = devices.map((device) => device.deviceId).sort().join("|");
   useEffect(() => {
     if (!auth.authenticated) return;
     let active = true;
@@ -285,9 +287,15 @@ function App() {
     if (!auth.authenticated) return;
     fetch("/api/motion-calibrations", { cache: "no-store" })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error("无法读取标定参数")))
-      .then((profiles) => setCalibrationProfiles(profiles && typeof profiles === "object" ? profiles : {}))
+      .then((profiles) => {
+        const saved = profiles && typeof profiles === "object" ? profiles : {};
+        setCalibrationProfiles(saved);
+        setManualMotionByDevice(Object.fromEntries(Object.entries(saved)
+          .filter(([, profile]) => profile?.manualControl)
+          .map(([deviceId, profile]) => [deviceId, profile.manualControl])));
+      })
       .catch(() => { /* retain local fallback for older controllers */ });
-  }, [auth.authenticated]);
+  }, [auth.authenticated, motionDeviceIds]);
 
   useEffect(() => {
     if (!auth.authenticated || !isAdmin) return;
@@ -468,6 +476,19 @@ function App() {
       localStorage.setItem(`${MANUAL_MOTION_STORAGE_KEY}:${auth.user?.id || "guest"}`, JSON.stringify(updated));
       return updated;
     });
+
+    window.clearTimeout(manualMotionSaveTimers.current[device.deviceId]);
+    manualMotionSaveTimers.current[device.deviceId] = window.setTimeout(async () => {
+      try {
+        const response = await fetch("/api/motion-calibrations", {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ deviceId: device.deviceId, manualControl: next }),
+        });
+        if (!response.ok) throw new Error((await response.text()).trim() || "运动参数保存失败");
+      } catch (saveError) {
+        setFeedback(`运动参数未写入配置：${saveError.message}`);
+      }
+    }, 300);
 
     const mode = multiKeyboardRef.current?.mode(device.deviceId);
     if (mode && mode !== "stop") sendRealtimeCommand(device, mode, undefined, next).catch(reportKeyboardError);

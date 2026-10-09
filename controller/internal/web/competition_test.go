@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDevelopmentMatchSeedsFourSignedInAccountsAndPersists(t *testing.T) {
@@ -135,9 +136,17 @@ func TestCompetitionFlow(t *testing.T) {
 	if matchOf(started)["state"] != matchStateRunning {
 		t.Fatalf("start 后状态应为 running")
 	}
+	runningRename := call(http.MethodPut, "/api/competition/match", `{"matchNo":"第 08 场（进行中）"}`)
+	if matchOf(runningRename)["matchNo"] != "第 08 场（进行中）" {
+		t.Fatalf("进行中修改赛事名称失败: %+v", runningRename)
+	}
 	paused := call(http.MethodPost, "/api/competition/match/clock", `{"action":"pause"}`)
 	if paused["running"] != false {
 		t.Fatalf("pause 后应停止计时: %+v", paused)
+	}
+	pausedRename := call(http.MethodPut, "/api/competition/match", `{"matchNo":"第 08 场（暂停中）"}`)
+	if matchOf(pausedRename)["matchNo"] != "第 08 场（暂停中）" {
+		t.Fatalf("暂停时修改赛事名称失败: %+v", pausedRename)
 	}
 
 	// 4. 记分
@@ -160,6 +169,14 @@ func TestCompetitionFlow(t *testing.T) {
 	entry := list[0].(map[string]any)
 	if entry["blueName"] != "海洋先锋队" || entry["blueScore"].(float64) != 3 {
 		t.Fatalf("记录内容异常: %+v", entry)
+	}
+	// 赛后更正应同时更新当前比赛和已保存的历史记录。
+	call(http.MethodPut, "/api/competition/match", `{"matchNo":"第 08 场（更正）"}`)
+	call(http.MethodPost, "/api/competition/match/score", `{"side":"blue","delta":-2}`)
+	corrected := call(http.MethodGet, "/api/competition/records", "")
+	correctedEntry := corrected["records"].([]any)[0].(map[string]any)
+	if correctedEntry["matchNo"] != "第 08 场（更正）" || correctedEntry["blueScore"].(float64) != 1 {
+		t.Fatalf("赛后更正未同步到历史记录: %+v", correctedEntry)
 	}
 	if entry["videoUrl"] != "/api/vision/recordings/files/match-test.mp4" || entry["videoStatus"] != "saved" {
 		t.Fatalf("比赛记录应包含可回放录像: %+v", entry)
@@ -450,5 +467,38 @@ func TestCompetitionDeviceAssignment(t *testing.T) {
 	offline := (&server{hub: hub.New()}).competitionDevicesLocked(reloaded)["devices"].([]map[string]any)
 	if len(offline) != 1 || offline[0]["deviceId"] != "fish-a" || offline[0]["assignedTo"] != "blue/B2" || offline[0]["online"] != false {
 		t.Fatalf("重启后应保留离线设备归属: %+v", offline)
+	}
+}
+
+func TestReassignmentRevokesOldBrowserControl(t *testing.T) {
+	t.Setenv("FISH_AUTH_DISABLED", "true")
+	match := newMatchBlueRed("1", "", "")
+	match.Blue.Players[0].DeviceID = "fish-a"
+	s := &server{
+		hub:         hub.New(),
+		auth:        newAuthStore(filepath.Join(t.TempDir(), "users.json")),
+		competition: &competitionStore{Match: match},
+		leases:      newLeaseStore(time.Minute),
+	}
+	s.hub.Register(hub.Device{ID: "fish-a", Online: true}, assignmentTestConn{})
+	s.hub.Register(hub.Device{ID: "fish-b", Online: true}, assignmentTestConn{})
+	user := s.anonymousAdmin()
+	for _, deviceID := range []string{"fish-a", "fish-b"} {
+		if _, _, ok := s.leases.acquireExclusive(deviceID, user, "manual", false, "tab-a"); !ok {
+			t.Fatalf("无法获取 %s 的初始控制权", deviceID)
+		}
+	}
+	r := httptest.NewRequest(http.MethodPost, "/api/competition/match/assign",
+		strings.NewReader(`{"side":"blue","slot":"B1","deviceId":"fish-b"}`))
+	w := httptest.NewRecorder()
+	s.competitionAPI(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("换绑失败: %d %s", w.Code, w.Body.String())
+	}
+	if match.Blue.Players[0].DeviceID != "fish-b" {
+		t.Fatalf("B1 换绑后仍指向 %q", match.Blue.Players[0].DeviceID)
+	}
+	if leases := s.leases.snapshot(); len(leases) != 0 {
+		t.Fatalf("换绑后旧控制权仍存在: %+v", leases)
 	}
 }

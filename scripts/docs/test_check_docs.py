@@ -26,6 +26,14 @@ class DocsCheckTests(unittest.TestCase):
             check_docs.required_categories([("A", "vision/new_module.py")]),
             {"程序", "概述", "开发日志"},
         )
+        self.assertEqual(
+            check_docs.required_categories([("A", "controller/diagnostics/runs/run-1/controller.txt")]),
+            set(),
+        )
+        self.assertEqual(
+            check_docs.required_categories([("A", "controller/diagnostics/archives/20261008-151512-28676.json.gz")]),
+            set(),
+        )
 
 
 if __name__ == "__main__":

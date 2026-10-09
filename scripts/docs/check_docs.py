@@ -12,7 +12,7 @@ from pathlib import Path
 from urllib.parse import unquote
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 DOCS = ROOT / "docs"
 CATEGORIES = ("程序", "硬件", "概述", "开发日志")
 LINK = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
@@ -48,6 +48,8 @@ def required_categories(changes: list[tuple[str, str]]) -> set[str]:
     for status, path in changes:
         if path.startswith("docs/") or path in {"README.md", "config/README.md"}:
             continue
+        if path.startswith(("controller/diagnostics/", "controller/.runtime/", "output/")):
+            continue
         required.add("开发日志")
         if path.startswith("controller/") or path.startswith("vision/") or path.startswith("scripts/") or path == "environment-build.ps1":
             required.add("程序")
@@ -57,7 +59,7 @@ def required_categories(changes: list[tuple[str, str]]) -> set[str]:
             required.add("程序")
         if path.startswith("vision/camera") or path.startswith("vision/video_transform"):
             required.add("硬件")
-        if status in {"A", "D"} or path.startswith(".github/") or path == "scripts/check_docs.py":
+        if status in {"A", "D"} or path.startswith(".github/") or path == "scripts/docs/check_docs.py":
             required.add("概述")
     return required
 

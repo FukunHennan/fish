@@ -10,14 +10,14 @@ process.on('uncaughtException', (error) => {
   process.exitCode = 1;
 });
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const options = new Set(process.argv.slice(2));
 const allowed = new Set(['--check', '--local', '--cpu', '--firmware', '--help']);
 if ([...options].some((option) => !allowed.has(option))) {
-  throw new Error('未知参数。运行 node scripts/setup-windows.mjs --help 查看用法。');
+  throw new Error('未知参数。运行 node scripts/bootstrap/setup-windows.mjs --help 查看用法。');
 }
 if (options.has('--help')) {
-  console.log('用法：node scripts/setup-windows.mjs [--check] [--local] [--cpu] [--firmware]');
+  console.log('用法：node scripts/bootstrap/setup-windows.mjs [--check] [--local] [--cpu] [--firmware]');
   console.log('默认安装 Go、Python 3.12、视觉依赖和前端依赖，并构建电脑端。');
   console.log('--local 关闭本机 tunnel.json 中的公网隧道；--cpu 将本机 YOLO 设备设为 cpu。');
   console.log('--firmware 额外安装 PlatformIO 并构建固件。');

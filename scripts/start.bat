@@ -7,14 +7,15 @@ for %%I in ("%ROOT%") do set "ROOT=%%~fI"
 set "CONTROLLER=%ROOT%\controller"
 set "FRONTEND=%CONTROLLER%\frontend"
 set "RUNTIME=%CONTROLLER%\.runtime"
+set "AUTH_DATA=%ROOT%\..\Pro1-runtime"
 set "EXE=%RUNTIME%\fish-controller.exe"
 set "CLOUDFLARED=%RUNTIME%\cloudflared.exe"
 set "TUNNEL_CONFIG=%RUNTIME%\cloudflared-live.yml"
 set "TUNNEL_PID_FILE=%RUNTIME%\cloudflared.pid"
-set "PREPARE_TUNNEL=%~dp0prepare-tunnel.ps1"
-set "STARTUP_TASK=%~dp0install-startup-task.ps1"
-set "TAKEOVER_SCRIPT=%~dp0takeover-running-instance.ps1"
-set "WATCH_CONTROLLER=%~dp0watch-controller.ps1"
+set "PREPARE_TUNNEL=%~dp0runtime\prepare-tunnel.ps1"
+set "STARTUP_TASK=%~dp0runtime\install-startup-task.ps1"
+set "TAKEOVER_SCRIPT=%~dp0runtime\takeover-running-instance.ps1"
+set "WATCH_CONTROLLER=%~dp0runtime\watch-controller.ps1"
 
 if not exist "%CONTROLLER%\go.mod" (
   echo [ERROR] controller\go.mod not found.
@@ -23,6 +24,26 @@ if not exist "%CONTROLLER%\go.mod" (
 )
 
 if not exist "%RUNTIME%" mkdir "%RUNTIME%"
+if not exist "%AUTH_DATA%" mkdir "%AUTH_DATA%"
+if not defined FISH_AUTH_USERS if not exist "%AUTH_DATA%\users.json" (
+  if exist "%RUNTIME%\users.json" (
+    echo [INFO] Migrating the existing project account store...
+    for %%F in (users.json.sessions.json users.json.reservations.json users.json) do (
+      if exist "%RUNTIME%\%%F" (
+        copy /Y "%RUNTIME%\%%F" "%AUTH_DATA%\%%F" >nul
+        if errorlevel 1 goto :fail
+      )
+    )
+  ) else if exist "%APPDATA%\fish-controller\users.json" (
+    echo [INFO] Migrating the existing user account store...
+    for %%F in (users.json.sessions.json users.json.reservations.json users.json) do (
+      if exist "%APPDATA%\fish-controller\%%F" (
+        copy /Y "%APPDATA%\fish-controller\%%F" "%AUTH_DATA%\%%F" >nul
+        if errorlevel 1 goto :fail
+      )
+    )
+  )
+)
 
 if not exist "%TAKEOVER_SCRIPT%" (
   echo [ERROR] Startup takeover helper is missing: %TAKEOVER_SCRIPT%

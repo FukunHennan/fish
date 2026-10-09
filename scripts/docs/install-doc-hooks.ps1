@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-$root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 if (-not (Test-Path -LiteralPath (Join-Path $root '.git'))) {
     throw 'This Pro1 directory is not a Git checkout. Clone the repository before installing the hook.'
 }

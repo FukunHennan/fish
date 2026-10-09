@@ -63,6 +63,26 @@ func main() {
 	if err := config.ApplyProgramEnvironment(programPath); err != nil {
 		log.Fatalf("failed to load program config: %v", err)
 	}
+	if authPath := strings.TrimSpace(os.Getenv("FISH_AUTH_USERS")); authPath != "" && !filepath.IsAbs(authPath) {
+		if err := os.Setenv("FISH_AUTH_USERS", filepath.Join(projectRoot, authPath)); err != nil {
+			log.Fatalf("failed to resolve auth users path: %v", err)
+		}
+	}
+	if strings.TrimSpace(os.Getenv("FISH_MOTION_CALIBRATIONS")) == "" {
+		motionPath := filepath.Join(projectRoot, "config", "device-motion.json")
+		current, currentErr := os.ReadFile(motionPath)
+		if os.IsNotExist(currentErr) || strings.TrimSpace(string(current)) == "{}" {
+			if userConfigDir, dirErr := os.UserConfigDir(); dirErr == nil {
+				legacyPath := filepath.Join(userConfigDir, "fish-controller", "motion-calibrations.json")
+				if legacy, readErr := os.ReadFile(legacyPath); readErr == nil {
+					if writeErr := os.WriteFile(motionPath, legacy, 0o644); writeErr != nil {
+						log.Fatalf("failed to migrate motion calibration: %v", writeErr)
+					}
+				}
+			}
+		}
+		_ = os.Setenv("FISH_MOTION_CALIBRATIONS", motionPath)
+	}
 	// Local commissioning is the current default. It seeds the four known
 	// competitors as logged in; deployments can opt out explicitly later.
 	if _, configured := os.LookupEnv("FISH_DEVELOPMENT_MODE"); !configured {

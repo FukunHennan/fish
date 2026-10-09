@@ -12,7 +12,7 @@ import urllib.error
 import urllib.request
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 AUTH_PATH = Path(os.environ.get("FISH_AUTH_USERS", Path.home() / ".config/fish-controller/users.json"))
 REPORT_PATH = ROOT / "docs" / "2026-09-07循迹实测记录.md"
 

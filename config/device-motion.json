@@ -1,0 +1,94 @@
+{
+  "44:BD:8D:4B:C2:00": {
+    "deviceId": "44:BD:8D:4B:C2:00",
+    "servoMax": 180,
+    "straightCenter": 90,
+    "forwardFrequency": 2.5,
+    "forwardAmplitudePercent": 0.4,
+    "leftCenterRatio": 0.5,
+    "leftFrequency": 2.3,
+    "leftAmplitudePercent": 0.4,
+    "rightCenterRatio": 0.5,
+    "rightFrequency": 2.3,
+    "rightAmplitudePercent": 0.4,
+    "transitionMs": 600,
+    "playerControl": {
+      "frequency": 2.5,
+      "amplitudePercent": 60
+    },
+    "manualControl": {
+      "frequency": 2.5,
+      "amplitudePercent": 40
+    },
+    "updatedAt": "2026-10-09T13:01:38+08:00"
+  },
+  "90:DA:72:85:B9:A4": {
+    "deviceId": "90:DA:72:85:B9:A4",
+    "servoMax": 180,
+    "straightCenter": 90,
+    "forwardFrequency": 2.5,
+    "forwardAmplitudePercent": 0.4,
+    "leftCenterRatio": 0.5,
+    "leftFrequency": 2.3,
+    "leftAmplitudePercent": 0.4,
+    "rightCenterRatio": 0.5,
+    "rightFrequency": 2.3,
+    "rightAmplitudePercent": 0.4,
+    "transitionMs": 600,
+    "playerControl": {
+      "frequency": 2.5,
+      "amplitudePercent": 60
+    },
+    "manualControl": {
+      "frequency": 2.5,
+      "amplitudePercent": 40
+    },
+    "updatedAt": "2026-10-09T13:02:01+08:00"
+  },
+  "90:DA:72:85:EC:C8": {
+    "deviceId": "90:DA:72:85:EC:C8",
+    "servoMax": 180,
+    "straightCenter": 90,
+    "forwardFrequency": 2.5,
+    "forwardAmplitudePercent": 0.4,
+    "leftCenterRatio": 0.5,
+    "leftFrequency": 2.3,
+    "leftAmplitudePercent": 0.4,
+    "rightCenterRatio": 0.5,
+    "rightFrequency": 2.3,
+    "rightAmplitudePercent": 0.4,
+    "transitionMs": 600,
+    "playerControl": {
+      "frequency": 2.5,
+      "amplitudePercent": 60
+    },
+    "manualControl": {
+      "frequency": 2.5,
+      "amplitudePercent": 40
+    },
+    "updatedAt": "2026-10-09T13:18:57+08:00"
+  },
+  "AC:27:6E:5E:AB:7C": {
+    "deviceId": "AC:27:6E:5E:AB:7C",
+    "servoMax": 180,
+    "straightCenter": 90,
+    "forwardFrequency": 2.5,
+    "forwardAmplitudePercent": 0.4,
+    "leftCenterRatio": 0.5,
+    "leftFrequency": 2.3,
+    "leftAmplitudePercent": 0.4,
+    "rightCenterRatio": 0.5,
+    "rightFrequency": 2.3,
+    "rightAmplitudePercent": 0.4,
+    "transitionMs": 600,
+    "playerControl": {
+      "frequency": 3,
+      "amplitudePercent": 60
+    },
+    "manualControl": {
+      "frequency": 2.5,
+      "amplitudePercent": 40
+    },
+    "updatedAt": "2026-10-09T19:11:54+08:00"
+  }
+}
