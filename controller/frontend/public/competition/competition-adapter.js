@@ -178,7 +178,6 @@
   var lastDeviceTone = "info";
   var lastReadinessAvailability = {};
   var lastPlayerReadiness = {};
-  var lastObservedFieldLocked = null;
   var logoutPending = false;
   var activeTeamSide = null;
   try {
@@ -742,8 +741,8 @@
             });
           });
         }
-		if (!match || match.fieldLocked !== true) {
-			setBadge("等待裁判锁定场地；选手控制权尚未开放", "info");
+		if (!match) {
+			setBadge("等待裁判分配机器鱼", "info");
 			return applyBindings({});
 		}
 		if (!onlineDevices.length) {
@@ -1043,10 +1042,6 @@
   }
 
   function pressInput(player, action, token) {
-    if (state.match && state.match.state === "finished") {
-      setBadge("比赛已结束，选手控制已停止", "warn");
-      return;
-    }
     if (!heldInputs[player]) heldInputs[player] = {};
     heldInputs[player][token] = { player: player, action: action, token: token, order: ++inputOrder };
     reconcileInputs(player);
@@ -3393,7 +3388,7 @@
       referee.match = payload.match || referee.match;
       state.match = referee.match;
       paintReferee();
-      setBadge(locked ? "场地已锁定，控制权已开放给已分配选手" : "场地已解锁，选手控制权已收回", "ok");
+      setBadge(locked ? "场地已锁定" : "场地已解锁", "ok");
       return payload;
     }).catch(function (error) {
       setBadge("场地锁定操作失败：" + error.message, "error");
@@ -3402,18 +3397,13 @@
   };
 
   function showLoggedOutScreen() {
-    var layer = document.getElementById("teamAuthLayer");
-    var login = loginCard();
-    var confirm = confirmCard();
-    var account = document.getElementById("teamAccountInput");
-    var password = document.querySelector("#teamLoginCard input[type=password]");
-    var error = login && login.querySelector(".teamAuthError");
-    if (account) account.value = "";
-    if (password) password.value = "";
-    if (error) error.remove();
-    if (login) login.hidden = false;
-    if (confirm) confirm.hidden = true;
-    if (layer) layer.hidden = false;
+    // The competition shell owns login. The embedded player page never opens
+    // its former second login screen after a session is lost.
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({ type: "fish-auth-expired" }, window.location.origin);
+    } else {
+      window.location.replace("/competition.html");
+    }
   }
 
   function resetTeamSessionState() {
@@ -3738,21 +3728,9 @@
 
   function paintPlayerMatch(payload) {
     if (isRefereePage() || !payload) return;
-    var wasLocked = lastObservedFieldLocked;
     state.match = payload.match || null;
-    var isLocked = !!(state.match && state.match.fieldLocked === true);
-    lastObservedFieldLocked = isLocked;
     if (document.body) document.body.dataset.fishMatchState = state.match ? (state.match.state || "") : "";
     if (!state.match) return;
-    if (wasLocked !== null && wasLocked !== isLocked) {
-      if (isLocked) {
-        setBadge("场地已锁定，正在取得已分配机器鱼的选手控制权…", "info");
-        refreshDevices();
-      } else {
-        stopAll("场地已解锁，选手控制权已释放");
-        applyBindings({});
-      }
-    }
     var match = payload.match;
     syncPlayerReadiness(match);
     function setAll(selector, value) {
@@ -3772,22 +3750,28 @@
     setAll("[data-live-match-state]", stateText(match.state));
     setAll("[data-live-summary-state]", stateText(match.state));
     if (match.state === "finished") {
-      if (PLAYERS.some(function (player) { return !!activeMotion[player]; })) stopAll();
       var matchId = String(match.id || [match.matchNo, match.startedAt].join("|"));
       if (finishedMatchEventId !== matchId) {
         finishedMatchEventId = matchId;
-        document.dispatchEvent(new CustomEvent("fish-match-finished", {
-          detail: {
+        var account = state.user && state.user.email || "";
+        api("/api/competition/match/finish-notice", {
+          method: "POST", body: { matchId: matchId },
+        }).then(function (notice) {
+          if (!notice || !notice.show || !state.user || state.user.email !== account ||
+              !state.match || state.match.id !== matchId) return;
+          document.dispatchEvent(new CustomEvent("fish-match-finished", { detail: {
             matchId: matchId,
-            account: state.user && state.user.email || "",
+            account: account,
             matchNo: match.matchNo || "本场比赛",
             blueName: blueName,
             redName: redName,
             blueScore: Number(match.blue && match.blue.score) || 0,
             redScore: Number(match.red && match.red.score) || 0,
             elapsedMs: payload.elapsedMs || match.elapsedMs || 0,
-          },
-        }));
+          } }));
+        }).catch(function () {
+          if (finishedMatchEventId === matchId) finishedMatchEventId = null;
+        });
       }
     }
   }
@@ -4465,7 +4449,7 @@
           setBadge(slotForPlayer(player) + " 设备已离线，手动控制已停止", "warn");
         }
       });
-      if (state.match && state.match.fieldLocked === true && PLAYERS.some(function (player) { return !state.bound[player]; })) {
+      if (state.match && PLAYERS.some(function (player) { return !state.bound[player]; })) {
         schedulePlayerLeaseRefresh(300);
       }
     });
@@ -4655,7 +4639,7 @@
         ensureVideoSurface();
         ensureRefereeIntegration();
       } else {
-        setBadge("请先登录战队账号", "info");
+        showLoggedOutScreen();
       }
       if (authenticated) subscribe();
     });

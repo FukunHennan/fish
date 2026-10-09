@@ -1051,7 +1051,7 @@ func (s *server) leasesAPI(w http.ResponseWriter, r *http.Request) {
 			(!s.playerControlAllowed(input.DeviceID, input.Slot) ||
 				(s.authActive() && !isPlayerAccount(user)) ||
 				(accountSide != "" && accountSide != slotSide)) {
-			writeAuthError(w, http.StatusConflict, "场地尚未锁定，或该机器鱼未分配给当前席位")
+			writeAuthError(w, http.StatusConflict, "该机器鱼未分配给当前账号的席位")
 			return
 		}
 		// Administrators are the management authority for every control path,

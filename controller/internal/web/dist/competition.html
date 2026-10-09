@@ -25,7 +25,7 @@
   </header>
   <main class="frameWrap"><iframe id="appFrame" title="FISH CONTROL Interface"></iframe></main>
 </div>
-<div id="loginGate" class="loginGate">
+<div id="loginGate" class="loginGate" hidden>
   <form id="loginForm" class="loginCard">
     <h2>登录赛事平台</h2><p>账号 1 进入蓝队选手端，2 进入红队选手端，3 进入裁判端。</p>
     <label>账号<input id="accountInput" maxlength="20" autocomplete="username" aria-label="账号"></label>
@@ -50,6 +50,7 @@ let tabId="tab-"+Math.random().toString(36).slice(2)+"-"+Date.now();
 try{tabId=sessionStorage.getItem("fish-login-tab-id")||tabId;sessionStorage.setItem("fish-login-tab-id",tabId)}catch(_){}
 let activeUser=null;
 let checking=false;
+let authRevision=0;
 function routeFor(user){
   if(user?.role==="User"&&(user.email==="1"||user.email==="2"))return "player";
   if(user?.role==="Admin"&&user.email==="3")return "referee";
@@ -61,6 +62,7 @@ function ownsTab(user){
 }
 function clearMarker(user){if(user&&ownsTab(user))try{localStorage.removeItem(markerKey(user))}catch(_){}}
 function showLogin(message=""){
+  authRevision++;
   clearMarker(activeUser);
   activeUser=null;
   frame.src="about:blank";
@@ -80,6 +82,7 @@ function enter(user,takeover=false){
     }catch(_){}
   }
   clearMarker(activeUser);
+  authRevision++;
   try{localStorage.setItem(markerKey(user),JSON.stringify({tabId,email:user.email}))}catch(_){}
   activeUser=user;
   loginGate.hidden=true;
@@ -95,18 +98,28 @@ function enter(user,takeover=false){
 async function checkSession(){
   if(checking)return;
   checking=true;
+  const revision=authRevision;
   try{
     const response=await fetch("/api/auth/me",{cache:"no-store"});
     const session=await response.json();
-    if(!response.ok||!session.authenticated||!session.user){if(activeUser)showLogin("登录已失效，请重新登录");return}
+    if(revision!==authRevision)return;
+    if(!response.ok||!session.authenticated||!session.user){
+      if(activeUser)showLogin("登录已失效，请重新登录");
+      else if(loginGate.hidden)showLogin();
+      return;
+    }
     if(activeUser){
       if(session.user.id!==activeUser.id||!ownsTab(activeUser))showLogin("该账号已在另一页面登录，请重新登录");
     }else enter(session.user);
-  }catch(_){if(!activeUser)loginError.textContent="无法连接服务器，请稍后重试"}
+  }catch(_){if(revision===authRevision&&!activeUser){
+    if(loginGate.hidden)showLogin("无法连接服务器，请稍后重试");
+    else loginError.textContent="无法连接服务器，请稍后重试";
+  }}
   finally{checking=false}
 }
 document.getElementById("loginForm").onsubmit=async(event)=>{
   event.preventDefault();
+  authRevision++;
   loginError.textContent="";
   const account=accountInput.value.trim();
   if(!account){loginError.textContent="请输入账号";return}
@@ -129,6 +142,9 @@ switchBtn.onclick=async()=>{
 };
 window.addEventListener("storage",event=>{
   if(activeUser&&event.key===markerKey(activeUser)&&!ownsTab(activeUser))showLogin("该账号已在另一标签页登录");
+});
+window.addEventListener("message",event=>{
+  if(event.origin===location.origin&&event.source===frame.contentWindow&&event.data?.type==="fish-auth-expired")checkSession();
 });
 document.addEventListener("visibilitychange",()=>{if(!document.hidden)checkSession()});
 playerBtn.onclick=()=>checkSession();

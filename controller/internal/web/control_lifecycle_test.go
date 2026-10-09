@@ -187,16 +187,21 @@ func TestExpiredLeaseCannotResumeMotionWithoutReacquire(t *testing.T) {
 	}
 }
 
-func TestPlayerControlRequiresLockedAssignedField(t *testing.T) {
+func TestPlayerControlRequiresAssignmentRegardlessOfFieldOrMatchState(t *testing.T) {
 	store := &competitionStore{Match: newDevelopmentMatch()}
 	store.Match.Blue.Players[0].DeviceID = "fish"
 	s := &server{competition: store}
-	if s.playerControlAllowed("fish", "B1") {
-		t.Fatal("player control allowed before field lock")
+	if !s.playerControlAllowed("fish", "B1") {
+		t.Fatal("assigned player denied before field lock")
 	}
 	store.Match.FieldLocked = true
 	if !s.playerControlAllowed("fish", "B1") {
 		t.Fatal("assigned player denied after field lock")
+	}
+	store.Match.State = matchStateFinished
+	store.Match.FieldLocked = false
+	if !s.playerControlAllowed("fish", "B1") {
+		t.Fatal("assigned player denied after match finished")
 	}
 	if s.playerControlAllowed("fish", "B2") || s.playerControlAllowed("other", "B1") {
 		t.Fatal("wrong slot or device was allowed")

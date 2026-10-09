@@ -91,12 +91,13 @@ type competitionRecord struct {
 }
 
 type competitionStore struct {
-	mu      sync.Mutex
-	path    string
-	Match   *competitionMatch   `json:"match"`
-	Records []competitionRecord `json:"records"`
-	started time.Time
-	running bool
+	mu                   sync.Mutex
+	path                 string
+	Match                *competitionMatch          `json:"match"`
+	Records              []competitionRecord        `json:"records"`
+	FinishedNoticeClaims map[string]map[string]bool `json:"finishedNoticeClaims,omitempty"`
+	started              time.Time
+	running              bool
 }
 
 // 已结束比赛允许裁判更正名称和比分，对应的历史记录也要保持一致。
@@ -140,22 +141,22 @@ func competitionPath() string {
 	return filepath.Join(base, "fish-controller", "competition.json")
 }
 
-func (c *competitionStore) saveLocked() {
+func (c *competitionStore) saveLocked() error {
 	if c.path == "" {
-		return
+		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(c.path), 0o700); err != nil {
-		return
+		return err
 	}
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
-		return
+		return err
 	}
 	temporary := c.path + ".tmp"
 	if err := os.WriteFile(temporary, data, 0o600); err != nil {
-		return
+		return err
 	}
-	_ = os.Rename(temporary, c.path)
+	return os.Rename(temporary, c.path)
 }
 
 // elapsedLocked 返回当前累计比赛时长；进行中会叠加本次运行的时长。
@@ -298,6 +299,7 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 		FieldHeightCm *float64            `json:"fieldHeightCm"`
 		FieldLocked   *bool               `json:"fieldLocked"`
 		DurationMs    *int64              `json:"durationMs"`
+		MatchID       string              `json:"matchId"`
 	}
 	if r.Body != nil && r.ContentLength != 0 {
 		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
@@ -306,17 +308,43 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if s.authActive() && !isRefereeAccount(user) {
-		if action != "ready" {
+		if action != "ready" && action != "finish-notice" {
 			http.Error(w, "该操作需要裁判账号", http.StatusForbidden)
 			return
 		}
-		if side := competitionSideForUser(user); side == "" || !strings.EqualFold(side, input.Side) {
+		if action == "ready" && (competitionSideForUser(user) == "" || !strings.EqualFold(competitionSideForUser(user), input.Side)) {
 			http.Error(w, "只能设置所属战队的准备状态", http.StatusForbidden)
 			return
 		}
 	}
 
 	switch action {
+	case "finish-notice":
+		match := store.Match
+		side := competitionSideForUser(user)
+		if !isPlayerAccount(user) || side == "" || match == nil || match.State != matchStateFinished ||
+			match.ID == "" || match.ID != input.MatchID || match.teamForSide(side) == nil {
+			writeJSONValue(w, map[string]any{"show": false})
+			return
+		}
+		if store.FinishedNoticeClaims == nil {
+			store.FinishedNoticeClaims = make(map[string]map[string]bool)
+		}
+		if store.FinishedNoticeClaims[match.ID] == nil {
+			store.FinishedNoticeClaims[match.ID] = make(map[string]bool)
+		}
+		if store.FinishedNoticeClaims[match.ID][user.ID] {
+			writeJSONValue(w, map[string]any{"show": false})
+			return
+		}
+		store.FinishedNoticeClaims[match.ID][user.ID] = true
+		if err := store.saveLocked(); err != nil {
+			delete(store.FinishedNoticeClaims[match.ID], user.ID)
+			http.Error(w, "比赛结束提示状态保存失败", http.StatusInternalServerError)
+			return
+		}
+		writeJSONValue(w, map[string]any{"show": true})
+		return
 	case "match":
 		if store.Match == nil {
 			store.Match = newMatchBlueRed("", "", "")
@@ -396,11 +424,6 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 		match.Operator = user.Email
 		match.UpdatedAt = time.Now().Format(time.RFC3339)
 		store.saveLocked()
-		// Entering or leaving the player-control phase invalidates all browser
-		// leases. Players reacquire their assigned fish after the new state is
-		// visible; administrator and vision takeovers remain available.
-		s.leases.releaseBrowserLeases()
-		s.hub.Notify()
 		writeJSONValue(w, s.matchSnapshotLocked(store))
 
 	case "signin":
@@ -781,6 +804,17 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 		if len(store.Records) > 200 {
 			store.Records = store.Records[:200]
 		}
+		if len(store.FinishedNoticeClaims) > 200 {
+			retained := make(map[string]bool, len(store.Records))
+			for _, record := range store.Records {
+				retained[record.ID] = true
+			}
+			for matchID := range store.FinishedNoticeClaims {
+				if !retained[matchID] {
+					delete(store.FinishedNoticeClaims, matchID)
+				}
+			}
+		}
 		store.saveLocked()
 		writeJSONValue(w, s.matchSnapshotLocked(store))
 
@@ -880,7 +914,7 @@ func (s *server) playerControlAllowed(deviceID, slot string) bool {
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	if store.Match == nil || !store.Match.FieldLocked {
+	if store.Match == nil {
 		return false
 	}
 	_, assignedSlot, assigned := store.Match.assignmentOwner(deviceID)

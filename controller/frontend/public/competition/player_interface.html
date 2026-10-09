@@ -5576,9 +5576,9 @@ p {
   font-weight:900;
 }
 
-.matchFinishedNotice{position:fixed;inset:0;z-index:2147482980;display:grid;place-items:center;padding:20px;background:rgba(1,10,22,.78);backdrop-filter:blur(7px)}
+.matchFinishedNotice{position:fixed;inset:0;z-index:2147482980;display:flex;align-items:flex-end;justify-content:flex-end;padding:16px;pointer-events:none}
 .matchFinishedNotice[hidden]{display:none}
-.matchFinishedCard{width:min(480px,100%);padding:26px;border:1px solid rgba(61,217,255,.48);border-radius:18px;background:linear-gradient(145deg,#092d49,#071525);box-shadow:0 24px 70px rgba(0,0,0,.55);color:#f2fbff;text-align:center}
+.matchFinishedCard{width:min(480px,100%);padding:26px;border:1px solid rgba(61,217,255,.48);border-radius:18px;background:linear-gradient(145deg,#092d49,#071525);box-shadow:0 24px 70px rgba(0,0,0,.55);color:#f2fbff;text-align:center;pointer-events:auto}
 .matchFinishedCard small{color:#55e1ff;font-weight:800;letter-spacing:.12em}
 .matchFinishedCard h2{margin:10px 0;font-size:28px}
 .matchFinishedCard p{color:#a8c8d9;font-size:13px;line-height:1.6}
@@ -5587,14 +5587,13 @@ p {
 .matchFinishedCard footer{display:flex;gap:10px;margin-top:22px}
 .matchFinishedCard button{flex:1;padding:12px;border:1px solid rgba(79,200,244,.4);border-radius:9px;background:#103954;color:#fff;font-weight:800;cursor:pointer}
 .matchFinishedCard button[data-finish-records]{background:#0b8eac;border-color:#36d2e9}
-body[data-fish-match-state="finished"] [data-control-player][data-control-action]{opacity:.5;pointer-events:none}
 
 </style>
 </head>
 <body>
 <div id="competition-root"></div>
 
-<section class="teamAuthLayer" id="teamAuthLayer">
+<section class="teamAuthLayer" id="teamAuthLayer" hidden>
   <div class="teamAuthShell">
     <header class="teamAuthHeader">
       <div class="teamAuthBrand"><span class="teamAuthLogo"></span><div><h1>FISH <span>CONTROL</span></h1><p>学生赛事端 · 队伍终端登录</p></div></div>
@@ -5635,7 +5634,7 @@ body[data-fish-match-state="finished"] [data-control-player][data-control-action
   </div>
 </section>
 
-<div class="matchFinishedNotice" id="matchFinishedNotice" role="dialog" aria-modal="true" aria-labelledby="matchFinishedTitle" hidden>
+<div class="matchFinishedNotice" id="matchFinishedNotice" role="dialog" aria-modal="false" aria-labelledby="matchFinishedTitle" hidden>
   <div class="matchFinishedCard">
     <small>赛事通知</small>
     <h2 id="matchFinishedTitle">比赛已结束</h2>
@@ -5668,24 +5667,17 @@ body[data-fish-match-state="finished"] [data-control-player][data-control-action
   document.addEventListener('fish-match-finished', (event) => {
     const detail = event && event.detail;
     if (!detail || !detail.matchId || !finishedNotice) return;
-    stopAutoSimulation('match-finished');
-    releaseAllActiveControlKeys();
     const noticeKey = String(detail.matchId) + ':' + String(detail.account || '');
     if (shownFinishedMatch === noticeKey) return;
     shownFinishedMatch = noticeKey;
-    try {
-      if (sessionStorage.getItem('fish-finished-match-notice') === noticeKey) return;
-      sessionStorage.setItem('fish-finished-match-notice', noticeKey);
-    } catch (_) { /* 会话存储不可用时仍在当前页面去重 */ }
     const elapsed = Math.max(0, Math.floor(Number(detail.elapsedMs || 0) / 1000));
     const clock = String(Math.floor(elapsed / 60)).padStart(2, '0') + ':' + String(elapsed % 60).padStart(2, '0');
     finishedNotice.querySelector('[data-finish-match-name]').textContent = String(detail.matchNo || '本场比赛');
     finishedNotice.querySelector('[data-finish-blue]').textContent = String(detail.blueName || '蓝队');
     finishedNotice.querySelector('[data-finish-red]').textContent = String(detail.redName || '红队');
     finishedNotice.querySelector('[data-finish-score]').textContent = Number(detail.blueScore || 0) + ' : ' + Number(detail.redScore || 0);
-    finishedNotice.querySelector('[data-finish-summary]').textContent = '比赛用时 ' + clock + '，选手控制已停止。';
+    finishedNotice.querySelector('[data-finish-summary]').textContent = '比赛用时 ' + clock + '。已分配且在线的机器鱼仍可控制。';
     finishedNotice.hidden = false;
-    finishedNotice.querySelector('[data-finish-records]').focus();
   });
   finishedNotice.querySelector('[data-finish-close]').addEventListener('click', () => { finishedNotice.hidden = true; });
   finishedNotice.querySelector('[data-finish-records]').addEventListener('click', () => {

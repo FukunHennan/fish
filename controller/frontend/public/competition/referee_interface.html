@@ -2445,7 +2445,7 @@ lockCal.onclick=()=>{
  action.then(()=>{
    state.calLocked=nextLocked;
    renderCalibrationLock();
-   toast(state.calLocked?'场地已锁定，选手控制权已开放':'场地已解锁，选手控制权已收回');
+   toast(state.calLocked?'场地已锁定':'场地已解锁');
  }).catch(error=>toast(error&&error.message?error.message:'场地锁定失败')).finally(()=>{lockCal.disabled=false});
 };
 calNext.onclick=()=>{

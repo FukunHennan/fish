@@ -5,6 +5,7 @@ import (
 	"fish-controller/internal/hub"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -27,6 +28,59 @@ func TestDevelopmentMatchSeedsFourSignedInAccountsAndPersists(t *testing.T) {
 	reloaded := newCompetitionStore(path)
 	if reloaded.Match == nil || !reloaded.Match.Blue.Players[0].SignedIn {
 		t.Fatalf("开发比赛应写入磁盘并可恢复: %+v", reloaded.Match)
+	}
+}
+
+func TestFinishedNoticeIsClaimedOncePerTeamAccount(t *testing.T) {
+	t.Setenv("FISH_AUTH_DISABLED", "false")
+	path := filepath.Join(t.TempDir(), "competition.json")
+	store := newCompetitionStore(path)
+	store.Match = newMatchBlueRed("第 1 场", "", "")
+	store.Match.State = matchStateFinished
+	store.saveLocked()
+	auth := newAuthStore(filepath.Join(t.TempDir(), "users.json"))
+	s := &server{competition: store, auth: auth}
+	claim := func(account, role, matchID string) bool {
+		t.Helper()
+		user, err := auth.createUser(account, account, "password", role)
+		if err != nil && err != os.ErrExist {
+			t.Fatal(err)
+		}
+		if err == os.ErrExist {
+			user = auth.users[account]
+		}
+		session, err := auth.createSession(user)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequest(http.MethodPost, "/api/competition/match/finish-notice",
+			strings.NewReader(`{"matchId":"`+matchID+`"}`))
+		request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: session.Token})
+		response := httptest.NewRecorder()
+		s.competitionAPI(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("notice claim status %d: %s", response.Code, response.Body.String())
+		}
+		var payload struct {
+			Show bool `json:"show"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload.Show
+	}
+	if claim("1", "User", "wrong-match") || !claim("1", "User", store.Match.ID) || claim("1", "User", store.Match.ID) {
+		t.Fatal("blue notice was not claimed exactly once")
+	}
+	if !claim("2", "User", store.Match.ID) || claim("2", "User", store.Match.ID) {
+		t.Fatal("red notice was not claimed exactly once")
+	}
+	if claim("3", "Admin", store.Match.ID) {
+		t.Fatal("referee must not receive a team notice")
+	}
+	s.competition = newCompetitionStore(path)
+	if claim("1", "User", store.Match.ID) {
+		t.Fatal("notice claim was lost after reload")
 	}
 }
 

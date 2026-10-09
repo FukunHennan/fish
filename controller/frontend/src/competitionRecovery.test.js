@@ -23,7 +23,7 @@ test("裁判端单鱼模式清除并忽略旧 Track ID", () => {
   assert.match(adapter, /video\.trackingMode === "single_fish" \|\| session\.targetTrackId == null/);
 });
 
-test("锁场后的选手租约在空闲时持续续期并能重新申请", () => {
+test("选手租约在空闲时持续续期并能重新申请", () => {
   assert.match(adapter, /function renew\(deviceId\)[\s\S]*?method: "PATCH"/);
   assert.match(adapter, /function startPlayerLeaseMaintenance[\s\S]*?setInterval\(maintainPlayerLeases, 15000\)/);
   assert.match(adapter, /error\.status === 409[\s\S]*?acquire\(deviceId, slotForPlayer\(player\)\)/);
@@ -142,14 +142,14 @@ test("HTTPS 兼容画面在重绘和请求超时后继续轮询", async () => {
   assert.deepEqual(revoked, []);
 });
 
-test("选手端收到比赛结束快照后停止控制并只通知一次", () => {
+test("选手端结束比赛后保持控制并按账号领取一次通知", async () => {
   const begin = adapter.indexOf("  function paintPlayerMatch(payload) {");
   const end = adapter.indexOf("  function refreshPlayerMatch() {", begin);
   assert.ok(begin >= 0 && end > begin);
   const events = [];
   const activeMotion = { b1: { action: "forward" } };
-  let stops = 0;
-  const state = { match: null };
+  const requests = [];
+  const state = { match: null, user: { email: "1" } };
   const context = {
     isRefereePage: () => false, lastObservedFieldLocked: null,
     state, document: {
@@ -160,7 +160,7 @@ test("选手端收到比赛结束快照后停止控制并只通知一次", () =>
     syncPlayerReadiness() {}, currentTeamSide: () => "blue",
     stateText: (value) => value, fmtClock: () => "00:10",
     PLAYERS: ["b1", "b2"], activeMotion,
-    stopAll() { stops += 1; delete activeMotion.b1; },
+    api(path, options) { requests.push({ path, options }); return Promise.resolve({ show: true }); },
     finishedMatchEventId: null,
   };
   const paint = runInNewContext(adapter.slice(begin, end) + "\npaintPlayerMatch", context);
@@ -172,7 +172,10 @@ test("选手端收到比赛结束快照后停止控制并只通知一次", () =>
   assert.equal(events.length, 0);
   paint({ match: { ...match, state: "finished" }, elapsedMs: 10000 });
   paint({ match: { ...match, state: "finished" }, elapsedMs: 10000 });
-  assert.equal(stops, 1);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(activeMotion.b1, "比赛结束不得打断已有运动控制");
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].path, "/api/competition/match/finish-notice");
   assert.equal(events.length, 1);
   assert.equal(events[0].type, "fish-match-finished");
   assert.equal(events[0].detail.blueScore, 2);
@@ -199,7 +202,6 @@ test("比赛结束提示显示比分，关闭后不被轮询重复打开", () =>
     addEventListener(type, handler) { this.listeners[type] = handler; },
   };
   const listeners = {};
-  const saved = new Map();
   const window = { location: { hash: "#control" } };
   let stoppedPrograms = 0;
   let releasedKeys = 0;
@@ -207,10 +209,6 @@ test("比赛结束提示显示比分，关闭后不被轮询重复打开", () =>
     document: {
       getElementById: () => notice,
       addEventListener: (type, handler) => { listeners[type] = handler; },
-    },
-    sessionStorage: {
-      getItem: (key) => saved.get(key) || null,
-      setItem: (key, value) => saved.set(key, value),
     },
     window,
     stopAutoSimulation() { stoppedPrograms += 1; },
@@ -222,8 +220,8 @@ test("比赛结束提示显示比分，关闭后不被轮询重复打开", () =>
   };
   listeners["fish-match-finished"]({ detail });
   assert.equal(notice.hidden, false);
-  assert.equal(stoppedPrograms, 1);
-  assert.equal(releasedKeys, 1);
+  assert.equal(stoppedPrograms, 0);
+  assert.equal(releasedKeys, 0);
   assert.equal(node("[data-finish-score]").textContent, "2 : 1");
   assert.match(node("[data-finish-summary]").textContent, /00:10/);
   node("[data-finish-close]").listeners.click();
