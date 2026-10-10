@@ -29,7 +29,7 @@ test("裁判端单鱼模式清除并忽略旧 Track ID", () => {
 
 test("选手租约在空闲时持续续期并能重新申请", () => {
   assert.match(adapter, /function renew\(deviceId\)[\s\S]*?method: "PATCH"/);
-  assert.match(adapter, /function startPlayerLeaseMaintenance[\s\S]*?setInterval\(maintainPlayerLeases, 15000\)/);
+  assert.match(adapter, /function startPlayerLeaseMaintenance[\s\S]*?setInterval\(maintainPlayerLeases, 5000\)/);
   assert.match(adapter, /error\.status === 409[\s\S]*?acquire\(deviceId, slotForPlayer\(player\)\)/);
   assert.match(adapter, /visibilitychange[\s\S]*?schedulePlayerLeaseRefresh\(50\)/);
 });
@@ -37,6 +37,49 @@ test("选手租约在空闲时持续续期并能重新申请", () => {
 test("设备失联会停止本地续发并在设备恢复后重新绑定", () => {
   assert.match(adapter, /设备已离线[\s\S]*?schedulePlayerLeaseRefresh\(300\)/);
   assert.match(adapter, /heldInputs\[player\] = \{\};[\s\S]*?endMotion\(player\);[\s\S]*?delete state\.bound\[player\]/);
+});
+
+test("裁判端的历史分配不会让已离线设备显示在线", () => {
+  const begin = adapter.indexOf("  function refereeDevices() {");
+  const end = adapter.indexOf("  function fmtSignedAt(value) {", begin);
+  assert.ok(begin >= 0 && end > begin);
+  const state = {
+    devices: [],
+    competitionDevices: [{ deviceId: "fish-a", assignedTo: "blue/B1", online: true }],
+  };
+  const refereeDevices = runInNewContext(adapter.slice(begin, end) + "\nrefereeDevices", {
+    state,
+    sameDeviceId: (a, b) => String(a.deviceId).toUpperCase() === String(b.deviceId).toUpperCase(),
+  });
+  assert.equal(refereeDevices()[0].online, false);
+  state.devices = [{ deviceId: "fish-a", online: true }];
+  state.competitionDevices[0].online = false;
+  assert.equal(refereeDevices()[0].online, true);
+});
+
+test("设备快照过期后清除在线状态并停止控制", () => {
+  const begin = adapter.indexOf("  function expireDeviceSnapshot() {");
+  const end = adapter.indexOf("  // MAC is the only command identity.", begin);
+  assert.ok(begin >= 0 && end > begin);
+  const state = {
+    authenticated: true,
+    devices: [{ deviceId: "fish-a", online: true }],
+    competitionDevices: [{ deviceId: "fish-a", online: true }],
+  };
+  let stopped = 0;
+  let painted = 0;
+  const expire = runInNewContext("var deviceSnapshotAt = 1000; var DEVICE_SNAPSHOT_MAX_AGE_MS = 15000;\n" +
+    adapter.slice(begin, end) + "\nexpireDeviceSnapshot", {
+      state, Date: { now: () => 16000 },
+      stopOfflineBoundPlayers() { stopped++; }, paintDeviceInfo() { painted++; },
+    });
+  expire();
+  assert.equal(state.devices[0].online, false);
+  assert.equal(state.competitionDevices[0].online, false);
+  assert.equal(stopped, 1);
+  assert.equal(painted, 1);
+  expire();
+  assert.equal(painted, 1);
 });
 
 test("WebRTC 连接假在线但无新帧时主动重连", () => {

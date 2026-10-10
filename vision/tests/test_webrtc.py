@@ -1,6 +1,7 @@
 import unittest
 import time
 from fractions import Fraction
+from unittest.mock import patch
 
 import numpy as np
 
@@ -10,6 +11,7 @@ from webrtc import (
     _LatestFrameBuffer,
     _LatestVideoTrack,
     browser_ice_servers,
+    _ice_servers,
 )
 import crop_region
 
@@ -52,6 +54,15 @@ class WebRTCFrameTests(unittest.TestCase):
         self.assertEqual(browser_ice_servers()[0]["urls"], "stun:stun.l.google.com:19302")
         self.assertEqual(server.peer_count, 0)
         server.close()
+
+    def test_cloudflare_credentials_are_shared_by_browser_and_server(self):
+        temporary = [{"urls": ["turns:turn.cloudflare.com:443?transport=tcp"],
+                      "username": "short-user", "credential": "short-secret"}]
+        with patch("webrtc.cloudflare_turn.ice_servers", return_value=temporary):
+            self.assertEqual(browser_ice_servers(), temporary)
+            server = _ice_servers()[0]
+            self.assertEqual(server.urls, temporary[0]["urls"])
+            self.assertEqual(server.credential, "short-secret")
 
     def test_server_forwards_every_real_camera_frame_without_a_rate_cap(self):
         server = WebRTCServer()

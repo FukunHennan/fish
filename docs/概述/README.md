@@ -25,6 +25,7 @@
 | `docs/硬件/` | ESP32、相机、接线和产品资料 |
 | `docs/概述/` | 架构、目录与整理规范 |
 | `docs/开发日志/` | 更新记录、进度和问题复盘 |
+| `../Pro1-runtime/cloudflare-turn-key.json` | 可选 Cloudflare TURN 长期密钥；项目外本机私有运行凭据，不入 Git |
 
 ## 整理标准
 

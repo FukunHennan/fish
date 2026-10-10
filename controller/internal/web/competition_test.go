@@ -212,6 +212,13 @@ func TestCompetitionFlow(t *testing.T) {
 	if blue["score"].(float64) != 3 || red["score"].(float64) != 2 {
 		t.Fatalf("比分异常: blue=%v red=%v", blue["score"], red["score"])
 	}
+	scoreEvents := match["scoreEvents"].([]any)
+	if len(scoreEvents) != 2 || scoreEvents[0].(map[string]any)["delta"].(float64) != 3 {
+		t.Fatalf("计分事件没有写入当前比赛: %+v", scoreEvents)
+	}
+	if reloaded := newCompetitionStore(os.Getenv("FISH_COMPETITION_STATE")); len(reloaded.Match.ScoreEvents) != 2 {
+		t.Fatalf("计分事件没有持久化: %+v", reloaded.Match.ScoreEvents)
+	}
 
 	// 5. 结束并写入记录
 	call(http.MethodPost, "/api/competition/match/finish", "")
@@ -224,6 +231,9 @@ func TestCompetitionFlow(t *testing.T) {
 	if entry["blueName"] != "海洋先锋队" || entry["blueScore"].(float64) != 3 {
 		t.Fatalf("记录内容异常: %+v", entry)
 	}
+	if len(entry["scoreEvents"].([]any)) != 2 || len(entry["bluePlayers"].([]any)) != 2 {
+		t.Fatalf("比赛记录缺少计分事件或阵容: %+v", entry)
+	}
 	// 赛后更正应同时更新当前比赛和已保存的历史记录。
 	call(http.MethodPut, "/api/competition/match", `{"matchNo":"第 08 场（更正）"}`)
 	call(http.MethodPost, "/api/competition/match/score", `{"side":"blue","delta":-2}`)
@@ -232,11 +242,59 @@ func TestCompetitionFlow(t *testing.T) {
 	if correctedEntry["matchNo"] != "第 08 场（更正）" || correctedEntry["blueScore"].(float64) != 1 {
 		t.Fatalf("赛后更正未同步到历史记录: %+v", correctedEntry)
 	}
+	if len(correctedEntry["scoreEvents"].([]any)) != 3 {
+		t.Fatalf("赛后更正缺少计分事件: %+v", correctedEntry)
+	}
 	if entry["videoUrl"] != "/api/vision/recordings/files/match-test.mp4" || entry["videoStatus"] != "saved" {
 		t.Fatalf("比赛记录应包含可回放录像: %+v", entry)
 	}
 	if len(recordingCalls) != 2 || recordingCalls[0] != "POST /recordings" || !strings.HasPrefix(recordingCalls[1], "DELETE /recordings/") {
 		t.Fatalf("比赛开始和结束应自动启停录像: %+v", recordingCalls)
+	}
+	endedStart := httptest.NewRecorder()
+	handler.ServeHTTP(endedStart, httptest.NewRequest(http.MethodPost, "/api/competition/match/clock", strings.NewReader(`{"action":"start"}`)))
+	if endedStart.Code != http.StatusConflict {
+		t.Fatalf("已归档比赛不能再次开始，实际 %d", endedStart.Code)
+	}
+	next := matchOf(call(http.MethodPost, "/api/competition/match/new", `{"matchNo":"第 09 场"}`))
+	if next["id"] == match["id"] || next["blue"].(map[string]any)["score"].(float64) != 0 || next["elapsedMs"].(float64) != 0 {
+		t.Fatalf("新比赛应有独立 ID、比分和计时: %+v", next)
+	}
+	if len(call(http.MethodGet, "/api/competition/records", "")["records"].([]any)) != 1 {
+		t.Fatal("新比赛不能覆盖已归档记录")
+	}
+}
+
+func TestCompetitionScoreKindsAndFloor(t *testing.T) {
+	t.Setenv("FISH_COMPETITION_STATE", filepath.Join(t.TempDir(), "competition.json"))
+	handler := NewHandler(hub.New(), testKey())
+	created := httptest.NewRecorder()
+	handler.ServeHTTP(created, httptest.NewRequest(http.MethodPut, "/api/competition/match", strings.NewReader(`{"matchNo":"计分测试"}`)))
+	if created.Code != http.StatusOK {
+		t.Fatalf("建赛失败: %d %s", created.Code, created.Body.String())
+	}
+	request := func(body string) *httptest.ResponseRecorder {
+		t.Helper()
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/competition/match/score", strings.NewReader(body)))
+		return response
+	}
+	if response := request(`{"side":"blue","delta":1,"kind":"goal"}`); response.Code != http.StatusBadRequest {
+		t.Fatalf("事件类型与分值不符应被拒绝: %d %s", response.Code, response.Body.String())
+	}
+	if response := request(`{"side":"blue","delta":10,"kind":"goal"}`); response.Code != http.StatusOK {
+		t.Fatalf("进球计分失败: %d %s", response.Code, response.Body.String())
+	}
+	if response := request(`{"side":"blue","delta":-2,"kind":"out"}`); response.Code != http.StatusOK {
+		t.Fatalf("越界扣分失败: %d %s", response.Code, response.Body.String())
+	}
+	if response := request(`{"side":"red","delta":-2,"kind":"out"}`); response.Code != http.StatusOK {
+		t.Fatalf("零分越界计分失败: %d %s", response.Code, response.Body.String())
+	}
+	store := newCompetitionStore(os.Getenv("FISH_COMPETITION_STATE"))
+	if store.Match.Blue.Score != 8 || store.Match.Red.Score != 0 || len(store.Match.ScoreEvents) != 3 ||
+		store.Match.ScoreEvents[2].Delta != 0 || store.Match.ScoreEvents[2].Kind != "out" {
+		t.Fatalf("比分或事件流水异常: %+v", store.Match)
 	}
 }
 

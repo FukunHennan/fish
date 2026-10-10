@@ -82,13 +82,13 @@
     "rightAmplitudePercent": 0.4,
     "transitionMs": 600,
     "playerControl": {
-      "frequency": 3,
-      "amplitudePercent": 60
+      "frequency": 5,
+      "amplitudePercent": 100
     },
     "manualControl": {
       "frequency": 2.5,
       "amplitudePercent": 40
     },
-    "updatedAt": "2026-10-09T19:11:54+08:00"
+    "updatedAt": "2026-10-10T15:13:58+08:00"
   }
 }

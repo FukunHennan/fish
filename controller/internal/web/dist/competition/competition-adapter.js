@@ -145,6 +145,8 @@
   } catch (_) {}
   var activeLoginKey = "fish-active-login";
   var deviceEventSource = null;
+  var deviceSnapshotAt = 0;
+  var DEVICE_SNAPSHOT_MAX_AGE_MS = 15000;
 
   function ownsLoginTab() {
     if (!state.user || !state.authenticated) return false;
@@ -225,6 +227,32 @@
     if (Array.isArray(payload)) return payload;
     if (payload && Array.isArray(payload.devices)) return payload.devices;
     return [];
+  }
+
+  function stopOfflineBoundPlayers() {
+    if (isRefereePage()) return;
+    var disconnected = false;
+    PLAYERS.forEach(function (player) {
+      var deviceId = state.bound[player];
+      if (!deviceId || state.devices.some(function (device) {
+        return sameDeviceId(device, deviceId) && device.online === true;
+      })) return;
+      heldInputs[player] = {};
+      endMotion(player);
+      delete state.bound[player];
+      setBadge(slotForPlayer(player) + " 设备已离线，手动控制已停止", "warn");
+      disconnected = true;
+    });
+    if (disconnected) schedulePlayerLeaseRefresh(300);
+  }
+
+  function expireDeviceSnapshot() {
+    if (!state.authenticated || !deviceSnapshotAt || Date.now() - deviceSnapshotAt < DEVICE_SNAPSHOT_MAX_AGE_MS) return;
+    deviceSnapshotAt = 0;
+    state.devices = state.devices.map(function (device) { return Object.assign({}, device, { online: false }); });
+    state.competitionDevices = state.competitionDevices.map(function (device) { return Object.assign({}, device, { online: false }); });
+    stopOfflineBoundPlayers();
+    paintDeviceInfo();
   }
 
   // MAC is the only command identity. Keep the original spelling for API
@@ -656,7 +684,9 @@
     return api("/api/devices")
       .then(function (payload) {
         state.devices = deviceList(payload);
+        deviceSnapshotAt = Date.now();
         state.ready = true;
+		stopOfflineBoundPlayers();
 		if (isRefereePage()) {
 			paintDeviceInfo();
 			return null;
@@ -850,7 +880,7 @@
 
   function startPlayerLeaseMaintenance() {
     if (isRefereePage() || playerLeaseTimer) return;
-    playerLeaseTimer = window.setInterval(maintainPlayerLeases, 15000);
+    playerLeaseTimer = window.setInterval(maintainPlayerLeases, 5000);
   }
 
   function recoverPlayerLease(player, error) {
@@ -1461,7 +1491,7 @@
   // 画面，因此使用 root 会话；连接建立后只重新挂载 video 元素，
   // 页面切换不会重建媒体连接。
   var video = {
-    peer: null, stream: null, sessionId: null, timer: null, connecting: false,
+    peer: null, stream: null, sessionId: null, timer: null, turnRefreshTimer: null, connecting: false,
     connectionStartedAt: 0, connectedAt: 0, lastFrameAt: 0,
     connectionGeneration: 0,
     frameWatchTimer: null, frameCallbackId: null, frameElement: null,
@@ -1760,6 +1790,7 @@
           throw staleConnection();
         }
         video.peer = peer;
+        var turnRefreshSeconds = Number(config && config.turnRefreshSeconds) || 0;
         video.connectionStartedAt = Date.now();
         video.connectedAt = 0;
         video.lastFrameAt = 0;
@@ -1787,6 +1818,15 @@
             video.connectedAt = Date.now();
             video.statusText = "视频连接已建立，正在等待首帧…";
             setVisionStatus(video.statusText, "info");
+            if (turnRefreshSeconds > 0 && !video.turnRefreshTimer) {
+              video.turnRefreshTimer = setTimeout(function () {
+                video.turnRefreshTimer = null;
+                if (video.peer === peer) {
+                  closeVideoPeer();
+                  connectVideo();
+                }
+              }, turnRefreshSeconds * 1000);
+            }
           }
         };
         return peer.createOffer()
@@ -2385,7 +2425,7 @@
           name: player.name || player.slot || player.deviceId,
           deviceId: String(player.deviceId),
           online: !!(state.devices || []).some(function (device) {
-            return sameDeviceId(device, player.deviceId) && device.online !== false;
+            return sameDeviceId(device, player.deviceId) && device.online === true;
           }),
         });
       });
@@ -3244,6 +3284,10 @@
 
   function closeVideoPeer() {
     video.connectionGeneration += 1;
+    if (video.turnRefreshTimer) {
+      clearTimeout(video.turnRefreshTimer);
+      video.turnRefreshTimer = null;
+    }
     if (video.timer) {
       clearTimeout(video.timer);
       video.timer = null;
@@ -3504,6 +3548,7 @@
       });
     }
     renderRefreshTimer = window.setInterval(function () {
+      expireDeviceSnapshot();
       ensureVideoSurface();
       // player_interface.html owns the static page renderer and may recreate
       // the control cards. Re-apply server-owned team/seat/device state after
@@ -3581,6 +3626,8 @@
     state.user = null;
     state.authenticated = false;
     state.devices = [];
+    state.competitionDevices = [];
+    deviceSnapshotAt = 0;
     state.match = null;
     finishedMatchEventId = null;
     dismissedFinishedMatchId = null;
@@ -3833,6 +3880,7 @@
     syncText("redScore", match.red.score);
     syncText("blueQuick", match.blue.score);
     syncText("redQuick", match.red.score);
+    paintRefereeScoreEvents(match);
     syncText("clockState", referee.running ? "剩余时间" : stateText(match.state));
     syncText("currentMatchSummary", [match.matchNo, match.group, match.venue].filter(Boolean).join(" · ") || "比赛信息未填写");
     var matchNameButton = document.getElementById("currentMatchEdit");
@@ -3846,6 +3894,12 @@
       durationButton.title = durationButton.disabled ? "比赛进行或暂停期间不能修改时长" : "设置比赛倒计时";
       durationButton.textContent = fmtClock(match.durationMs || 180000);
     }
+    var startButton = document.getElementById("startBtn");
+    var endButton = document.getElementById("endBtn");
+    var newButton = document.getElementById("newMatchBtn");
+    if (startButton) startButton.disabled = match.state === "finished";
+    if (endButton) endButton.disabled = match.state === "finished";
+    if (newButton) newButton.disabled = match.state !== "finished";
     syncText("currentBlueTeam", match.blue && match.blue.name ? match.blue.name : "蓝队");
     syncText("currentRedTeam", match.red && match.red.name ? match.red.name : "红队");
     syncText("globalState", stateText(match.state));
@@ -3864,6 +3918,34 @@
     syncText("matchFieldHealth", match.fieldLocked === true ? "已锁定" : "待确认");
     syncText("matchSyncHealth", "已同步");
     paintRefereeRoster(match);
+  }
+
+  function paintRefereeScoreEvents(match) {
+    var list = document.getElementById("eventList");
+    if (!list) return;
+    var events = Array.isArray(match.scoreEvents) ? match.scoreEvents : [];
+    var signature = String(match.id || "") + ":" + events.map(function (item) { return item.id; }).join(",");
+    if (list.dataset.scoreSignature === signature) return;
+    list.dataset.scoreSignature = signature;
+    list.replaceChildren();
+    if (!events.length) {
+      var empty = document.createElement("small");
+      empty.textContent = "本场尚无计分事件";
+      list.appendChild(empty);
+      return;
+    }
+    events.slice().reverse().forEach(function (item) {
+      var row = document.createElement("div");
+      row.className = "event" + (item.side === "red" ? " red" : "");
+      var time = document.createElement("small");
+      time.textContent = fmtClock(item.remainingMs || 0);
+      var detail = document.createElement("span");
+      detail.textContent = (item.side === "red" ? "红队" : "蓝队") + " · " + (item.label || "比分更正");
+      var delta = document.createElement("b");
+      delta.textContent = (item.delta > 0 ? "+" : "") + item.delta;
+      row.append(time, detail, delta);
+      list.appendChild(row);
+    });
   }
 
   function paintRefereeClock() {
@@ -4079,7 +4161,9 @@
       return assignment ? Object.assign({}, device, assignment, { online: !!device.online }) : device;
     });
     assignments.forEach(function (assignment) {
-      if (!merged.some(function (device) { return sameDeviceId(device, assignment); })) merged.push(assignment);
+      if (!merged.some(function (device) { return sameDeviceId(device, assignment); })) {
+        merged.push(Object.assign({}, assignment, { online: false }));
+      }
     });
     return merged;
   }
@@ -4190,6 +4274,8 @@
     syncText("matchSignupHealth", "等待上报");
     syncText("matchDeviceHealth", "等待上报");
     syncText("matchSyncHealth", "读取失败");
+    var eventList = document.getElementById("eventList");
+    if (eventList) { eventList.replaceChildren(); delete eventList.dataset.scoreSignature; }
     var blueTitle = document.querySelector(".teamCard.blue .teamHead h2");
     var redTitle = document.querySelector(".teamCard.red .teamHead h2");
     if (blueTitle) blueTitle.textContent = "蓝队 · 未读取真实账号";
@@ -4376,7 +4462,8 @@
       event.stopImmediatePropagation();
       var delta = Number(scoreButton.getAttribute("data-score"));
       var side = scoreButton.getAttribute("data-team");
-      if (side && delta) refereeAction("score", { side: side, delta: delta });
+      var kind = scoreButton.getAttribute("data-score-kind");
+      if (side && delta) refereeAction("score", { side: side, delta: delta, kind: kind });
       return true;
     }
     if (target.closest("#startBtn")) {
@@ -4396,6 +4483,22 @@
       event.preventDefault();
       event.stopImmediatePropagation();
       refereeAction("finish");
+      return true;
+    }
+    if (target.closest("#newMatchBtn")) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (!referee.match || referee.match.state !== "finished") return true;
+      var proposed = window.prompt("输入下一场比赛名称", "下一场比赛");
+      if (proposed == null) return true;
+      var name = String(proposed).trim();
+      if (!name || Array.from(name).length > 80) {
+        setBadge("比赛名称须为 1 至 80 个字符", "warn");
+        return true;
+      }
+      refereeAction("new", { matchNo: name }).then(function (result) {
+        if (result !== null) setBadge("新比赛已创建，比分和计时已重置", "ok");
+      });
       return true;
     }
     var selectPlayer = target.closest(".selectPlayer");
@@ -4473,6 +4576,7 @@
       if (document.hidden) return;
       api("/api/devices").then(function (payload) {
         state.devices = deviceList(payload);
+        deviceSnapshotAt = Date.now();
         paintDeviceInfo();
       }).catch(function () { /* 保留上一帧状态，等待下一次刷新 */ });
     }, 2000);
@@ -4628,21 +4732,11 @@
       var payload = null;
       try { payload = JSON.parse(event.data); } catch (e) { return; }
       state.devices = deviceList(payload);
+      deviceSnapshotAt = Date.now();
       paintDeviceInfo();
       paintAccountInfo();
       paintCurrentTeamIdentity();
-      // 设备掉线立即停止对应玩家
-      PLAYERS.forEach(function (player) {
-        var deviceId = state.bound[player];
-        if (!deviceId) return;
-        var online = state.devices.some(function (device) { return sameDeviceId(device, deviceId) && device.online; });
-        if (!online) {
-          heldInputs[player] = {};
-          endMotion(player);
-          delete state.bound[player];
-          setBadge(slotForPlayer(player) + " 设备已离线，手动控制已停止", "warn");
-        }
-      });
+      stopOfflineBoundPlayers();
       if (state.match && PLAYERS.some(function (player) { return !state.bound[player]; })) {
         schedulePlayerLeaseRefresh(300);
       }
@@ -4783,7 +4877,9 @@
 
     document.addEventListener("visibilitychange", function () {
       if (!document.hidden) {
-        schedulePlayerLeaseRefresh(50);
+        expireDeviceSnapshot();
+        if (isRefereePage()) refreshDevices();
+        else schedulePlayerLeaseRefresh(50);
         video.connectedAt = Date.now();
       }
     });

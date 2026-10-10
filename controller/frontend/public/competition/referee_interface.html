@@ -2333,11 +2333,11 @@ input:focus,select:focus{
   </aside>
   <section class="arenaCard panel"><div class="arenaHead"><h2>比赛画面</h2><span>原始视频</span></div><div class="arena" id="refereeMatchStage" aria-label="原始比赛视频"></div><div class="arenaFoot"><span>裁判全画面</span><span>视觉独立处理</span></div></section>
   <aside class="scoreSidePanel">
-   <section class="teamQuick panel"><div class="teamQuickHead"><h3 class="blueTxt">蓝队</h3><b id="blueQuick">0</b></div><div class="quickBtns"><button class="goalBtn" data-team="blue" data-score="10">⚽ 进球<br>+10</button><button class="assistBtn" data-team="blue" data-score="2">⇄ 配合<br>+2</button><button class="outBtn" data-team="blue" data-score="-2">⚠ 越界<br>-2</button></div></section>
-   <section class="teamQuick panel"><div class="teamQuickHead"><h3 class="redTxt">红队</h3><b id="redQuick">0</b></div><div class="quickBtns"><button class="goalBtn" data-team="red" data-score="10">⚽ 进球<br>+10</button><button class="assistBtn" data-team="red" data-score="2">⇄ 配合<br>+2</button><button class="outBtn" data-team="red" data-score="-2">⚠ 越界<br>-2</button></div></section>
+   <section class="teamQuick panel"><div class="teamQuickHead"><h3 class="blueTxt">蓝队</h3><b id="blueQuick">0</b></div><div class="quickBtns"><button class="goalBtn" data-team="blue" data-score="10" data-score-kind="goal">⚽ 进球<br>+10</button><button class="assistBtn" data-team="blue" data-score="2" data-score-kind="assist">⇄ 配合<br>+2</button><button class="outBtn" data-team="blue" data-score="-2" data-score-kind="out">⚠ 越界<br>-2</button></div></section>
+   <section class="teamQuick panel"><div class="teamQuickHead"><h3 class="redTxt">红队</h3><b id="redQuick">0</b></div><div class="quickBtns"><button class="goalBtn" data-team="red" data-score="10" data-score-kind="goal">⚽ 进球<br>+10</button><button class="assistBtn" data-team="red" data-score="2" data-score-kind="assist">⇄ 配合<br>+2</button><button class="outBtn" data-team="red" data-score="-2" data-score-kind="out">⚠ 越界<br>-2</button></div></section>
    <section class="events panel"><h3>计分记录</h3><div class="eventList" id="eventList"></div></section>
   </aside>
-  <section class="bottom"><section class="health panel"><div class="h"><span>签到</span><b id="matchSignupHealth">等待上报</b></div><div class="h"><span>设备</span><b id="matchDeviceHealth">等待上报</b></div><div class="h"><span>场地</span><b id="matchFieldHealth">待确认</b></div><div class="h"><span>同步</span><b id="matchSyncHealth">等待服务器</b></div></section><section class="controls panel"><button class="btn good" id="startBtn">开始比赛</button><button class="btn" id="pauseBtn">暂停比赛</button><button class="btn warn" id="endBtn">结束比赛</button></section></section>
+  <section class="bottom"><section class="health panel"><div class="h"><span>签到</span><b id="matchSignupHealth">等待上报</b></div><div class="h"><span>设备</span><b id="matchDeviceHealth">等待上报</b></div><div class="h"><span>场地</span><b id="matchFieldHealth">待确认</b></div><div class="h"><span>同步</span><b id="matchSyncHealth">等待服务器</b></div></section><section class="controls panel" style="grid-template-columns:repeat(4,minmax(0,1fr))"><button class="btn good" id="startBtn">开始比赛</button><button class="btn" id="pauseBtn">暂停比赛</button><button class="btn warn" id="endBtn">结束比赛</button><button class="btn" id="newMatchBtn" disabled>新建下一场</button></section></section>
  </section>
 
  <section id="records" class="page records hidden">
@@ -2411,7 +2411,6 @@ const state={
  events:[]
 };
 let selectedPlayer=null,timer=null,historySelected=null,replayObjectUrl=null;
-const MATCH_DURATION=180;
 const $=id=>document.getElementById(id);
 const bluePlayers=$('bluePlayers'), redPlayers=$('redPlayers'), openSignup=$('openSignup'), signupNext=$('signupNext');
 const modal=$('modal'), modalTitle=$('modalTitle'), closeBtn=$('close'), selectStep=$('selectStep'), confirmStep=$('confirmStep');
@@ -2493,26 +2492,22 @@ endBtn.onclick=unavailableCompetitionFallback;
 document.querySelectorAll('[data-score]').forEach(button=>button.onclick=unavailableCompetitionFallback);
 
 function hw(m){return m.blue.score>m.red.score?'蓝队获胜':m.red.score>m.blue.score?'红队获胜':'平局'}
-function renderHistory(){const q=search.value.toLowerCase(),g=groupFilter.value;const list=history.filter(m=>(g==='all'||m.group===g)&&(!q||(m.no+m.blue.team+m.red.team).toLowerCase().includes(q)));historyCount.textContent=list.length+' 场';matchList.innerHTML=list.length?list.map(m=>`<button class="matchItem ${m.id===historySelected?'active':''}" data-id="${m.id}"><div class="matchTop"><b>${m.no} · ${m.group}</b><span>${m.date}</span></div><div class="matchTeams"><span class="blue">${m.blue.team}</span><strong>${m.blue.score}:${m.red.score}</strong><span class="red">${m.red.team}</span></div></button>`).join(''):'<div class="deviceOverviewEmpty"><b>暂无真实比赛记录</b><span>完成并保存比赛后将在此显示</span></div>';document.querySelectorAll('.matchItem').forEach(b=>b.onclick=()=>{
+function escapeHtml(value){return String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}
+function renderHistory(){const q=search.value.toLowerCase(),g=groupFilter.value;const list=history.filter(m=>(g==='all'||m.group===g)&&(!q||(m.no+m.blue.team+m.red.team).toLowerCase().includes(q)));historyCount.textContent=list.length+' 场';matchList.innerHTML=list.length?list.map(m=>`<button class="matchItem ${m.id===historySelected?'active':''}" data-id="${escapeHtml(m.id)}"><div class="matchTop"><b>${escapeHtml(m.no)} · ${escapeHtml(m.group)}</b><span>${escapeHtml(m.date)}</span></div><div class="matchTeams"><span class="blue">${escapeHtml(m.blue.team)}</span><strong>${m.blue.score}:${m.red.score}</strong><span class="red">${escapeHtml(m.red.team)}</span></div></button>`).join(''):'<div class="deviceOverviewEmpty"><b>暂无真实比赛记录</b><span>完成并保存比赛后将在此显示</span></div>';document.querySelectorAll('.matchItem').forEach(b=>b.onclick=()=>{
  historySelected=b.dataset.id;
  if(replayObjectUrl){URL.revokeObjectURL(replayObjectUrl);replayObjectUrl=null}
  replayVideo.removeAttribute('src');replayVideo.load();videoPlaceholder.classList.remove('hidden');
  videoFile.value='';videoFileName.textContent='正在载入服务器录像';videoElapsed.textContent='00:00';videoDuration.textContent='--:--';
  renderHistory();renderHistoryDetail()
 })}
-function remainingToSeconds(t){
- const [mm,ss]=t.split(':').map(Number);return (mm||0)*60+(ss||0)
-}
-function replayElapsedForEvent(matchTime){
- return Math.max(0,MATCH_DURATION-remainingToSeconds(matchTime))
-}
-function seekReplay(matchTime){
- const elapsed=replayElapsedForEvent(matchTime);
+function seekReplay(videoTime){
+ const elapsed=Number(videoTime);
+ if(!Number.isFinite(elapsed)||elapsed<0){toast('此计分发生在录像之外');return}
  if(replayVideo.src){
    const max=Number.isFinite(replayVideo.duration)?replayVideo.duration:elapsed;
    replayVideo.currentTime=Math.min(elapsed,max||elapsed);
    replayVideo.play().catch(()=>{});
-   toast('已跳转到 '+matchTime+' 的计分片段');
+   toast('已跳转到计分片段');
  }else{
    toast('请先载入本场录像');
  }
@@ -2534,12 +2529,12 @@ function renderReplay(m){
    videoFileName.textContent=m.videoError||'本场没有可播放录像';
    histVideoStatus.textContent=m.videoError?'录像异常':'无录像';
  }
- replayTrack.innerHTML=m.events.map(e=>{
-   const elapsed=replayElapsedForEvent(e[0]);
-   const left=Math.min(100,Math.max(0,elapsed/MATCH_DURATION*100));
-   return `<button class="eventMark ${e[2]==='红队'?'red':''}" style="left:${left}%" data-replay-time="${e[0]}" title="${e[0]} ${e[2]} ${e[3]}"></button>`;
+ const videoSeconds=(m.durationMs||m.videoDurationMs||0)/1000;
+ replayTrack.innerHTML=m.events.filter(e=>e.videoTime!==null).map(e=>{
+   const left=videoSeconds>0?Math.min(100,Math.max(0,e.videoTime/videoSeconds*100)):0;
+   return `<button class="eventMark ${e.side==='红队'?'red':''}" style="left:${left}%" data-replay-time="${e.videoTime}" title="${escapeHtml(e.matchTime+' '+e.side+' '+e.label)}"></button>`;
  }).join('');
- replayEvents.innerHTML=m.events.length?m.events.map(e=>`<button class="replayEvent ${e[2]==='红队'?'red':''}" data-replay-time="${e[0]}"><small>${e[0]} · ${e[1]}</small>${e[2]} · ${e[3]} · ${e[4]}</button>`).join(''):'<span class="videoStatus">本场暂未记录独立计分事件</span>';
+ replayEvents.innerHTML=m.events.length?m.events.map(e=>`<button class="replayEvent ${e.side==='红队'?'red':''}" ${e.videoTime===null?'disabled':`data-replay-time="${e.videoTime}"`}><small>${escapeHtml(e.matchTime)} · ${escapeHtml(e.wallTime)}</small>${escapeHtml(e.side)} · ${escapeHtml(e.label)} · ${e.delta>0?'+':''}${e.delta}</button>`).join(''):'<span class="videoStatus">本场没有可用的计分事件</span>';
  document.querySelectorAll('[data-replay-time]').forEach(b=>b.onclick=()=>seekReplay(b.dataset.replayTime));
 }
 function renderHistoryDetail(){
@@ -2551,6 +2546,7 @@ function renderHistoryDetail(){
   histVideoFile.textContent='—';histJsonFile.textContent='—';histSavePath.textContent='—';histVideoStatus.textContent='暂无真实记录';
   [hbg,hba,hbo,hrg,hra,hro].forEach(el=>el.textContent='—');
   recordTable.innerHTML='<div class="deviceOverviewEmpty"><b>暂无计分记录</b><span>这里只显示真实比赛数据</span></div>';
+  replayVideo.removeAttribute('src');delete replayVideo.dataset.recordUrl;replayVideo.load();videoPlaceholder.classList.remove('hidden');
   replayTrack.innerHTML='';replayEvents.innerHTML='';return;
  }
  histBlueTeam.textContent='蓝队 · '+m.blue.team;histRedTeam.textContent='红队 · '+m.red.team;
@@ -2561,9 +2557,12 @@ function renderHistoryDetail(){
  histJsonFile.textContent=m.jsonFile||'-';
  histSavePath.textContent=m.savePath||'-';
  histVideoStatus.textContent=m.videoStatus==='saved'?'✓ 服务器录像已封存':(m.videoError?'录像异常':'无录像');
- hbg.textContent=m.blue.g;hba.textContent=m.blue.a;hbo.textContent=m.blue.o;hrg.textContent=m.red.g;hra.textContent=m.red.a;hro.textContent=m.red.o;
+ const legacy=!m.hasEventLog;
+ hbg.textContent=legacy?'未记录':m.blue.g;hba.textContent=legacy?'未记录':m.blue.a;hbo.textContent=legacy?'未记录':m.blue.o;hrg.textContent=legacy?'未记录':m.red.g;hra.textContent=legacy?'未记录':m.red.a;hro.textContent=legacy?'未记录':m.red.o;
  recordTable.innerHTML=`<div class="tr head"><span>比赛时间</span><span>现场时间</span><span>队伍</span><span>事件</span><span>分值</span></div>`+
- m.events.map(e=>`<div class="tr"><span>${e[0]}</span><span>${e[1]}</span><span class="${e[2]==='蓝队'?'blueTxt':'redTxt'}">${e[2]}</span><button class="btn" data-replay-time="${e[0]}" style="text-align:left;padding:4px 6px">${e[3]}</button><b>${e[4]}</b></div>`).join('');
+ (m.events.length?m.events.map(e=>`<div class="tr"><span>${escapeHtml(e.matchTime)}</span><span>${escapeHtml(e.wallTime)}</span><span class="${e.side==='蓝队'?'blueTxt':'redTxt'}">${escapeHtml(e.side)}</span><button class="btn" ${e.videoTime===null?'disabled':`data-replay-time="${e.videoTime}"`} style="text-align:left;padding:4px 6px">${escapeHtml(e.label)}</button><b>${e.delta>0?'+':''}${e.delta}</b></div>`).join(''):'<div class="deviceOverviewEmpty">本场未保存计分明细</div>');
+ const timelineStart=document.querySelector('.timelineLabels span:first-child');
+ if(timelineStart)timelineStart.textContent='比赛开始 '+fmt(Math.ceil(m.matchDurationMs/1000));
  renderReplay(m);
  document.querySelectorAll('#recordTable [data-replay-time]').forEach(b=>b.onclick=()=>seekReplay(b.dataset.replayTime));
 }
@@ -2572,15 +2571,26 @@ window.applyCompetitionRecords=function(records){
    const finished=record.finishedAt?new Date(record.finishedAt):null;
    const validDate=finished&&!Number.isNaN(finished.getTime());
    const fileName=record.videoUrl?decodeURIComponent(String(record.videoUrl).split('/').pop()||''):'';
+   const events=(Array.isArray(record.scoreEvents)?record.scoreEvents:[]).map(event=>{
+     const stamp=event.occurredAt?new Date(event.occurredAt):null;
+     const videoTime=event.videoTimestampSeconds==null?null:Number(event.videoTimestampSeconds);
+     return {matchTime:fmt(Math.floor(Math.max(0,Number(event.remainingMs)||0)/1000)),
+       wallTime:stamp&&!Number.isNaN(stamp.getTime())?stamp.toLocaleTimeString('zh-CN',{hour12:false}):'未记录',
+       side:event.side==='red'?'红队':'蓝队',kind:String(event.kind||'adjustment'),
+       label:String(event.label||'比分更正'),delta:Number(event.delta)||0,
+       videoTime:Number.isFinite(videoTime)&&videoTime>=0?videoTime:null};
+   });
+   const count=(side,kind)=>events.filter(event=>event.side===side&&event.kind===kind).length;
    return {
-     id:String(record.id||`${record.matchNo||'match'}-${record.finishedAt||index}`),
+     id:String(record.id||record.matchNo||'match')+'|'+String(record.finishedAt||index),
      no:record.matchNo||'未命名比赛',group:record.group||'未设置',arena:record.venue||'未设置',
      date:validDate?finished.toLocaleDateString('zh-CN'):'未记录',
      end:validDate?finished.toLocaleString('zh-CN',{hour12:false}):(record.finishedAt||'未记录'),
-     blue:{team:record.blueName||'蓝队',players:'比赛阵容已保存',score:Number(record.blueScore)||0,g:0,a:0,o:0},
-     red:{team:record.redName||'红队',players:'比赛阵容已保存',score:Number(record.redScore)||0,g:0,a:0,o:0},
+     blue:{team:record.blueName||'蓝队',players:Array.isArray(record.bluePlayers)?record.bluePlayers.join('、'):'阵容未记录',score:Number(record.blueScore)||0,g:count('蓝队','goal'),a:count('蓝队','assist'),o:count('蓝队','out')},
+     red:{team:record.redName||'红队',players:Array.isArray(record.redPlayers)?record.redPlayers.join('、'):'阵容未记录',score:Number(record.redScore)||0,g:count('红队','goal'),a:count('红队','assist'),o:count('红队','out')},
      videoUrl:record.videoUrl||'',videoFile:fileName,videoStatus:record.videoStatus||'',videoError:record.videoError||'',
-     jsonFile:'赛事服务',savePath:'服务器录像库',durationMs:Number(record.videoDurationMs)||0,events:[]
+     jsonFile:'competition.json',savePath:'赛事数据目录',durationMs:Number(record.videoDurationMs)||0,
+     matchDurationMs:Number(record.durationMs)||180000,hasEventLog:Array.isArray(record.scoreEvents),events:events
    };
  });
  history.splice(0,history.length,...mapped);
@@ -2621,6 +2631,6 @@ replayVideo.ontimeupdate=()=>{
 
 renderSignup();renderCalibrationLock();renderHistory();renderHistoryDetail();show('signup');
 </script>
-<script src="competition-adapter.js?v=20260923-referee-roster"></script>
+<script src="competition-adapter.js?v=20261010-score-records"></script>
 </body>
 </html>

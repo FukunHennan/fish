@@ -19,6 +19,8 @@ Windows 新电脑若只有 Node.js/npm，可从项目根目录运行 `scripts\se
 
 `camera.rotationAngle`（-180°～180°）和 `camera.exposure`（相机驱动的曝光值）也在同一文件中。裁判端应用旋转或成功调整曝光时会分别更新对应字段，并保留另一个字段；视觉服务每次打开或重连相机时从这里恢复两项设置。手工修改后重新打开相机预览生效；驱动不接受曝光值时仍以实际回读结果为准。
 
+跨网 WebRTC 可使用 Cloudflare Realtime TURN。长期 Key 保存在项目外的 `../Pro1-runtime/cloudflare-turn-key.json`，由 `scripts/runtime/set-turn-key.ps1 -KeyId <Key ID>` 交互录入，不属于三个可提交的手动配置文件，也不能上传 Git。视觉服务自动从 Cloudflare 获取 24 小时有效的临时 ICE 凭据，提前刷新；浏览器连接在到期前自动重建。未放置 Key 文件时仍采用 `program.json` 内的 STUN 和旧静态 TURN 设置。完整开通步骤见[公网访问配置](../docs/程序/公网访问配置.md)。
+
 `firmware/include/AppConfig.h` 和 `vision/config.py` 仍保留编译默认值、类型及读取逻辑，不再作为日常修改入口。`firmware/platformio.ini`、`go.mod`、`package.json`、`requirements.txt` 等是构建依赖清单。视觉标定产生的 `vision/assets/*.local.json`、Go 用户数据、诊断日志、模型和录像是运行数据或资源，不计入三个手动部署配置文件。
 
 目标 GitHub 仓库是公开仓库；`firmware.json` 中的部署密钥和 Wi-Fi 值上传后可被公开读取。启动与停止见[程序文档](../docs/程序/README.md)。

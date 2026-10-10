@@ -18,6 +18,7 @@ from config import OUTPUT_DIR, YOLO_MODEL_PATH, list_yolo_models, resolve_yolo_m
 from recording import RecordingError
 from session import InvalidTransition, SessionMismatch
 from webrtc import WebRTCServer, WebRTCUnavailable
+from turn_credentials import TurnCredentialsError, cloudflare_turn
 
 
 def create_app(
@@ -182,11 +183,18 @@ def create_app(
     def webrtc_config():
         if webrtc_server is None:
             return jsonify({"available": False, "iceServers": []})
-        return jsonify({
+        try:
+            ice_servers = webrtc_server.browser_ice_servers()
+        except TurnCredentialsError as error:
+            return jsonify({"available": False, "message": str(error), "iceServers": []}), 503
+        response = jsonify({
             "available": bool(webrtc_server.available),
             "activePeers": webrtc_server.peer_count,
-            "iceServers": webrtc_server.browser_ice_servers(),
+            "iceServers": ice_servers,
+            "turnRefreshSeconds": cloudflare_turn.seconds_until_refresh() if cloudflare_turn.configured() else None,
         })
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.get("/frame.jpg")
     def current_frame_jpeg():

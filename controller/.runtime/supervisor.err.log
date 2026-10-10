@@ -1,0 +1,6 @@
+^C# fish-controller/internal/web
+internal\web\server.go:23:2: "net/url" imported and not used
+internal\web\server.go:287:41: s.visionFrameSocket undefined (type *server has no field or method visionFrameSocket)
+# fish-controller/internal/web
+internal\web\vision_frame_socket.go:40:38: cannot call pointer method Upgrade on websocket.Upgrader
+^C

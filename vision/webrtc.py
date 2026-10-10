@@ -10,6 +10,7 @@ from fractions import Fraction
 import cv2
 import crop_region
 from recording import MatchVideoRecorder, RecordingError
+from turn_credentials import cloudflare_turn
 
 from config import (
     WEBRTC_OFFER_TIMEOUT_S,
@@ -151,19 +152,13 @@ def _resize_for_video(frame, quality="smooth"):
 
 
 def _ice_servers():
-    servers = []
-    if WEBRTC_STUN_URL:
-        servers.append(RTCIceServer(urls=WEBRTC_STUN_URL))
-    if WEBRTC_TURN_URL:
-        servers.append(RTCIceServer(
-            urls=WEBRTC_TURN_URL,
-            username=WEBRTC_TURN_USERNAME,
-            credential=WEBRTC_TURN_CREDENTIAL,
-        ))
-    return servers
+    return [RTCIceServer(**server) for server in browser_ice_servers()]
 
 
 def browser_ice_servers():
+    cloudflare_servers = cloudflare_turn.ice_servers()
+    if cloudflare_servers is not None:
+        return cloudflare_servers
     servers = []
     if WEBRTC_STUN_URL:
         servers.append({"urls": WEBRTC_STUN_URL})
