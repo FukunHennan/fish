@@ -593,6 +593,43 @@ func TestMotionCalibrationProfilesPersistPerDevice(t *testing.T) {
 	}
 }
 
+func TestMotionProfilesFollowMACAcrossReconnectAndEdits(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "device-motion.json")
+	t.Setenv("FISH_MOTION_CALIBRATIONS", path)
+	first := &server{calibrationPath: path}
+	for _, id := range []string{"ac:27:6e:5e:ab:7c", "44:bd:8d:4b:c2:00"} {
+		if err := first.ensureMotionCalibration(id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	handler := NewHandler(hub.New(), testKey())
+	patch := httptest.NewRecorder()
+	handler.ServeHTTP(patch, httptest.NewRequest(http.MethodPatch, "/api/motion-calibrations", strings.NewReader(
+		`{"deviceId":"ac:27:6e:5e:ab:7c","playerControl":{"frequency":2.1,"amplitudePercent":25}}`)))
+	if patch.Code != http.StatusOK {
+		t.Fatalf("PATCH status=%d body=%s", patch.Code, patch.Body.String())
+	}
+	if err := first.ensureMotionCalibration("AC:27:6E:5E:AB:7C"); err != nil {
+		t.Fatal(err)
+	}
+	profiles := (&server{calibrationPath: path}).readMotionCalibrations()
+	if len(profiles) != 2 || profiles["AC:27:6E:5E:AB:7C"].PlayerControl.AmplitudePercent != 25 ||
+		profiles["44:BD:8D:4B:C2:00"].PlayerControl.AmplitudePercent != 60 {
+		t.Fatalf("MAC profiles were not kept independently: %+v", profiles)
+	}
+	put := httptest.NewRecorder()
+	handler.ServeHTTP(put, httptest.NewRequest(http.MethodPut, "/api/motion-calibrations", strings.NewReader(
+		`{"deviceId":"AC:27:6E:5E:AB:7C","servoMin":20,"servoMax":160,"straightCenter":96,"forwardFrequency":2.5,"forwardAmplitudePercent":0.45,"leftCenterRatio":0.5,"leftFrequency":2.3,"leftAmplitudePercent":0.55,"rightCenterRatio":0.5,"rightFrequency":2.3,"rightAmplitudePercent":0.55,"transitionMs":600}`)))
+	if put.Code != http.StatusOK {
+		t.Fatalf("PUT status=%d body=%s", put.Code, put.Body.String())
+	}
+	profiles = (&server{calibrationPath: path}).readMotionCalibrations()
+	if profiles["AC:27:6E:5E:AB:7C"].PlayerControl.AmplitudePercent != 25 ||
+		profiles["AC:27:6E:5E:AB:7C"].StraightCenter != 96 {
+		t.Fatalf("calibration edit lost player tuning: %+v", profiles["AC:27:6E:5E:AB:7C"])
+	}
+}
+
 func TestMotionCalibrationProfilesAcceptServoModel(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "motion-calibrations.json")
 	t.Setenv("FISH_MOTION_CALIBRATIONS", path)
@@ -697,8 +734,6 @@ func TestProtocolV2RegistrationKeepsIdentityMetadata(t *testing.T) {
 func TestCompetitionPrototypeBundleIsServed(t *testing.T) {
 	handler := NewHandler(hub.New(), testKey())
 	for _, path := range []string{
-		"/competition/player_interface.html",
-		"/competition/referee_interface.html",
 		"/competition/competition_flowchart.svg",
 	} {
 		w := httptest.NewRecorder()

@@ -18,6 +18,7 @@ from config import OUTPUT_DIR, YOLO_MODEL_PATH, list_yolo_models, resolve_yolo_m
 from recording import RecordingError
 from session import InvalidTransition, SessionMismatch
 from webrtc import WebRTCServer, WebRTCUnavailable
+from turn_credentials import TurnCredentialsError, cloudflare_turn
 
 
 def create_app(
@@ -182,10 +183,41 @@ def create_app(
     def webrtc_config():
         if webrtc_server is None:
             return jsonify({"available": False, "iceServers": []})
-        return jsonify({
+        try:
+            ice_servers = webrtc_server.browser_ice_servers()
+        except TurnCredentialsError as error:
+            return jsonify({"available": False, "message": str(error), "iceServers": []}), 503
+        response = jsonify({
             "available": bool(webrtc_server.available),
             "activePeers": webrtc_server.peer_count,
-            "iceServers": webrtc_server.browser_ice_servers(),
+            "iceServers": ice_servers,
+            "turnRefreshSeconds": cloudflare_turn.seconds_until_refresh() if cloudflare_turn.configured() else None,
+        })
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @app.get("/frame.jpg")
+    def current_frame_jpeg():
+        current = service.current_session()
+        if (
+            webrtc_server is None
+            or current.get("state") not in ("previewing", "processing", "tracking")
+            or request.args.get("sessionId") != current.get("sessionId")
+        ):
+            return jsonify({"message": "视觉会话无效"}), 409
+        view = request.args.get("view", "cropped")
+        if view not in ("cropped", "full"):
+            return jsonify({"message": "无效的视频视图"}), 400
+        quality = request.args.get("quality", "smooth")
+        if quality not in ("smooth", "compact"):
+            return jsonify({"message": "无效的视频质量"}), 400
+        frame = webrtc_server.jpeg_snapshot(view=view, quality=quality)
+        if frame is None:
+            return jsonify({"message": "暂无新鲜摄像头画面"}), 503
+        sequence, jpeg = frame
+        return Response(jpeg, mimetype="image/jpeg", headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, private, max-age=0, no-transform",
+            "X-Fish-Frame-Sequence": str(sequence),
         })
 
     @app.post("/recordings")

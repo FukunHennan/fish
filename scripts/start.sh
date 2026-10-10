@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONTROLLER="$ROOT/controller"
 FRONTEND="$CONTROLLER/frontend"
 RUNTIME="$CONTROLLER/.runtime"
+AUTH_DATA="$ROOT/../Pro1-runtime"
 EXE="$RUNTIME/fish-controller"
 
 if [[ ! -f "$CONTROLLER/go.mod" ]]; then
@@ -31,6 +32,17 @@ echo "[2/4] Building frontend..."
 (cd "$FRONTEND" && npm run build)
 
 mkdir -p "$RUNTIME"
+mkdir -p "$AUTH_DATA"
+if [[ -z "${FISH_AUTH_USERS:-}" && ! -f "$AUTH_DATA/users.json" ]]; then
+  legacy_dir="$RUNTIME"
+  if [[ ! -f "$legacy_dir/users.json" ]]; then legacy_dir="${XDG_CONFIG_HOME:-$HOME/.config}/fish-controller"; fi
+  if [[ -f "$legacy_dir/users.json" ]]; then
+    echo "[INFO] Migrating the existing account store..."
+    for name in users.json.sessions.json users.json.reservations.json users.json; do
+      if [[ -f "$legacy_dir/$name" ]]; then cp "$legacy_dir/$name" "$AUTH_DATA/$name"; fi
+    done
+  fi
+fi
 
 echo "[3/4] Building Go controller..."
 (cd "$CONTROLLER" && go build -o "$EXE" ./cmd/fish-controller)

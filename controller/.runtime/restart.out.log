@@ -1,0 +1,227 @@
+[INFO] Taking over any previous Fish instance...
+[2/4] Building frontend...
+
+> fish-controller-web@0.1.0 build
+> vite build
+
+vite v8.2.2 building client environment for production...
+transforming...
+✓ 3 modules transformed.
+rendering chunks...
+computing gzip size...
+../internal/web/dist/competition.html  2.47 kB │ gzip: 1.28 kB
+
+✓ built in 100ms
+[3/4] Building Go controller...
+[4/4] Updating the FishStack logon task...
+[WARN] Could not update the FishStack logon task. Run this script from an elevated terminal once.
+[5/5] Starting Fish Controller and configured tunnel...
+Close this window to stop the services started from this window.
+Open: http://localhost:8081
+[INFO] Fish Controller hot reload supervisor is active.
+[HOT] Starting Fish Controller...
+2026/10/09 18:40:49.569268 main.go:100: project root: C:\Users\chenfukun\Desktop\Fish\Pro1
+2026/10/09 18:40:49.569783 main.go:101: diagnostic session: C:\Users\chenfukun\Desktop\Fish\Pro1\controller\diagnostics\runs\20261009-184049-28372
+2026/10/09 18:40:49.570812 main.go:126: vision Python: C:\Users\chenfukun\Desktop\Fish\Pro1\vision\.venv\Scripts\python.exe (project_venv)
+2026/10/09 18:40:54.289430 main.go:153: Python vision backend started automatically
+2026/10/09 18:40:54.294160 main.go:170: hot reload enabled for frontend and Python vision sources
+2026/10/09 18:40:54.302055 main.go:209: fish controller ready: http://localhost:8081
+[ WARN:0@155.240] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:0@155.505] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(MSMF): backend is generally available but can't be used to capture by index
+[ WARN:0@0.008] global cap_ffmpeg_impl.hpp:1246 open VIDEOIO/FFMPEG: OpenCV should be configured with libavdevice to open a camera device
+[ERROR:0@155.701] global obsensor_uvc_stream_channel.cpp:163 cv::obsensor::getStreamChannelGroup Camera index out of range
+[ WARN:0@155.707] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:0@155.849] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(MSMF): backend is generally available but can't be used to capture by index
+[ERROR:0@155.999] global obsensor_uvc_stream_channel.cpp:163 cv::obsensor::getStreamChannelGroup Camera index out of range
+[ WARN:0@156.002] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:0@156.140] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(MSMF): backend is generally available but can't be used to capture by index
+[ERROR:0@156.278] global obsensor_uvc_stream_channel.cpp:163 cv::obsensor::getStreamChannelGroup Camera index out of range
+[ WARN:0@156.282] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:0@156.413] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(MSMF): backend is generally available but can't be used to capture by index
+[ERROR:0@156.543] global obsensor_uvc_stream_channel.cpp:163 cv::obsensor::getStreamChannelGroup Camera index out of range
+[ WARN:0@156.547] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:0@156.670] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(MSMF): backend is generally available but can't be used to capture by index
+[ERROR:0@156.800] global obsensor_uvc_stream_channel.cpp:163 cv::obsensor::getStreamChannelGroup Camera index out of range
+[ WARN:0@156.804] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(DSHOW): backend is generally available but can't be used to capture by index
+[ WARN:0@156.926] global cap.cpp:477 cv::VideoCapture::open VIDEOIO(MSMF): backend is generally available but can't be used to capture by index
+[ERROR:0@157.059] global obsensor_uvc_stream_channel.cpp:163 cv::obsensor::getStreamChannelGroup Camera index out of range
+2026/10/09 18:44:17.404530 server.go:1846: device registered: 90:DA:72:85:B9:A4 (172.16.20.125), source 172.16.20.125:64300
+2026/10/09 18:44:19.134161 server.go:1846: device registered: 44:BD:8D:4B:C2:00 (172.16.20.137), source 172.16.20.137:51234
+2026/10/09 18:44:22.143834 server.go:1846: device registered: AC:27:6E:5E:AB:7C (172.16.20.136), source 172.16.20.136:62511
+2026/10/09 18:44:44.278358 server.go:1846: device registered: 90:DA:72:85:EC:C8 (172.16.20.133), source 172.16.20.133:50252
+[HOT] Controller source changed; rebuilding...
+2026/10/09 18:46:08.753268 main.go:218: hot reload requested; stopping devices and shutting down
+[HOT] Starting Fish Controller...
+[HOT] Controller reloaded.
+2026/10/09 18:46:17.202715 main.go:100: project root: C:\Users\chenfukun\Desktop\Fish\Pro1
+2026/10/09 18:46:17.203220 main.go:101: diagnostic session: C:\Users\chenfukun\Desktop\Fish\Pro1\controller\diagnostics\runs\20261009-184617-31964
+2026/10/09 18:46:17.204256 main.go:126: vision Python: C:\Users\chenfukun\Desktop\Fish\Pro1\vision\.venv\Scripts\python.exe (project_venv)
+2026/10/09 18:46:23.452007 main.go:153: Python vision backend started automatically
+2026/10/09 18:46:23.453592 main.go:170: hot reload enabled for frontend and Python vision sources
+2026/10/09 18:46:23.458972 main.go:209: fish controller ready: http://localhost:8081
+2026/10/09 18:46:49.507824 reverseproxy.go:747: http: proxy error: context canceled
+[HOT] Controller source changed; rebuilding...
+2026/10/09 18:47:06.164625 main.go:218: hot reload requested; stopping devices and shutting down
+[HOT] Starting Fish Controller...
+[HOT] Controller reloaded.
+2026/10/09 18:47:13.170040 main.go:100: project root: C:\Users\chenfukun\Desktop\Fish\Pro1
+2026/10/09 18:47:13.170643 main.go:101: diagnostic session: C:\Users\chenfukun\Desktop\Fish\Pro1\controller\diagnostics\runs\20261009-184713-12688
+2026/10/09 18:47:13.171912 main.go:126: vision Python: C:\Users\chenfukun\Desktop\Fish\Pro1\vision\.venv\Scripts\python.exe (project_venv)
+[HOT] Controller source changed; rebuilding...
+2026/10/09 18:47:18.620663 main.go:153: Python vision backend started automatically
+2026/10/09 18:47:18.622194 main.go:170: hot reload enabled for frontend and Python vision sources
+2026/10/09 18:47:18.625300 main.go:209: fish controller ready: http://localhost:8081
+2026/10/09 18:47:19.116541 main.go:218: hot reload requested; stopping devices and shutting down
+[HOT] Starting Fish Controller...
+[HOT] Controller reloaded.
+2026/10/09 18:47:26.017929 main.go:100: project root: C:\Users\chenfukun\Desktop\Fish\Pro1
+2026/10/09 18:47:26.018453 main.go:101: diagnostic session: C:\Users\chenfukun\Desktop\Fish\Pro1\controller\diagnostics\runs\20261009-184725-35368
+2026/10/09 18:47:26.018973 main.go:126: vision Python: C:\Users\chenfukun\Desktop\Fish\Pro1\vision\.venv\Scripts\python.exe (project_venv)
+2026/10/09 18:47:31.245886 main.go:153: Python vision backend started automatically
+2026/10/09 18:47:31.247532 main.go:170: hot reload enabled for frontend and Python vision sources
+2026/10/09 18:47:31.250949 main.go:209: fish controller ready: http://localhost:8081
+[HOT] Controller source changed; rebuilding...
+2026/10/09 18:48:09.702336 main.go:218: hot reload requested; stopping devices and shutting down
+[HOT] Starting Fish Controller...
+[HOT] Controller reloaded.
+2026/10/09 18:48:18.505622 main.go:100: project root: C:\Users\chenfukun\Desktop\Fish\Pro1
+2026/10/09 18:48:18.506142 main.go:101: diagnostic session: C:\Users\chenfukun\Desktop\Fish\Pro1\controller\diagnostics\runs\20261009-184818-21072
+2026/10/09 18:48:18.506659 main.go:126: vision Python: C:\Users\chenfukun\Desktop\Fish\Pro1\vision\.venv\Scripts\python.exe (project_venv)
+2026/10/09 18:48:23.202656 main.go:153: Python vision backend started automatically
+2026/10/09 18:48:23.204452 main.go:170: hot reload enabled for frontend and Python vision sources
+2026/10/09 18:48:23.208152 main.go:209: fish controller ready: http://localhost:8081
+[HOT] Controller source changed; rebuilding...
+2026/10/09 18:50:21.603530 main.go:218: hot reload requested; stopping devices and shutting down
+[HOT] Starting Fish Controller...
+[HOT] Controller reloaded.
+2026/10/09 18:50:31.031600 main.go:100: project root: C:\Users\chenfukun\Desktop\Fish\Pro1
+2026/10/09 18:50:31.031600 main.go:101: diagnostic session: C:\Users\chenfukun\Desktop\Fish\Pro1\controller\diagnostics\runs\20261009-185030-18596
+2026/10/09 18:50:31.032627 main.go:126: vision Python: C:\Users\chenfukun\Desktop\Fish\Pro1\vision\.venv\Scripts\python.exe (project_venv)
+2026/10/09 18:50:35.835201 main.go:153: Python vision backend started automatically
+2026/10/09 18:50:35.837278 main.go:170: hot reload enabled for frontend and Python vision sources
+2026/10/09 18:50:35.839890 main.go:209: fish controller ready: http://localhost:8081
+[HOT] Controller source changed; rebuilding...
+2026/10/09 18:51:45.475531 main.go:218: hot reload requested; stopping devices and shutting down
+[HOT] Starting Fish Controller...
+[HOT] Controller reloaded.
+2026/10/09 18:51:54.735374 main.go:100: project root: C:\Users\chenfukun\Desktop\Fish\Pro1
+2026/10/09 18:51:54.735895 main.go:101: diagnostic session: C:\Users\chenfukun\Desktop\Fish\Pro1\controller\diagnostics\runs\20261009-185154-13984
+2026/10/09 18:51:54.736940 main.go:126: vision Python: C:\Users\chenfukun\Desktop\Fish\Pro1\vision\.venv\Scripts\python.exe (project_venv)
+2026/10/09 18:52:01.272694 main.go:153: Python vision backend started automatically
+2026/10/09 18:52:01.275030 main.go:170: hot reload enabled for frontend and Python vision sources
+2026/10/09 18:52:01.280453 main.go:209: fish controller ready: http://localhost:8081
+[HOT] Controller source changed; rebuilding...
+2026/10/09 18:52:54.777884 main.go:218: hot reload requested; stopping devices and shutting down
+[HOT] Starting Fish Controller...
+[HOT] Controller reloaded.
+2026/10/09 18:53:01.749142 main.go:100: project root: C:\Users\chenfukun\Desktop\Fish\Pro1
+2026/10/09 18:53:01.750194 main.go:101: diagnostic session: C:\Users\chenfukun\Desktop\Fish\Pro1\controller\diagnostics\runs\20261009-185301-22140
+2026/10/09 18:53:01.751247 main.go:126: vision Python: C:\Users\chenfukun\Desktop\Fish\Pro1\vision\.venv\Scripts\python.exe (project_venv)
+2026/10/09 18:53:07.671808 main.go:153: Python vision backend started automatically
+2026/10/09 18:53:07.673330 main.go:170: hot reload enabled for frontend and Python vision sources
+2026/10/09 18:53:07.675501 main.go:209: fish controller ready: http://localhost:8081
+[HOT] Controller source changed; rebuilding...
+2026/10/09 18:53:14.011242 main.go:218: hot reload requested; stopping devices and shutting down
+[HOT] Starting Fish Controller...
+[HOT] Controller reloaded.
+2026/10/09 18:53:23.125060 main.go:100: project root: C:\Users\chenfukun\Desktop\Fish\Pro1
+2026/10/09 18:53:23.125579 main.go:101: diagnostic session: C:\Users\chenfukun\Desktop\Fish\Pro1\controller\diagnostics\runs\20261009-185323-31172
+2026/10/09 18:53:23.126745 main.go:126: vision Python: C:\Users\chenfukun\Desktop\Fish\Pro1\vision\.venv\Scripts\python.exe (project_venv)
+2026/10/09 18:53:29.663763 main.go:153: Python vision backend started automatically
+2026/10/09 18:53:29.665465 main.go:170: hot reload enabled for frontend and Python vision sources
+2026/10/09 18:53:29.671698 main.go:209: fish controller ready: http://localhost:8081
+2026/10/09 18:54:46.487758 server.go:1869: device registered: 90:DA:72:85:B9:A4 (172.16.20.125), source 172.16.20.125:57550
+2026/10/09 18:59:43.521173 server.go:1869: device registered: 44:BD:8D:4B:C2:00 (172.16.20.137), source 172.16.20.137:64716
+2026/10/09 18:59:46.037224 server.go:1869: device registered: AC:27:6E:5E:AB:7C (172.16.20.136), source 172.16.20.136:49402
+2026/10/09 18:59:52.641133 server.go:1869: device registered: 90:DA:72:85:EC:C8 (172.16.20.133), source 172.16.20.133:57285
+[HOT] Controller source changed; rebuilding...
+2026/10/09 19:09:51.230483 main.go:218: hot reload requested; stopping devices and shutting down
+[HOT] Starting Fish Controller...
+[HOT] Controller reloaded.
+2026/10/09 19:09:59.349042 main.go:100: project root: C:\Users\chenfukun\Desktop\Fish\Pro1
+2026/10/09 19:09:59.349567 main.go:101: diagnostic session: C:\Users\chenfukun\Desktop\Fish\Pro1\controller\diagnostics\runs\20261009-190959-33608
+2026/10/09 19:09:59.350816 main.go:126: vision Python: C:\Users\chenfukun\Desktop\Fish\Pro1\vision\.venv\Scripts\python.exe (project_venv)
+2026/10/09 19:10:05.481387 main.go:153: Python vision backend started automatically
+2026/10/09 19:10:05.484115 main.go:170: hot reload enabled for frontend and Python vision sources
+2026/10/09 19:10:05.489878 main.go:209: fish controller ready: http://localhost:8081
+[HOT] Controller source changed; rebuilding...
+2026/10/09 19:10:10.411324 main.go:218: hot reload requested; stopping devices and shutting down
+[HOT] Starting Fish Controller...
+[HOT] Controller reloaded.
+2026/10/09 19:10:18.538823 main.go:100: project root: C:\Users\chenfukun\Desktop\Fish\Pro1
+2026/10/09 19:10:18.539387 main.go:101: diagnostic session: C:\Users\chenfukun\Desktop\Fish\Pro1\controller\diagnostics\runs\20261009-191018-23188
+2026/10/09 19:10:18.540428 main.go:126: vision Python: C:\Users\chenfukun\Desktop\Fish\Pro1\vision\.venv\Scripts\python.exe (project_venv)
+2026/10/09 19:10:24.179554 main.go:153: Python vision backend started automatically
+2026/10/09 19:10:24.181098 main.go:170: hot reload enabled for frontend and Python vision sources
+2026/10/09 19:10:24.185527 main.go:209: fish controller ready: http://localhost:8081
+2026/10/09 19:11:06.134591 server.go:1870: device registered: 90:DA:72:85:B9:A4 (172.16.20.125), source 172.16.20.125:50306
+2026/10/09 19:11:07.558900 server.go:1870: device registered: AC:27:6E:5E:AB:7C (172.16.20.136), source 172.16.20.136:63341
+2026/10/09 19:11:09.202030 server.go:1870: device registered: 44:BD:8D:4B:C2:00 (172.16.20.137), source 172.16.20.137:56754
+2026/10/09 19:11:10.309151 server.go:1870: device registered: 90:DA:72:85:EC:C8 (172.16.20.133), source 172.16.20.133:55111
+2026/10/09 19:11:40.081884 server.go:1920: device disconnected: 44:BD:8D:4B:C2:00: read tcp 172.16.20.63:8081->172.16.20.137:56754: i/o timeout
+2026/10/09 19:12:16.318431 server.go:1870: device registered: 44:BD:8D:4B:C2:00 (172.16.20.137), source 172.16.20.137:50879
+[HOT] Controller source changed; rebuilding...
+2026/10/09 19:19:01.716489 main.go:218: hot reload requested; stopping devices and shutting down
+[HOT] Starting Fish Controller...
+[HOT] Controller reloaded.
+2026/10/09 19:19:10.434520 main.go:100: project root: C:\Users\chenfukun\Desktop\Fish\Pro1
+2026/10/09 19:19:10.435036 main.go:101: diagnostic session: C:\Users\chenfukun\Desktop\Fish\Pro1\controller\diagnostics\runs\20261009-191910-12260
+2026/10/09 19:19:10.435560 main.go:126: vision Python: C:\Users\chenfukun\Desktop\Fish\Pro1\vision\.venv\Scripts\python.exe (project_venv)
+2026/10/09 19:19:14.718169 main.go:153: Python vision backend started automatically
+2026/10/09 19:19:14.720728 main.go:170: hot reload enabled for frontend and Python vision sources
+2026/10/09 19:19:14.725361 main.go:209: fish controller ready: http://localhost:8081
+2026/10/09 19:19:42.056500 server.go:1870: device registered: 90:DA:72:85:EC:C8 (172.16.20.133), source 172.16.20.133:49684
+2026/10/09 19:19:42.961602 server.go:1870: device registered: 44:BD:8D:4B:C2:00 (172.16.20.137), source 172.16.20.137:57048
+2026/10/09 19:19:45.181601 server.go:1870: device registered: AC:27:6E:5E:AB:7C (172.16.20.136), source 172.16.20.136:61350
+2026/10/09 19:19:45.810750 server.go:1870: device registered: 90:DA:72:85:B9:A4 (172.16.20.125), source 172.16.20.125:49848
+[HOT] Controller source changed; rebuilding...
+2026/10/09 19:19:49.753468 main.go:218: hot reload requested; stopping devices and shutting down
+[HOT] Starting Fish Controller...
+[HOT] Controller reloaded.
+2026/10/09 19:19:58.133924 main.go:100: project root: C:\Users\chenfukun\Desktop\Fish\Pro1
+2026/10/09 19:19:58.134437 main.go:101: diagnostic session: C:\Users\chenfukun\Desktop\Fish\Pro1\controller\diagnostics\runs\20261009-191958-15604
+2026/10/09 19:19:58.134955 main.go:126: vision Python: C:\Users\chenfukun\Desktop\Fish\Pro1\vision\.venv\Scripts\python.exe (project_venv)
+2026/10/09 19:20:02.316913 main.go:153: Python vision backend started automatically
+2026/10/09 19:20:02.318417 main.go:170: hot reload enabled for frontend and Python vision sources
+2026/10/09 19:20:02.322043 main.go:209: fish controller ready: http://localhost:8081
+2026/10/09 19:20:31.366460 server.go:1870: device registered: 90:DA:72:85:B9:A4 (172.16.20.125), source 172.16.20.125:49974
+2026/10/09 19:20:35.652983 server.go:1870: device registered: 44:BD:8D:4B:C2:00 (172.16.20.137), source 172.16.20.137:57198
+2026/10/09 19:20:37.898774 server.go:1870: device registered: AC:27:6E:5E:AB:7C (172.16.20.136), source 172.16.20.136:61498
+[HOT] Controller source changed; rebuilding...
+2026/10/09 19:21:04.227093 main.go:218: hot reload requested; stopping devices and shutting down
+[HOT] Starting Fish Controller...
+[HOT] Controller reloaded.
+2026/10/09 19:21:11.001404 main.go:100: project root: C:\Users\chenfukun\Desktop\Fish\Pro1
+2026/10/09 19:21:11.001955 main.go:101: diagnostic session: C:\Users\chenfukun\Desktop\Fish\Pro1\controller\diagnostics\runs\20261009-192110-14728
+2026/10/09 19:21:11.002470 main.go:126: vision Python: C:\Users\chenfukun\Desktop\Fish\Pro1\vision\.venv\Scripts\python.exe (project_venv)
+2026/10/09 19:21:15.184199 main.go:153: Python vision backend started automatically
+2026/10/09 19:21:15.185864 main.go:170: hot reload enabled for frontend and Python vision sources
+2026/10/09 19:21:15.190006 main.go:209: fish controller ready: http://localhost:8081
+[HOT] Controller source changed; rebuilding...
+2026/10/09 19:21:19.889483 main.go:218: hot reload requested; stopping devices and shutting down
+[HOT] Starting Fish Controller...
+[HOT] Controller reloaded.
+2026/10/09 19:21:26.571717 main.go:100: project root: C:\Users\chenfukun\Desktop\Fish\Pro1
+2026/10/09 19:21:26.572278 main.go:101: diagnostic session: C:\Users\chenfukun\Desktop\Fish\Pro1\controller\diagnostics\runs\20261009-192126-25128
+2026/10/09 19:21:26.572793 main.go:126: vision Python: C:\Users\chenfukun\Desktop\Fish\Pro1\vision\.venv\Scripts\python.exe (project_venv)
+2026/10/09 19:21:30.549913 main.go:153: Python vision backend started automatically
+2026/10/09 19:21:30.551432 main.go:170: hot reload enabled for frontend and Python vision sources
+2026/10/09 19:21:30.553501 main.go:209: fish controller ready: http://localhost:8081
+2026/10/09 19:21:35.691089 server.go:1870: device registered: AC:27:6E:5E:AB:7C (172.16.20.136), source 172.16.20.136:61607
+2026/10/09 19:21:39.263845 server.go:1870: device registered: 90:DA:72:85:B9:A4 (172.16.20.125), source 172.16.20.125:50105
+[HOT] Controller source changed; rebuilding...
+2026/10/09 19:21:42.169054 main.go:218: hot reload requested; stopping devices and shutting down
+[HOT] Starting Fish Controller...
+[HOT] Controller reloaded.
+2026/10/09 19:21:49.021188 main.go:100: project root: C:\Users\chenfukun\Desktop\Fish\Pro1
+2026/10/09 19:21:49.021188 main.go:101: diagnostic session: C:\Users\chenfukun\Desktop\Fish\Pro1\controller\diagnostics\runs\20261009-192148-34380
+2026/10/09 19:21:49.021704 main.go:126: vision Python: C:\Users\chenfukun\Desktop\Fish\Pro1\vision\.venv\Scripts\python.exe (project_venv)
+2026/10/09 19:21:52.998856 main.go:153: Python vision backend started automatically
+2026/10/09 19:21:52.999868 main.go:170: hot reload enabled for frontend and Python vision sources
+2026/10/09 19:21:53.002441 main.go:209: fish controller ready: http://localhost:8081
+2026/10/09 19:24:04.061689 server.go:1870: device registered: 44:BD:8D:4B:C2:00 (172.16.20.137), source 172.16.20.137:63839
+2026/10/09 19:24:04.234954 server.go:1870: device registered: 90:DA:72:85:EC:C8 (172.16.20.133), source 172.16.20.133:58185
+2026/10/09 19:24:05.020073 server.go:1870: device registered: AC:27:6E:5E:AB:7C (172.16.20.136), source 172.16.20.136:63979
+2026/10/09 19:24:06.638374 server.go:1870: device registered: 90:DA:72:85:B9:A4 (172.16.20.125), source 172.16.20.125:64010
+2026/10/09 19:24:24.333729 server.go:1870: device registered: 90:DA:72:85:EC:C8 (172.16.20.133), source 172.16.20.133:62061
+2026/10/09 19:24:24.333729 server.go:1920: device disconnected: 90:DA:72:85:EC:C8: read tcp 172.16.20.63:8081->172.16.20.133:58185: use of closed network connection

@@ -17,6 +17,7 @@ import (
 	"log"
 	"log/slog"
 	"math"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -84,28 +85,35 @@ func (s *server) event(message string, args ...any) {
 }
 
 type motionCalibrationProfile struct {
-	DeviceID                string  `json:"deviceId"`
-	CenterDeg               float64 `json:"centerDeg"`
-	Frequency               float64 `json:"frequency"`
-	Amplitude               float64 `json:"amplitude"`
-	LeftSign                int     `json:"leftSign"`
-	LeftMaxOffset           float64 `json:"leftMaxOffset"`
-	RightSign               int     `json:"rightSign"`
-	RightMaxOffset          float64 `json:"rightMaxOffset"`
-	TurnPercent             float64 `json:"turnPercent"`
-	ServoMin                float64 `json:"servoMin"`
-	ServoMax                float64 `json:"servoMax"`
-	StraightCenter          float64 `json:"straightCenter"`
-	ForwardFrequency        float64 `json:"forwardFrequency"`
-	ForwardAmplitudePercent float64 `json:"forwardAmplitudePercent"`
-	LeftCenterRatio         float64 `json:"leftCenterRatio"`
-	LeftFrequency           float64 `json:"leftFrequency"`
-	LeftAmplitudePercent    float64 `json:"leftAmplitudePercent"`
-	RightCenterRatio        float64 `json:"rightCenterRatio"`
-	RightFrequency          float64 `json:"rightFrequency"`
-	RightAmplitudePercent   float64 `json:"rightAmplitudePercent"`
-	TransitionMs            float64 `json:"transitionMs"`
-	UpdatedAt               string  `json:"updatedAt"`
+	DeviceID                string               `json:"deviceId"`
+	CenterDeg               float64              `json:"centerDeg,omitempty"`
+	Frequency               float64              `json:"frequency,omitempty"`
+	Amplitude               float64              `json:"amplitude,omitempty"`
+	LeftSign                int                  `json:"leftSign,omitempty"`
+	LeftMaxOffset           float64              `json:"leftMaxOffset,omitempty"`
+	RightSign               int                  `json:"rightSign,omitempty"`
+	RightMaxOffset          float64              `json:"rightMaxOffset,omitempty"`
+	TurnPercent             float64              `json:"turnPercent,omitempty"`
+	ServoMin                float64              `json:"servoMin,omitempty"`
+	ServoMax                float64              `json:"servoMax"`
+	StraightCenter          float64              `json:"straightCenter"`
+	ForwardFrequency        float64              `json:"forwardFrequency"`
+	ForwardAmplitudePercent float64              `json:"forwardAmplitudePercent"`
+	LeftCenterRatio         float64              `json:"leftCenterRatio"`
+	LeftFrequency           float64              `json:"leftFrequency"`
+	LeftAmplitudePercent    float64              `json:"leftAmplitudePercent"`
+	RightCenterRatio        float64              `json:"rightCenterRatio"`
+	RightFrequency          float64              `json:"rightFrequency"`
+	RightAmplitudePercent   float64              `json:"rightAmplitudePercent"`
+	TransitionMs            float64              `json:"transitionMs"`
+	PlayerControl           *motionControlTuning `json:"playerControl,omitempty"`
+	ManualControl           *motionControlTuning `json:"manualControl,omitempty"`
+	UpdatedAt               string               `json:"updatedAt"`
+}
+
+type motionControlTuning struct {
+	Frequency        float64 `json:"frequency"`
+	AmplitudePercent float64 `json:"amplitudePercent"`
 }
 
 type deviceConn struct {
@@ -232,6 +240,22 @@ func newHandler(h *hub.Hub, key []byte, apiAddress, streamAddress, firmwarePath 
 			w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
 			w.Header().Set("Pragma", "no-cache")
 		}
+		if r.URL.Path == "/competition/referee_interface.html" ||
+			r.URL.Path == "/competition/player_interface.html" {
+			user, authenticated := s.currentUser(r)
+			if !authenticated {
+				http.Error(w, "请先登录赛事账号", http.StatusUnauthorized)
+				return
+			}
+			if r.URL.Path == "/competition/referee_interface.html" && !isRefereeAccount(user) {
+				http.Error(w, "仅裁判账号 3 可进入裁判端", http.StatusForbidden)
+				return
+			}
+			if r.URL.Path == "/competition/player_interface.html" && !isPlayerAccount(user) {
+				http.Error(w, "仅蓝队账号 1 和红队账号 2 可进入选手端", http.StatusForbidden)
+				return
+			}
+		}
 		switch r.URL.Path {
 		case "/", "/console.html", "/index.html":
 			http.Redirect(w, r, "/competition.html", http.StatusTemporaryRedirect)
@@ -259,6 +283,7 @@ func newHandler(h *hub.Hub, key []byte, apiAddress, streamAddress, firmwarePath 
 	m.HandleFunc("/api/firmware", s.firmwareAPI)
 	m.HandleFunc("/api/firmware/current.bin", s.firmware)
 	m.HandleFunc("/api/vision/device-command", s.visionDeviceCommand)
+	m.HandleFunc("/api/vision/frame.ws", s.visionFrameSocket)
 	m.Handle("/api/vision/", s.authenticatedVisionProxy(visionHandler))
 	m.HandleFunc("/ws/device", s.deviceSocket)
 	m.HandleFunc("/ws/control", s.controlSocket)
@@ -959,10 +984,16 @@ func (s *server) deviceEvents(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case <-updates:
+			if _, valid := s.currentUser(r); !valid {
+				return
+			}
 			if err := writeSnapshot(); err != nil {
 				return
 			}
 		case <-keepAlive.C:
+			if _, valid := s.currentUser(r); !valid {
+				return
+			}
 			if _, err := fmt.Fprint(w, ": keep-alive\n\n"); err != nil {
 				return
 			}
@@ -1010,9 +1041,18 @@ func (s *server) leasesAPI(w http.ResponseWriter, r *http.Request) {
 		s.event("lease_renewed", "device_id", input.DeviceID, "client_id", input.ClientID, "owner_id", user.ID)
 		_ = json.NewEncoder(w).Encode(map[string]any{"renewed": true})
 	case http.MethodPost:
+		accountSide := competitionSideForUser(user)
+		slotSide := ""
+		if slot := strings.ToUpper(strings.TrimSpace(input.Slot)); strings.HasPrefix(slot, "B") {
+			slotSide = "blue"
+		} else if strings.HasPrefix(slot, "R") {
+			slotSide = "red"
+		}
 		if strings.EqualFold(strings.TrimSpace(input.Mode), "player") &&
-			!s.playerControlAllowed(input.DeviceID, input.Slot) {
-			writeAuthError(w, http.StatusConflict, "场地尚未锁定，或该机器鱼未分配给当前席位")
+			(!s.playerControlAllowed(input.DeviceID, input.Slot) ||
+				(s.authActive() && !isPlayerAccount(user)) ||
+				(accountSide != "" && accountSide != slotSide)) {
+			writeAuthError(w, http.StatusConflict, "该机器鱼未分配给当前账号的席位")
 			return
 		}
 		// Administrators are the management authority for every control path,
@@ -1104,6 +1144,10 @@ func validMotionCalibration(p motionCalibrationProfile) bool {
 	if p.DeviceID == "" {
 		return false
 	}
+	if (p.PlayerControl != nil && !validMotionControlTuning(*p.PlayerControl)) ||
+		(p.ManualControl != nil && !validMotionControlTuning(*p.ManualControl)) {
+		return false
+	}
 	if p.ServoMax != 0 || p.StraightCenter != 0 || p.ForwardFrequency != 0 {
 		return p.ServoMin >= 0 && p.ServoMin < p.ServoMax && p.ServoMax <= 180 &&
 			p.StraightCenter >= p.ServoMin && p.StraightCenter <= p.ServoMax &&
@@ -1124,13 +1168,79 @@ func validMotionCalibration(p motionCalibrationProfile) bool {
 		p.TurnPercent >= 0 && p.TurnPercent <= 100
 }
 
-func (s *server) readMotionCalibrations() map[string]motionCalibrationProfile {
+func validMotionControlTuning(tuning motionControlTuning) bool {
+	return tuning.Frequency >= 0.3 && tuning.Frequency <= 5 &&
+		tuning.AmplitudePercent >= 0 && tuning.AmplitudePercent <= 100
+}
+
+func motionDeviceKey(deviceID string) string {
+	deviceID = strings.TrimSpace(deviceID)
+	address, err := net.ParseMAC(deviceID)
+	if err == nil && len(address) == 6 {
+		return strings.ToUpper(address.String())
+	}
+	return deviceID
+}
+
+func (s *server) loadMotionCalibrations() (map[string]motionCalibrationProfile, error) {
 	profiles := map[string]motionCalibrationProfile{}
 	data, err := os.ReadFile(s.calibrationPath)
 	if err == nil {
-		_ = json.Unmarshal(data, &profiles)
+		if err := json.Unmarshal(data, &profiles); err != nil {
+			return nil, fmt.Errorf("invalid motion configuration: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, err
 	}
+	normalized := make(map[string]motionCalibrationProfile, len(profiles))
+	for key, profile := range profiles {
+		deviceID := motionDeviceKey(key)
+		if deviceID == "" {
+			continue
+		}
+		profile.DeviceID = deviceID
+		normalized[deviceID] = profile
+	}
+	return normalized, nil
+}
+
+func (s *server) readMotionCalibrations() map[string]motionCalibrationProfile {
+	profiles, _ := s.loadMotionCalibrations()
 	return profiles
+}
+
+func (s *server) saveMotionCalibrations(profiles map[string]motionCalibrationProfile) error {
+	data, err := json.MarshalIndent(profiles, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(s.calibrationPath), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(s.calibrationPath, append(data, '\n'), 0o644)
+}
+
+func (s *server) ensureMotionCalibration(deviceID string) error {
+	deviceID = motionDeviceKey(deviceID)
+	if deviceID == "" {
+		return nil
+	}
+	s.calibrationMu.Lock()
+	defer s.calibrationMu.Unlock()
+	profiles, err := s.loadMotionCalibrations()
+	if err != nil {
+		return err
+	}
+	if _, exists := profiles[deviceID]; exists {
+		return nil
+	}
+	profile := defaultMotionProfile()
+	profile.DeviceID = deviceID
+	profile.PlayerControl = &motionControlTuning{Frequency: 2.5, AmplitudePercent: 60}
+	profile.ManualControl = &motionControlTuning{Frequency: 2.5, AmplitudePercent: 40}
+	profile.UpdatedAt = time.Now().Format(time.RFC3339)
+	profiles[deviceID] = profile
+	return s.saveMotionCalibrations(profiles)
 }
 
 func clampMotionValue(value, min, max, fallback float64) float64 {
@@ -1270,7 +1380,7 @@ func (s *server) motionProfileForDevice(deviceID string) motionCalibrationProfil
 	profile := defaultMotionProfile()
 	s.calibrationMu.Lock()
 	profiles := s.readMotionCalibrations()
-	saved, ok := profiles[deviceID]
+	saved, ok := profiles[motionDeviceKey(deviceID)]
 	s.calibrationMu.Unlock()
 	if ok && validMotionCalibration(saved) {
 		profile = saved
@@ -1332,13 +1442,51 @@ func (s *server) motionCalibrations(w http.ResponseWriter, r *http.Request) {
 	s.calibrationMu.Lock()
 	defer s.calibrationMu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
-	profiles := s.readMotionCalibrations()
+	profiles, err := s.loadMotionCalibrations()
+	if err != nil {
+		http.Error(w, "运动配置文件读取失败："+err.Error(), http.StatusInternalServerError)
+		return
+	}
 	if r.Method == http.MethodGet {
 		_ = json.NewEncoder(w).Encode(profiles)
 		return
 	}
+	if r.Method == http.MethodPatch {
+		var update struct {
+			DeviceID      string               `json:"deviceId"`
+			PlayerControl *motionControlTuning `json:"playerControl"`
+			ManualControl *motionControlTuning `json:"manualControl"`
+		}
+		if json.NewDecoder(r.Body).Decode(&update) != nil ||
+			(update.PlayerControl == nil && update.ManualControl == nil) ||
+			(update.PlayerControl != nil && !validMotionControlTuning(*update.PlayerControl)) ||
+			(update.ManualControl != nil && !validMotionControlTuning(*update.ManualControl)) {
+			http.Error(w, "运动参数无效", http.StatusBadRequest)
+			return
+		}
+		deviceID := motionDeviceKey(update.DeviceID)
+		profile, exists := profiles[deviceID]
+		if !exists {
+			http.Error(w, "设备尚未接入系统", http.StatusNotFound)
+			return
+		}
+		if update.PlayerControl != nil {
+			profile.PlayerControl = update.PlayerControl
+		}
+		if update.ManualControl != nil {
+			profile.ManualControl = update.ManualControl
+		}
+		profile.UpdatedAt = time.Now().Format(time.RFC3339)
+		profiles[deviceID] = profile
+		if err := s.saveMotionCalibrations(profiles); err != nil {
+			http.Error(w, "无法保存运动参数", http.StatusInternalServerError)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(profile)
+		return
+	}
 	if r.Method != http.MethodPut {
-		http.Error(w, "仅支持 GET / PUT", http.StatusMethodNotAllowed)
+		http.Error(w, "仅支持 GET / PUT / PATCH", http.StatusMethodNotAllowed)
 		return
 	}
 	var profile motionCalibrationProfile
@@ -1346,14 +1494,18 @@ func (s *server) motionCalibrations(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "标定参数无效", http.StatusBadRequest)
 		return
 	}
+	profile.DeviceID = motionDeviceKey(profile.DeviceID)
+	if previous, exists := profiles[profile.DeviceID]; exists {
+		if profile.PlayerControl == nil {
+			profile.PlayerControl = previous.PlayerControl
+		}
+		if profile.ManualControl == nil {
+			profile.ManualControl = previous.ManualControl
+		}
+	}
 	profile.UpdatedAt = time.Now().Format(time.RFC3339)
 	profiles[profile.DeviceID] = profile
-	data, _ := json.MarshalIndent(profiles, "", "  ")
-	if err := os.MkdirAll(filepath.Dir(s.calibrationPath), 0o755); err != nil {
-		http.Error(w, "无法创建标定目录", http.StatusInternalServerError)
-		return
-	}
-	if err := os.WriteFile(s.calibrationPath, data, 0o644); err != nil {
+	if err := s.saveMotionCalibrations(profiles); err != nil {
 		http.Error(w, "无法保存标定参数", http.StatusInternalServerError)
 		return
 	}
@@ -1594,7 +1746,8 @@ func (s *server) authenticatedVisionProxy(next http.Handler) http.Handler {
 			}
 			r.Header.Set("X-Fish-Workspace-User", user.ID)
 			r.Header.Set("X-Fish-Workspace-Client", clientID)
-		} else if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		} else if r.Method != http.MethodGet && r.Method != http.MethodHead &&
+			!(r.Method == http.MethodPost && r.URL.Path == "/api/vision/webrtc/offer") {
 			if !canAdmin(user) {
 				writeAuthError(w, http.StatusForbidden, "共享视觉设置需要管理员权限")
 				return
@@ -1703,6 +1856,9 @@ func (s *server) deviceSocket(w http.ResponseWriter, r *http.Request) {
 				d.I2CAddresses = append(d.I2CAddresses, int(address))
 			}
 		}
+	}
+	if err := s.ensureMotionCalibration(id); err != nil {
+		s.event("motion_profile_init_failed", "device_id", id, "error", err.Error())
 	}
 	// Complete the protocol handshake before exposing the device to command
 	// handlers. Otherwise a concurrent HTTP request could enqueue a command

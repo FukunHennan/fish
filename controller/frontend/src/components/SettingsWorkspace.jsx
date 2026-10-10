@@ -367,7 +367,7 @@ export default function SettingsWorkspace({
       return (
         <>
           <SettingsBlock title="个人资料">
-            <p>姓名：{authUser?.name || "未命名用户"}<br />邮箱：{authUser?.email || "—"}<br />账户类型：{roleLabel(authUser)}</p>
+            <p>姓名：{authUser?.name || "未命名用户"}<br />账号：{authUser?.email || "—"}<br />账户类型：{roleLabel(authUser)}</p>
           </SettingsBlock>
           <SettingsBlock title="密码安全">
             <p>系统只保存密码摘要。管理员也不能读取密码明文，需要时只能执行重置。</p>

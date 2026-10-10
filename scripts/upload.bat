@@ -14,6 +14,14 @@ if errorlevel 1 (
   exit /b 1
 )
 
+where node >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] Node.js was not found in PATH.
+  popd
+  pause
+  exit /b 1
+)
+
 git rev-parse --is-inside-work-tree >nul 2>nul
 if errorlevel 1 (
   echo [ERROR] This folder is not a Git repository.
@@ -21,6 +29,12 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
+
+node scripts\diagnostics\snapshot-runtime-data.mjs
+if errorlevel 1 goto :fail
+
+node scripts\diagnostics\compact-runtime-logs.mjs --apply
+if errorlevel 1 goto :fail
 
 echo.
 git status --short

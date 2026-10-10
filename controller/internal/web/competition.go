@@ -45,58 +45,116 @@ type competitionTeam struct {
 }
 
 type competitionMatch struct {
-	ID                 string          `json:"id"`
-	MatchNo            string          `json:"matchNo"`
-	Group              string          `json:"group"`
-	Venue              string          `json:"venue"`
-	State              string          `json:"state"`
-	Blue               competitionTeam `json:"blue"`
-	Red                competitionTeam `json:"red"`
-	ElapsedMs          int64           `json:"elapsedMs"`
-	RunningIf          bool            `json:"-"`
-	StartedAt          string          `json:"startedAt,omitempty"`
-	UpdatedAt          string          `json:"updatedAt"`
-	Operator           string          `json:"operator,omitempty"`
-	RecordingID        string          `json:"recordingId,omitempty"`
-	RecordingState     string          `json:"recordingState,omitempty"`
-	RecordingStartedAt string          `json:"recordingStartedAt,omitempty"`
-	RecordingError     string          `json:"recordingError,omitempty"`
-	FieldWidthCm       float64         `json:"fieldWidthCm,omitempty"`
-	FieldHeightCm      float64         `json:"fieldHeightCm,omitempty"`
-	FieldLocked        bool            `json:"fieldLocked"`
-	DurationMs         int64           `json:"durationMs"`
+	ID                 string                  `json:"id"`
+	MatchNo            string                  `json:"matchNo"`
+	Group              string                  `json:"group"`
+	Venue              string                  `json:"venue"`
+	State              string                  `json:"state"`
+	Blue               competitionTeam         `json:"blue"`
+	Red                competitionTeam         `json:"red"`
+	ElapsedMs          int64                   `json:"elapsedMs"`
+	RunningIf          bool                    `json:"-"`
+	StartedAt          string                  `json:"startedAt,omitempty"`
+	UpdatedAt          string                  `json:"updatedAt"`
+	Operator           string                  `json:"operator,omitempty"`
+	RecordingID        string                  `json:"recordingId,omitempty"`
+	RecordingState     string                  `json:"recordingState,omitempty"`
+	RecordingStartedAt string                  `json:"recordingStartedAt,omitempty"`
+	RecordingError     string                  `json:"recordingError,omitempty"`
+	FieldWidthCm       float64                 `json:"fieldWidthCm,omitempty"`
+	FieldHeightCm      float64                 `json:"fieldHeightCm,omitempty"`
+	FieldLocked        bool                    `json:"fieldLocked"`
+	DurationMs         int64                   `json:"durationMs"`
+	ScoreEvents        []competitionScoreEvent `json:"scoreEvents,omitempty"`
+}
+
+type competitionScoreEvent struct {
+	ID                    string   `json:"id"`
+	Side                  string   `json:"side"`
+	Kind                  string   `json:"kind"`
+	Label                 string   `json:"label"`
+	Delta                 int      `json:"delta"`
+	Score                 int      `json:"score"`
+	ElapsedMs             int64    `json:"elapsedMs"`
+	RemainingMs           int64    `json:"remainingMs"`
+	OccurredAt            string   `json:"occurredAt"`
+	VideoTimestampSeconds *float64 `json:"videoTimestampSeconds,omitempty"`
 }
 
 type competitionRecord struct {
-	ID                 string  `json:"id"`
-	MatchNo            string  `json:"matchNo"`
-	Group              string  `json:"group"`
-	Venue              string  `json:"venue"`
-	BlueName           string  `json:"blueName"`
-	RedName            string  `json:"redName"`
-	BlueScore          int     `json:"blueScore"`
-	RedScore           int     `json:"redScore"`
-	ElapsedMs          int64   `json:"elapsedMs"`
-	Finished           string  `json:"finishedAt"`
-	StartedAt          string  `json:"startedAt,omitempty"`
-	VideoURL           string  `json:"videoUrl,omitempty"`
-	VideoStatus        string  `json:"videoStatus"`
-	VideoDurationMs    int64   `json:"videoDurationMs,omitempty"`
-	VideoFrameCount    int64   `json:"videoFrameCount,omitempty"`
-	VideoDroppedFrames int64   `json:"videoDroppedFrames,omitempty"`
-	VideoAverageFPS    float64 `json:"videoAverageFps,omitempty"`
-	VideoWidth         int     `json:"videoWidth,omitempty"`
-	VideoHeight        int     `json:"videoHeight,omitempty"`
-	VideoError         string  `json:"videoError,omitempty"`
+	ID                 string                  `json:"id"`
+	MatchNo            string                  `json:"matchNo"`
+	Group              string                  `json:"group"`
+	Venue              string                  `json:"venue"`
+	BlueName           string                  `json:"blueName"`
+	RedName            string                  `json:"redName"`
+	BlueScore          int                     `json:"blueScore"`
+	RedScore           int                     `json:"redScore"`
+	BluePlayers        []string                `json:"bluePlayers,omitempty"`
+	RedPlayers         []string                `json:"redPlayers,omitempty"`
+	ElapsedMs          int64                   `json:"elapsedMs"`
+	Finished           string                  `json:"finishedAt"`
+	StartedAt          string                  `json:"startedAt,omitempty"`
+	VideoURL           string                  `json:"videoUrl,omitempty"`
+	VideoStatus        string                  `json:"videoStatus"`
+	VideoDurationMs    int64                   `json:"videoDurationMs,omitempty"`
+	VideoFrameCount    int64                   `json:"videoFrameCount,omitempty"`
+	VideoDroppedFrames int64                   `json:"videoDroppedFrames,omitempty"`
+	VideoAverageFPS    float64                 `json:"videoAverageFps,omitempty"`
+	VideoWidth         int                     `json:"videoWidth,omitempty"`
+	VideoHeight        int                     `json:"videoHeight,omitempty"`
+	VideoError         string                  `json:"videoError,omitempty"`
+	DurationMs         int64                   `json:"durationMs,omitempty"`
+	ScoreEvents        []competitionScoreEvent `json:"scoreEvents"`
 }
 
 type competitionStore struct {
-	mu      sync.Mutex
-	path    string
-	Match   *competitionMatch   `json:"match"`
-	Records []competitionRecord `json:"records"`
-	started time.Time
-	running bool
+	mu                   sync.Mutex
+	path                 string
+	Match                *competitionMatch          `json:"match"`
+	Records              []competitionRecord        `json:"records"`
+	FinishedNoticeClaims map[string]map[string]bool `json:"finishedNoticeClaims,omitempty"`
+	started              time.Time
+	running              bool
+}
+
+// 已结束比赛允许裁判更正名称和比分，对应的历史记录也要保持一致。
+func (c *competitionStore) syncFinishedRecordLocked() {
+	match := c.Match
+	if match == nil || match.State != matchStateFinished {
+		return
+	}
+	for i := range c.Records {
+		record := &c.Records[i]
+		if record.ID != match.ID {
+			continue
+		}
+		record.MatchNo = match.MatchNo
+		record.Group = match.Group
+		record.Venue = match.Venue
+		record.BlueName = match.Blue.Name
+		record.RedName = match.Red.Name
+		record.BlueScore = match.Blue.Score
+		record.RedScore = match.Red.Score
+		record.BluePlayers = competitionPlayerNames(match.Blue.Players)
+		record.RedPlayers = competitionPlayerNames(match.Red.Players)
+		record.ScoreEvents = append([]competitionScoreEvent(nil), match.ScoreEvents...)
+		return
+	}
+}
+
+func competitionPlayerNames(players []competitionPlayer) []string {
+	names := make([]string, 0, len(players))
+	for _, player := range players {
+		name := strings.TrimSpace(player.Name)
+		if name == "" {
+			name = strings.TrimSpace(player.Slot)
+		}
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 func newCompetitionStore(path string) *competitionStore {
@@ -118,22 +176,22 @@ func competitionPath() string {
 	return filepath.Join(base, "fish-controller", "competition.json")
 }
 
-func (c *competitionStore) saveLocked() {
+func (c *competitionStore) saveLocked() error {
 	if c.path == "" {
-		return
+		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(c.path), 0o700); err != nil {
-		return
+		return err
 	}
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
-		return
+		return err
 	}
 	temporary := c.path + ".tmp"
 	if err := os.WriteFile(temporary, data, 0o600); err != nil {
-		return
+		return err
 	}
-	_ = os.Rename(temporary, c.path)
+	return os.Rename(temporary, c.path)
 }
 
 // elapsedLocked 返回当前累计比赛时长；进行中会叠加本次运行的时长。
@@ -150,13 +208,13 @@ func (c *competitionStore) elapsedLocked() int64 {
 
 func newMatchBlueRed(matchNo, group, venue string) *competitionMatch {
 	return &competitionMatch{
-		ID:        fmt.Sprintf("match-%d", time.Now().UnixNano()),
-		MatchNo:   matchNo,
-		Group:     group,
-		Venue:     venue,
+		ID:         fmt.Sprintf("match-%d", time.Now().UnixNano()),
+		MatchNo:    matchNo,
+		Group:      group,
+		Venue:      venue,
 		State:      matchStateSignup,
 		DurationMs: 180000,
-		UpdatedAt: time.Now().Format(time.RFC3339),
+		UpdatedAt:  time.Now().Format(time.RFC3339),
 		Blue: competitionTeam{Side: "blue", Name: "蓝队", Players: []competitionPlayer{
 			{Slot: "B1"}, {Slot: "B2"},
 		}},
@@ -169,14 +227,14 @@ func newMatchBlueRed(matchNo, group, venue string) *competitionMatch {
 func newDevelopmentMatch() *competitionMatch {
 	now := time.Now().Format(time.RFC3339)
 	return &competitionMatch{
-		ID:        fmt.Sprintf("dev-match-%d", time.Now().UnixNano()),
-		MatchNo:   "第 08 场",
-		Group:     "学生组",
-		Venue:     "A 赛场",
+		ID:         fmt.Sprintf("dev-match-%d", time.Now().UnixNano()),
+		MatchNo:    "第 08 场",
+		Group:      "学生组",
+		Venue:      "A 赛场",
 		State:      matchStateReady,
 		DurationMs: 180000,
-		UpdatedAt: now,
-		Operator:  "local@fish",
+		UpdatedAt:  now,
+		Operator:   "local@fish",
 		Blue: competitionTeam{Side: "blue", Name: "海洋先锋队", Players: []competitionPlayer{
 			{Slot: "B1", Name: "陈同学", Email: "stu-24018@fish.local", SignedIn: true, SignedAt: now},
 			{Slot: "B2", Name: "李同学", Email: "stu-24027@fish.local", SignedIn: true, SignedAt: now},
@@ -268,6 +326,7 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 		Ready         *bool               `json:"ready"`
 		Score         *int                `json:"score"`
 		Delta         *int                `json:"delta"`
+		Kind          string              `json:"kind"`
 		Action        string              `json:"action"`
 		Blue          *competitionTeam    `json:"blue"`
 		Red           *competitionTeam    `json:"red"`
@@ -276,6 +335,7 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 		FieldHeightCm *float64            `json:"fieldHeightCm"`
 		FieldLocked   *bool               `json:"fieldLocked"`
 		DurationMs    *int64              `json:"durationMs"`
+		MatchID       string              `json:"matchId"`
 	}
 	if r.Body != nil && r.ContentLength != 0 {
 		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
@@ -283,8 +343,93 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if s.authActive() && !isRefereeAccount(user) {
+		if action != "ready" && action != "finish-notice" {
+			http.Error(w, "该操作需要裁判账号", http.StatusForbidden)
+			return
+		}
+		if action == "ready" && (competitionSideForUser(user) == "" || !strings.EqualFold(competitionSideForUser(user), input.Side)) {
+			http.Error(w, "只能设置所属战队的准备状态", http.StatusForbidden)
+			return
+		}
+	}
 
 	switch action {
+	case "finish-notice":
+		match := store.Match
+		side := competitionSideForUser(user)
+		if !isPlayerAccount(user) || side == "" || match == nil || match.State != matchStateFinished ||
+			match.ID == "" || match.ID != input.MatchID || match.teamForSide(side) == nil {
+			writeJSONValue(w, map[string]any{"show": false})
+			return
+		}
+		if store.FinishedNoticeClaims == nil {
+			store.FinishedNoticeClaims = make(map[string]map[string]bool)
+		}
+		if store.FinishedNoticeClaims[match.ID] == nil {
+			store.FinishedNoticeClaims[match.ID] = make(map[string]bool)
+		}
+		if store.FinishedNoticeClaims[match.ID][user.ID] {
+			writeJSONValue(w, map[string]any{"show": false})
+			return
+		}
+		store.FinishedNoticeClaims[match.ID][user.ID] = true
+		if err := store.saveLocked(); err != nil {
+			delete(store.FinishedNoticeClaims[match.ID], user.ID)
+			http.Error(w, "比赛结束提示状态保存失败", http.StatusInternalServerError)
+			return
+		}
+		writeJSONValue(w, map[string]any{"show": true})
+		return
+	case "new":
+		if store.Match != nil && store.Match.State != matchStateFinished {
+			http.Error(w, "当前比赛尚未结束", http.StatusConflict)
+			return
+		}
+		name := strings.TrimSpace(input.MatchNo)
+		if name == "" || len([]rune(name)) > 80 {
+			http.Error(w, "新比赛名称须为 1 至 80 个字符", http.StatusBadRequest)
+			return
+		}
+		previous := store.Match
+		next := newMatchBlueRed(name, input.Group, input.Venue)
+		if previous != nil {
+			if next.Group == "" {
+				next.Group = previous.Group
+			}
+			if next.Venue == "" {
+				next.Venue = previous.Venue
+			}
+			next.Blue = previous.Blue
+			next.Red = previous.Red
+			next.Blue.Players = append([]competitionPlayer(nil), previous.Blue.Players...)
+			next.Red.Players = append([]competitionPlayer(nil), previous.Red.Players...)
+			next.Blue.Score = 0
+			next.Red.Score = 0
+			next.FieldWidthCm = previous.FieldWidthCm
+			next.FieldHeightCm = previous.FieldHeightCm
+			next.FieldLocked = previous.FieldLocked
+			if previous.DurationMs > 0 {
+				next.DurationMs = previous.DurationMs
+			}
+			for _, team := range []*competitionTeam{&next.Blue, &next.Red} {
+				for i := range team.Players {
+					team.Players[i].clearReady()
+				}
+			}
+			if next.Blue.allSignedIn() && next.Red.allSignedIn() {
+				next.State = matchStateReady
+			}
+		}
+		next.Operator = user.Email
+		store.Match = next
+		if err := store.saveLocked(); err != nil {
+			store.Match = previous
+			http.Error(w, "新比赛保存失败", http.StatusInternalServerError)
+			return
+		}
+		writeJSONValue(w, s.matchSnapshotLocked(store))
+		return
 	case "match":
 		if store.Match == nil {
 			store.Match = newMatchBlueRed("", "", "")
@@ -325,6 +470,7 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		match.Operator = user.Email
 		match.UpdatedAt = time.Now().Format(time.RFC3339)
+		store.syncFinishedRecordLocked()
 		store.saveLocked()
 		writeJSONValue(w, s.matchSnapshotLocked(store))
 
@@ -363,11 +509,6 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 		match.Operator = user.Email
 		match.UpdatedAt = time.Now().Format(time.RFC3339)
 		store.saveLocked()
-		// Entering or leaving the player-control phase invalidates all browser
-		// leases. Players reacquire their assigned fish after the new state is
-		// visible; administrator and vision takeovers remain available.
-		s.leases.releaseBrowserLeases()
-		s.hub.Notify()
 		writeJSONValue(w, s.matchSnapshotLocked(store))
 
 	case "signin":
@@ -446,27 +587,35 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "该机器鱼当前不在线", http.StatusConflict)
 			return
 		}
+		slotIndex := -1
+		for i := range team.Players {
+			if strings.EqualFold(team.Players[i].Slot, input.Slot) {
+				slotIndex = i
+				break
+			}
+		}
+		if slotIndex < 0 {
+			http.Error(w, "未找到该席位", http.StatusBadRequest)
+			return
+		}
+		previousDeviceID := team.Players[slotIndex].DeviceID
 		// 换绑是幂等操作：新席位接管机器鱼时，旧席位自动释放。
 		// 这样裁判不需要先手动解除，再重新分配，设备归属始终只有一个来源。
+		assignmentChanged := !strings.EqualFold(previousDeviceID, deviceID)
 		if side, slot, taken := match.assignmentOwner(deviceID); taken {
 			sameSlot := strings.EqualFold(side, team.Side) && strings.EqualFold(slot, input.Slot)
 			if !sameSlot {
+				assignmentChanged = true
 				match.clearDeviceAssignment(deviceID)
 			}
 		}
-		assigned := false
-		for i := range team.Players {
-			if strings.EqualFold(team.Players[i].Slot, input.Slot) {
-				if !strings.EqualFold(team.Players[i].DeviceID, deviceID) {
-					team.Players[i].clearReady()
-				}
-				team.Players[i].DeviceID = deviceID
-				assigned = true
-			}
+		if assignmentChanged {
+			team.Players[slotIndex].clearReady()
 		}
-		if !assigned {
-			http.Error(w, "未找到该席位", http.StatusBadRequest)
-			return
+		team.Players[slotIndex].DeviceID = deviceID
+		if assignmentChanged {
+			s.leases.releaseBrowserDevices(deviceID, previousDeviceID)
+			s.hub.Notify()
 		}
 		match.Operator = user.Email
 		match.UpdatedAt = time.Now().Format(time.RFC3339)
@@ -484,11 +633,17 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "队伍或席位参数无效", http.StatusBadRequest)
 			return
 		}
+		previousDeviceID := ""
 		for i := range team.Players {
 			if strings.EqualFold(team.Players[i].Slot, input.Slot) {
+				previousDeviceID = team.Players[i].DeviceID
 				team.Players[i].DeviceID = ""
 				team.Players[i].clearReady()
 			}
+		}
+		if previousDeviceID != "" {
+			s.leases.releaseBrowserDevices(previousDeviceID)
+			s.hub.Notify()
 		}
 		match.Operator = user.Email
 		match.UpdatedAt = time.Now().Format(time.RFC3339)
@@ -607,18 +762,69 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "队伍参数无效", http.StatusBadRequest)
 			return
 		}
+		if (input.Score == nil) == (input.Delta == nil) {
+			http.Error(w, "只能提供 score 或 delta 中的一项", http.StatusBadRequest)
+			return
+		}
+		kind := strings.ToLower(strings.TrimSpace(input.Kind))
+		labels := map[string]string{"goal": "进球", "assist": "配合", "out": "越界", "adjustment": "比分更正"}
+		if kind == "" {
+			kind = "adjustment"
+		}
+		label, validKind := labels[kind]
+		if !validKind {
+			http.Error(w, "计分事件类型无效", http.StatusBadRequest)
+			return
+		}
+		if kind != "adjustment" {
+			expected := map[string]int{"goal": 10, "assist": 2, "out": -2}[kind]
+			if input.Delta == nil || *input.Delta != expected {
+				http.Error(w, "计分事件与分值不匹配", http.StatusBadRequest)
+				return
+			}
+		}
+		previousScore := team.Score
+		previousOperator, previousUpdatedAt := match.Operator, match.UpdatedAt
+		nextScore := previousScore
 		if input.Score != nil {
-			team.Score = *input.Score
+			nextScore = *input.Score
+		} else {
+			nextScore += *input.Delta
 		}
-		if input.Delta != nil {
-			team.Score += *input.Delta
+		if nextScore < 0 {
+			nextScore = 0
 		}
-		if team.Score < 0 {
-			team.Score = 0
+		now := time.Now()
+		elapsed := store.elapsedLocked()
+		remaining := match.DurationMs - elapsed
+		if remaining < 0 {
+			remaining = 0
 		}
+		event := competitionScoreEvent{
+			ID: fmt.Sprintf("score-%d", now.UnixNano()), Side: team.Side,
+			Kind: kind, Label: label, Delta: nextScore - previousScore,
+			Score: nextScore, ElapsedMs: elapsed, RemainingMs: remaining,
+			OccurredAt: now.Format(time.RFC3339Nano),
+		}
+		if match.RecordingState == "recording" && match.RecordingStartedAt != "" {
+			if started, err := time.Parse(time.RFC3339Nano, match.RecordingStartedAt); err == nil && !started.After(now) {
+				seconds := now.Sub(started).Seconds()
+				event.VideoTimestampSeconds = &seconds
+			}
+		}
+		team.Score = nextScore
+		match.ScoreEvents = append(match.ScoreEvents, event)
 		match.Operator = user.Email
-		match.UpdatedAt = time.Now().Format(time.RFC3339)
-		store.saveLocked()
+		match.UpdatedAt = now.Format(time.RFC3339)
+		store.syncFinishedRecordLocked()
+		if err := store.saveLocked(); err != nil {
+			team.Score = previousScore
+			match.ScoreEvents = match.ScoreEvents[:len(match.ScoreEvents)-1]
+			match.Operator, match.UpdatedAt = previousOperator, previousUpdatedAt
+			store.syncFinishedRecordLocked()
+			http.Error(w, "计分保存失败", http.StatusInternalServerError)
+			return
+		}
 		writeJSONValue(w, s.matchSnapshotLocked(store))
 
 	case "clock":
@@ -629,6 +835,10 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		switch strings.ToLower(input.Action) {
 		case "start":
+			if match.State == matchStateFinished {
+				http.Error(w, "比赛已结束，不能重新开始同一场", http.StatusConflict)
+				return
+			}
 			if !store.running {
 				if match.RecordingState != "recording" {
 					recording, err := s.startCompetitionRecording(r.Context(), match)
@@ -659,6 +869,10 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 			}
 			match.State = matchStatePaused
 		case "reset":
+			if match.State == matchStateFinished {
+				http.Error(w, "已归档比赛不能重置", http.StatusConflict)
+				return
+			}
 			if match.RecordingState == "recording" && match.RecordingID != "" {
 				if _, err := s.stopCompetitionRecording(r.Context(), match.RecordingID, true); err != nil {
 					match.RecordingState = "error"
@@ -718,7 +932,11 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 			MatchNo: match.MatchNo, Group: match.Group, Venue: match.Venue,
 			BlueName: match.Blue.Name, RedName: match.Red.Name,
 			BlueScore: match.Blue.Score, RedScore: match.Red.Score,
-			ElapsedMs: match.ElapsedMs, Finished: time.Now().Format(time.RFC3339),
+			BluePlayers: competitionPlayerNames(match.Blue.Players),
+			RedPlayers:  competitionPlayerNames(match.Red.Players),
+			ElapsedMs:   match.ElapsedMs, Finished: time.Now().Format(time.RFC3339),
+			DurationMs:         match.DurationMs,
+			ScoreEvents:        append([]competitionScoreEvent{}, match.ScoreEvents...),
 			StartedAt:          match.StartedAt,
 			VideoURL:           recordingPlaybackURL(recording.FileName),
 			VideoStatus:        match.RecordingState,
@@ -733,7 +951,21 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 		if len(store.Records) > 200 {
 			store.Records = store.Records[:200]
 		}
-		store.saveLocked()
+		if len(store.FinishedNoticeClaims) > 200 {
+			retained := make(map[string]bool, len(store.Records))
+			for _, record := range store.Records {
+				retained[record.ID] = true
+			}
+			for matchID := range store.FinishedNoticeClaims {
+				if !retained[matchID] {
+					delete(store.FinishedNoticeClaims, matchID)
+				}
+			}
+		}
+		if err := store.saveLocked(); err != nil {
+			http.Error(w, "比赛记录保存失败", http.StatusInternalServerError)
+			return
+		}
 		writeJSONValue(w, s.matchSnapshotLocked(store))
 
 	default:
@@ -808,9 +1040,6 @@ func mergeTeam(target *competitionTeam, incoming *competitionTeam, side string) 
 	if len(incoming.Players) > 0 {
 		target.Players = incoming.Players
 	}
-	if incoming.Score != 0 {
-		target.Score = incoming.Score
-	}
 }
 
 // assignmentOwner 返回该机器鱼当前归属的席位。
@@ -832,7 +1061,7 @@ func (s *server) playerControlAllowed(deviceID, slot string) bool {
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	if store.Match == nil || !store.Match.FieldLocked {
+	if store.Match == nil {
 		return false
 	}
 	_, assignedSlot, assigned := store.Match.assignmentOwner(deviceID)

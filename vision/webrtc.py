@@ -10,6 +10,7 @@ from fractions import Fraction
 import cv2
 import crop_region
 from recording import MatchVideoRecorder, RecordingError
+from turn_credentials import cloudflare_turn
 
 from config import (
     WEBRTC_OFFER_TIMEOUT_S,
@@ -132,7 +133,7 @@ class _LatestFrameBuffer:
             self._condition.notify_all()
 
 
-VIDEO_PROFILES = {"smooth": (640, 480), "hd": (1280, 960), "full": (1920, 1440)}
+VIDEO_PROFILES = {"compact": (480, 360), "smooth": (640, 480), "hd": (1280, 960), "full": (1920, 1440)}
 
 def _resize_for_video(frame, quality="smooth"):
     height, width = frame.shape[:2]
@@ -151,19 +152,13 @@ def _resize_for_video(frame, quality="smooth"):
 
 
 def _ice_servers():
-    servers = []
-    if WEBRTC_STUN_URL:
-        servers.append(RTCIceServer(urls=WEBRTC_STUN_URL))
-    if WEBRTC_TURN_URL:
-        servers.append(RTCIceServer(
-            urls=WEBRTC_TURN_URL,
-            username=WEBRTC_TURN_USERNAME,
-            credential=WEBRTC_TURN_CREDENTIAL,
-        ))
-    return servers
+    return [RTCIceServer(**server) for server in browser_ice_servers()]
 
 
 def browser_ice_servers():
+    cloudflare_servers = cloudflare_turn.ice_servers()
+    if cloudflare_servers is not None:
+        return cloudflare_servers
     servers = []
     if WEBRTC_STUN_URL:
         servers.append({"urls": WEBRTC_STUN_URL})
@@ -253,6 +248,22 @@ class WebRTCServer:
     def browser_ice_servers(self):
         return browser_ice_servers()
 
+    def jpeg_snapshot(self, view="cropped", quality="smooth"):
+        """Return one fresh frame for the HTTPS fallback when ICE cannot connect."""
+        if view not in ("cropped", "full") or quality not in VIDEO_PROFILES:
+            raise ValueError("Invalid JPEG snapshot options")
+        item = self._source.latest_frame(view=view)
+        if item is None:
+            return None
+        sequence, frame, timestamp = item
+        if timestamp <= 0 or time.time() - timestamp > 2.0:
+            return None
+        ok, encoded = cv2.imencode(
+            ".jpg", _resize_for_video(frame, quality),
+            [cv2.IMWRITE_JPEG_QUALITY, 58 if quality == "compact" else 75],
+        )
+        return (sequence, encoded.tobytes()) if ok else None
+
     def start(self):
         if not self.available or self._thread is not None:
             return self
@@ -271,7 +282,7 @@ class WebRTCServer:
         self._loop.close()
 
     def update(self, frame, timestamp=None):
-        if not self.available or self._closed or frame is None:
+        if self._closed or frame is None:
             return
         # No synthetic frame-rate cap and no duplicated frames.  The latest
         # real camera frame replaces the previous one, so a slow viewer drops

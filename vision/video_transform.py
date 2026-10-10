@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import math
-from pathlib import Path
 
 import cv2
 
-from config import CACHE_DIR
+import camera_settings
 
 
-PATH = Path(CACHE_DIR) / "video-transform.json"
 DEFAULT = {"angle": 0.0}
 
 
@@ -28,17 +25,12 @@ def validate(value):
 
 
 def load():
-    if not PATH.exists():
-        return dict(DEFAULT)
-    return validate(json.loads(PATH.read_text(encoding="utf-8")))
+    return {"angle": camera_settings.load()["rotationAngle"]}
 
 
 def save(value):
     value = validate(value)
-    PATH.parent.mkdir(parents=True, exist_ok=True)
-    temporary = PATH.with_suffix(".tmp")
-    temporary.write_text(json.dumps(value), encoding="utf-8")
-    temporary.replace(PATH)
+    camera_settings.save(rotationAngle=value["angle"])
     return value
 
 

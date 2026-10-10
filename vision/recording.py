@@ -81,8 +81,10 @@ class MatchVideoRecorder:
         self.file_name = f"{event_name}_{stamp}.mp4"
         self.path = self.output_dir / self.file_name
         self.partial_path = self.output_dir / f".{self.file_name}.partial"
-        self.started_at = datetime.now().astimezone().isoformat()
         self._started_timestamp = float(timestamp or time.time())
+        # The MP4 timeline starts at the first source frame, which can precede
+        # recorder construction. Report the same origin to the score service.
+        self.started_at = datetime.fromtimestamp(self._started_timestamp).astimezone().isoformat()
         self._last_timestamp = self._started_timestamp
         self._previous_sequence = int(sequence) - 1
         self._last_pts = -1
@@ -100,13 +102,16 @@ class MatchVideoRecorder:
                 format="mp4",
                 options={"movflags": "+faststart"},
             )
-            # 60 is the encoder timing grid, not a frame generator or cap.
-            # Frames retain real capture timestamps and are never duplicated.
+            # The nominal rate is only encoder metadata. The codec must use
+            # the same millisecond grid as the capture PTS below: libx264's
+            # default 1/60 grid collapses distinct frames above 60 FPS.
             self._stream = self._container.add_stream(
                 "libx264",
                 rate=60,
                 options={"preset": "ultrafast", "crf": "23", "tune": "zerolatency"},
             )
+            self._stream.codec_context.time_base = _TIME_BASE
+            self._stream.time_base = _TIME_BASE
             self._stream.width = self.width
             self._stream.height = self.height
             self._stream.pix_fmt = "yuv420p"
@@ -154,8 +159,12 @@ class MatchVideoRecorder:
         self._frame_count += 1
 
     def _writer_loop(self):
+        stage = "等待视频帧"
+        sequence = self._previous_sequence
+        timestamp = self._started_timestamp
         try:
             while not self._stop_event.is_set():
+                stage = "等待视频帧"
                 item = self.source.wait_for_frame(
                     self._previous_sequence,
                     timeout=0.25,
@@ -167,12 +176,18 @@ class MatchVideoRecorder:
                 if self._previous_sequence >= 0 and sequence > self._previous_sequence + 1:
                     self._dropped_frames += sequence - self._previous_sequence - 1
                 self._previous_sequence = sequence
+                stage = "编码或写入视频帧"
                 self._encode(frame, timestamp)
+            stage = "封存编码流"
             for packet in self._stream.encode():
                 self._container.mux(packet)
         except Exception as error:
             with self._lock:
-                self._error = str(error)
+                self._error = (
+                    f"{stage}失败：已写入 {self._frame_count} 帧，"
+                    f"源序号 {sequence}，时间戳 {timestamp!r}，"
+                    f"上次 PTS {self._last_pts}：{error}"
+                )
         finally:
             self._close_container_quietly()
             try:

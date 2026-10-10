@@ -6,6 +6,9 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 const sessionCookieName = "fish_session"
@@ -40,6 +44,7 @@ type authStore struct {
 	path     string
 	users    map[string]authUser
 	sessions map[string]authSession
+	loadErr  error
 }
 
 func authStorePath() string {
@@ -55,8 +60,14 @@ func authStorePath() string {
 
 func newAuthStore(path string) *authStore {
 	store := &authStore{path: path, users: map[string]authUser{}, sessions: map[string]authSession{}}
-	_ = store.loadSessions()
-	_ = store.load()
+	if err := store.loadSessions(); err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Printf("auth sessions load failed from %s: %v", path+".sessions.json", err)
+	}
+	if err := store.load(); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			log.Printf("auth users load failed from %q: %v", path, err)
+		}
+	}
 	return store
 }
 
@@ -65,11 +76,21 @@ func (a *authStore) load() error {
 	defer a.mu.Unlock()
 	data, err := os.ReadFile(a.path)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			a.loadErr = nil
+		} else {
+			a.loadErr = fmt.Errorf("read auth users: %w", err)
+		}
 		return err
 	}
 	var users map[string]authUser
 	if err := json.Unmarshal(data, &users); err != nil {
+		a.loadErr = fmt.Errorf("decode auth users: %w", err)
 		return err
+	}
+	if users == nil {
+		a.loadErr = fmt.Errorf("auth users must be a JSON object")
+		return a.loadErr
 	}
 	changed := false
 	for email, user := range users {
@@ -81,11 +102,18 @@ func (a *authStore) load() error {
 		}
 	}
 	a.users = users
+	a.loadErr = nil
 	if changed {
 		// Migrate legacy Operator/Viewer records to the two-role model.
 		_ = a.saveLocked()
 	}
 	return nil
+}
+
+func (a *authStore) readinessError() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.loadErr
 }
 
 func (a *authStore) saveLocked() error {
@@ -166,10 +194,7 @@ func (a *authStore) register(name, email, password, role, invite string) (authUs
 	if configuredInvite != "" && subtle.ConstantTimeCompare([]byte(strings.TrimSpace(invite)), []byte(configuredInvite)) != 1 {
 		return authUser{}, false, os.ErrPermission
 	}
-	if password == "" || len(password) < 8 {
-		return authUser{}, false, os.ErrInvalid
-	}
-	if email == "" || !strings.Contains(email, "@") {
+	if email == "" || utf8.RuneCountInString(email) > 20 {
 		return authUser{}, false, os.ErrInvalid
 	}
 	if existing, ok := a.users[email]; ok {
@@ -200,21 +225,34 @@ func validateUserInput(name, email, password string) (string, string, error) {
 	if name == "" {
 		name = email
 	}
-	if password == "" || len(password) < 8 {
-		return "", "", os.ErrInvalid
-	}
-	if email == "" || !strings.Contains(email, "@") {
+	if email == "" || utf8.RuneCountInString(email) > 20 {
 		return "", "", os.ErrInvalid
 	}
 	return name, email, nil
 }
 
 func normalizeLoginIdentifier(value string) string {
-	identifier := strings.ToLower(strings.TrimSpace(value))
-	if identifier != "" && !strings.Contains(identifier, "@") {
-		return identifier + "@fish.local"
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func competitionSideForUser(user authUser) string {
+	switch strings.ToLower(strings.TrimSpace(user.Email)) {
+	case "1":
+		return "blue"
+	case "2":
+		return "red"
+	default:
+		return ""
 	}
-	return identifier
+}
+
+func isRefereeAccount(user authUser) bool {
+	return user.Status == "active" && user.Role == "Admin" &&
+		strings.EqualFold(strings.TrimSpace(user.Email), "3")
+}
+
+func isPlayerAccount(user authUser) bool {
+	return user.Status == "active" && user.Role == "User" && competitionSideForUser(user) != ""
 }
 
 func (a *authStore) createUser(name, email, password, role string) (authUser, error) {
@@ -293,9 +331,6 @@ func (a *authStore) updateUser(id, name, role, status, password string, actorID 
 		user.Status = status
 	}
 	if password != "" {
-		if len(password) < 8 {
-			return authUser{}, os.ErrInvalid
-		}
 		salt, err := randomHex(16)
 		if err != nil {
 			return authUser{}, err
@@ -349,6 +384,10 @@ func (a *authStore) authenticate(email, password string) (authUser, bool) {
 	defer a.mu.Unlock()
 	email = normalizeLoginIdentifier(email)
 	user, ok := a.users[email]
+	if !ok && email != "" && !strings.Contains(email, "@") {
+		// Keep historical short accounts usable after accepting plain usernames.
+		user, ok = a.users[email+"@fish.local"]
+	}
 	if !ok || user.Status != "active" {
 		return authUser{}, false
 	}
@@ -369,9 +408,17 @@ func (a *authStore) createSession(user authUser) (authSession, error) {
 	}
 	session := authSession{Token: token, UserID: user.ID, ExpiresAt: time.Now().Add(14 * 24 * time.Hour)}
 	a.mu.Lock()
+	previous := a.sessions
+	next := make(map[string]authSession, len(previous)+1)
+	for key, existing := range previous {
+		if existing.UserID != user.ID && time.Now().Before(existing.ExpiresAt) {
+			next[key] = existing
+		}
+	}
+	a.sessions = next
 	a.sessions[sessionKey(token)] = session
 	if err := a.saveSessionsLocked(); err != nil {
-		delete(a.sessions, sessionKey(token))
+		a.sessions = previous
 		a.mu.Unlock()
 		return authSession{}, err
 	}

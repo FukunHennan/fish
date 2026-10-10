@@ -1,0 +1,8 @@
+Register-ScheduledTask : Unspecified error
+At C:\Users\chenfukun\Desktop\Fish\Pro1\scripts\runtime\install-startup-task.ps1:17 char:1
++ Register-ScheduledTask -TaskName "FishStack" -Action $action -Trigger ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (PS_ScheduledTask:Root/Microsoft/...S_ScheduledTask) [Register-ScheduledTa 
+   sk], CimException
+    + FullyQualifiedErrorId : HRESULT 0x80004005,Register-ScheduledTask
+ 

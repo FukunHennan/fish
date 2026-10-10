@@ -16,6 +16,7 @@ from pathlib import Path
 import cv2
 import crop_region
 import video_transform
+import camera_settings
 
 from config import CAPTURE_FOURCC, TARGET_FPS, TARGET_HEIGHT, TARGET_WIDTH
 from interface import (
@@ -352,7 +353,7 @@ class RestartSafeCameraStream:
         self.real_width, self.real_height = right - x, bottom - y
 
         if not hasattr(self, "exposure_val"):
-            self.exposure_val = -6
+            self.exposure_val = camera_settings.load()["exposure"]
         if self.backend_name != "V4L2":
             # OpenCV exposure values use a different scale on Linux V4L2.
             # Writing the Windows-style -6 value can select a multi-second
@@ -569,6 +570,7 @@ class RestartSafeCameraStream:
     def _apply_exposure_result(self, result):
         if result.status == "completed" and result.actual_value is not None:
             self.exposure_val = result.actual_value
+            camera_settings.save(exposure=self.exposure_val)
             print(f"[Camera] Manual exposure changed to {self.exposure_val}")
         else:
             print(f"[Camera] Exposure adjustment failed: {result.error_code}")

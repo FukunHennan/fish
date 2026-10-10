@@ -167,6 +167,40 @@ func (l *leaseStore) releaseBrowserLeases() {
 	_ = l.saveLocked()
 }
 
+// A changed match assignment must revoke any browser control held under the
+// previous seat. Vision control is managed separately and is left untouched.
+func (l *leaseStore) releaseBrowserDevices(deviceIDs ...string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	changed := false
+	for _, deviceID := range deviceIDs {
+		lease, exists := l.leases[deviceID]
+		if !exists || lease.OwnerID == "vision-bot" {
+			continue
+		}
+		l.forceStopLocked(deviceID)
+		delete(l.leases, deviceID)
+		changed = true
+	}
+	if changed {
+		_ = l.saveLocked()
+	}
+}
+
+// A replacement login must stop commands owned by the displaced session.
+func (l *leaseStore) releaseOwner(userID string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for id, lease := range l.leases {
+		if lease.OwnerID != userID {
+			continue
+		}
+		l.forceStopLocked(id)
+		delete(l.leases, id)
+	}
+	_ = l.saveLocked()
+}
+
 func (l *leaseStore) snapshot() map[string]controlLease {
 	l.mu.Lock()
 	defer l.mu.Unlock()
