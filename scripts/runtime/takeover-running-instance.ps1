@@ -5,6 +5,7 @@ $runtime = Join-Path $root "controller\.runtime"
 $controllerExe = [IO.Path]::GetFullPath((Join-Path $runtime "fish-controller.exe"))
 $cloudflaredExe = [IO.Path]::GetFullPath((Join-Path $runtime "cloudflared.exe"))
 $launcher = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\start.bat"))
+$watcher = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "watch-controller.ps1"))
 $currentLauncherPid = (Get-CimInstance Win32_Process -Filter "ProcessId=$PID").ParentProcessId
 
 function Get-ProcessPath($process) {
@@ -27,6 +28,18 @@ foreach ($process in $processes) {
     $command = [string]$process.CommandLine
     if ($command.IndexOf($launcher, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
         Stop-ProcessTree $process.ProcessId "Fish startup supervisor"
+    }
+}
+
+# A supervisor attached to an already running controller has no start.bat
+# parent. Stop it before stopping the controller so it cannot restart it.
+foreach ($process in $processes) {
+    if ($process.Name -notin @("powershell.exe", "pwsh.exe")) { continue }
+    $command = [string]$process.CommandLine
+    if ($command.IndexOf("-File", [StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+        $command.IndexOf($watcher, [StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+        $command.IndexOf($controllerExe, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+        Stop-ProcessTree $process.ProcessId "Fish Controller supervisor"
     }
 }
 
