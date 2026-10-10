@@ -86,6 +86,6 @@ USB 烧录需要连接设备后执行 PlatformIO Upload。仅修改电脑端 GUI
 
 - 部署配置统一修改 `config/firmware.json`、`config/program.json`、`config/tunnel.json`；设备运动参数保存在 `config/device-motion.json`，按 MAC 继承和更新。字段与启动行为见[配置入口](config/README.md)。固件和控制器共用 `firmware.json` 中的 `deploymentKey`。
 - 项目当前启用 Cloudflare Tunnel 并关闭内建登录：知道域名的人均可操作管理员功能。风险与配置步骤见[公网访问配置](docs/程序/公网访问配置.md)。
-- Windows 开发机通过 `scripts\start.bat` 构建并启动本地控制器；脚本会注册 `FishStack` 登录启动任务，统一守护控制器和 Cloudflare Tunnel。
+- Windows 开发机手动运行 `scripts\start.bat` 构建并启动本地控制器及 Cloudflare Tunnel；脚本不创建开机或登录计划任务。
 - OTA 只能由管理员发起。
 - 设备断线、控制器心跳超时、视觉异常和 OTA 开始时都应停止运动。

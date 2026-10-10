@@ -3,6 +3,7 @@ $ErrorActionPreference = "Stop"
 $root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $runtime = Join-Path $root "controller\.runtime"
 $controllerExe = [IO.Path]::GetFullPath((Join-Path $runtime "fish-controller.exe"))
+$nextControllerExe = [IO.Path]::GetFullPath((Join-Path $runtime "fish-controller.next.exe"))
 $cloudflaredExe = [IO.Path]::GetFullPath((Join-Path $runtime "cloudflared.exe"))
 $launcher = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\start.bat"))
 $watcher = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "watch-controller.ps1"))
@@ -48,7 +49,8 @@ foreach ($process in $processes) {
 $processes = @(Get-CimInstance Win32_Process)
 foreach ($process in $processes) {
     $path = Get-ProcessPath $process
-    if ($path.Equals($controllerExe, [StringComparison]::OrdinalIgnoreCase)) {
+    if ($path.Equals($controllerExe, [StringComparison]::OrdinalIgnoreCase) -or
+        $path.Equals($nextControllerExe, [StringComparison]::OrdinalIgnoreCase)) {
         Stop-ProcessTree $process.ProcessId "Fish Controller and vision service"
     }
 }

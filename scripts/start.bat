@@ -13,7 +13,6 @@ set "CLOUDFLARED=%RUNTIME%\cloudflared.exe"
 set "TUNNEL_CONFIG=%RUNTIME%\cloudflared-live.yml"
 set "TUNNEL_PID_FILE=%RUNTIME%\cloudflared.pid"
 set "PREPARE_TUNNEL=%~dp0runtime\prepare-tunnel.ps1"
-set "STARTUP_TASK=%~dp0runtime\install-startup-task.ps1"
 set "TAKEOVER_SCRIPT=%~dp0runtime\takeover-running-instance.ps1"
 set "WATCH_CONTROLLER=%~dp0runtime\watch-controller.ps1"
 
@@ -94,20 +93,20 @@ for %%C in (firmware.json program.json tunnel.json) do (
 )
 
 if not exist "%FRONTEND%\node_modules" (
-  echo [1/4] Installing frontend dependencies...
+  echo [1/3] Installing frontend dependencies...
   pushd "%FRONTEND%"
   call npm install
   if errorlevel 1 goto :fail
   popd
 )
 
- echo [2/4] Building frontend...
+echo [2/3] Building frontend...
 pushd "%FRONTEND%"
 call npm run build
 if errorlevel 1 goto :fail
 popd
 
-echo [3/4] Building Go controller...
+echo [3/3] Building Go controller...
 pushd "%CONTROLLER%"
 go build -o "%EXE%" ./cmd/fish-controller
 if errorlevel 1 goto :fail
@@ -124,13 +123,7 @@ if /I "%TUNNEL_MODE%"=="enabled" (
   if not exist "%TUNNEL_CONFIG%" goto :fail
 )
 
-echo [4/4] Updating the FishStack logon task...
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%STARTUP_TASK%"
-if errorlevel 1 (
-  echo [WARN] Could not update the FishStack logon task. Run this script from an elevated terminal once.
-)
-
-echo [5/5] Starting Fish Controller and configured tunnel...
+echo Starting Fish Controller and configured tunnel...
 echo Close this window to stop the services started from this window.
 echo Open: http://localhost:8081
 if /I "%TUNNEL_MODE%"=="enabled" (
@@ -145,7 +138,7 @@ if /I "%TUNNEL_MODE%"=="enabled" (
 pushd "%CONTROLLER%"
 if not defined FISH_HOT_RELOAD set "FISH_HOT_RELOAD=true"
 echo [INFO] Fish Controller hot reload supervisor is active.
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%WATCH_CONTROLLER%" -ControllerDir "%CONTROLLER%" -Executable "%EXE%"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%WATCH_CONTROLLER%" -ControllerDir "%CONTROLLER%" -Executable "%EXE%" >> "%RUNTIME%\supervisor.out.log" 2>> "%RUNTIME%\supervisor.err.log"
 set "EXIT_CODE=!errorlevel!"
 popd
 if defined TUNNEL_PID powershell.exe -NoProfile -Command "Stop-Process -Id %TUNNEL_PID% -Force -ErrorAction SilentlyContinue"

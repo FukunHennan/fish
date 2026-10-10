@@ -6,7 +6,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $nextExecutable = [IO.Path]::ChangeExtension($Executable, ".next.exe")
-$backupExecutable = [IO.Path]::ChangeExtension($Executable, ".previous.exe")
+$restartHelper = Join-Path $PSScriptRoot "request-controller-restart.ps1"
 
 function Get-ControllerRevision {
     $roots = @(
@@ -43,13 +43,12 @@ function Get-ControllerRevision {
     }
 }
 
-function Build-Controller {
+function Build-Controller([string]$OutputPath) {
     Write-Host "[HOT] Controller source changed; rebuilding..."
     Push-Location $ControllerDir
     try {
-        & go build -o $nextExecutable ./cmd/fish-controller
+        & go build -o $OutputPath ./cmd/fish-controller
         if ($LASTEXITCODE -ne 0) {
-            Remove-Item -LiteralPath $nextExecutable -Force -ErrorAction SilentlyContinue
             return $false
         }
         return $true
@@ -59,17 +58,17 @@ function Build-Controller {
     }
 }
 
-function Start-Controller {
+function Start-Controller([string]$Path) {
     Write-Host "[HOT] Starting Fish Controller..."
-    return Start-Process -FilePath $Executable -WorkingDirectory $ControllerDir -NoNewWindow -PassThru -ErrorAction Stop
+    return Start-Process -FilePath $Path -WorkingDirectory $ControllerDir -NoNewWindow -PassThru -ErrorAction Stop
 }
 
-function Start-ControllerWithRetry([int]$MaximumAttempts = 0) {
+function Start-ControllerWithRetry([string]$Path, [int]$MaximumAttempts = 0) {
     $attempt = 0
     while ($MaximumAttempts -eq 0 -or $attempt -lt $MaximumAttempts) {
         $attempt++
         try {
-            $candidate = Start-Controller
+            $candidate = Start-Controller -Path $Path
             Start-Sleep -Milliseconds 500
             if (-not $candidate.HasExited) { return $candidate }
             Write-Host "[WARN] Fish Controller exited immediately with code $($candidate.ExitCode)."
@@ -82,19 +81,14 @@ function Start-ControllerWithRetry([int]$MaximumAttempts = 0) {
     return $null
 }
 
-function Restore-ControllerBackup {
-    try {
-        Copy-Item -LiteralPath $backupExecutable -Destination $Executable -Force -ErrorAction Stop
-        Write-Host "[WARN] Restored the previous Fish Controller binary."
-    }
-    catch {
-        Write-Host "[WARN] Could not restore the previous binary: $($_.Exception.Message)"
-    }
-}
-
 function Request-GracefulRestart {
     try {
-        Invoke-WebRequest -UseBasicParsing -Method Post -Uri "http://127.0.0.1:8081/__dev/restart-controller" -TimeoutSec 3 | Out-Null
+        if (-not (Test-Path -LiteralPath $restartHelper -PathType Leaf)) {
+            throw "Restart helper is missing: $restartHelper"
+        }
+        $arguments = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ('"' + $restartHelper + '"'))
+        Start-Process -FilePath "powershell.exe" -ArgumentList $arguments `
+            -WorkingDirectory $ControllerDir -WindowStyle Hidden -ErrorAction Stop | Out-Null
         return $true
     }
     catch {
@@ -103,8 +97,18 @@ function Request-GracefulRestart {
     }
 }
 
+function Wait-ControllerExit([int]$ProcessId, [int]$TimeoutMilliseconds) {
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
+    do {
+        if (-not (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) { return $true }
+        Start-Sleep -Milliseconds 200
+    } while ([DateTime]::UtcNow -lt $deadline)
+    return $false
+}
+
 $revision = Get-ControllerRevision
 $process = $null
+$runningExecutable = $Executable
 try {
     if ($ExistingProcessId -gt 0) {
         $existing = Get-CimInstance Win32_Process -Filter "ProcessId=$ExistingProcessId"
@@ -119,7 +123,7 @@ try {
         Write-Host "[HOT] Attached to running Fish Controller PID $ExistingProcessId."
     }
     else {
-        $process = Start-ControllerWithRetry
+        $process = Start-ControllerWithRetry -Path $runningExecutable
     }
     while ($true) {
         Start-Sleep -Milliseconds 750
@@ -127,7 +131,7 @@ try {
             $code = $process.ExitCode
             Write-Host "[WARN] Fish Controller exited with code $code; restarting in 5 seconds."
             Start-Sleep -Seconds 5
-            $process = Start-ControllerWithRetry
+            $process = Start-ControllerWithRetry -Path $runningExecutable
             $revision = Get-ControllerRevision
             continue
         }
@@ -141,67 +145,49 @@ try {
         if ($stable -ne $current) {
             continue
         }
-        if (-not (Build-Controller)) {
+        $candidateExecutable = if ([String]::Equals($runningExecutable, $Executable,
+            [StringComparison]::OrdinalIgnoreCase)) { $nextExecutable } else { $Executable }
+        if (-not (Build-Controller -OutputPath $candidateExecutable)) {
             Write-Host "[WARN] Controller rebuild failed; keeping the current process running."
             $revision = $stable
             continue
         }
 
-        try {
-            Copy-Item -LiteralPath $Executable -Destination $backupExecutable -Force -ErrorAction Stop
-        }
-        catch {
-            Write-Host "[WARN] Could not back up the running controller; keeping it online: $($_.Exception.Message)"
-            Remove-Item -LiteralPath $nextExecutable -Force -ErrorAction SilentlyContinue
-            $revision = $stable
-            continue
-        }
-
         if (-not (Request-GracefulRestart)) {
-            Remove-Item -LiteralPath $nextExecutable -Force -ErrorAction SilentlyContinue
-            Remove-Item -LiteralPath $backupExecutable -Force -ErrorAction SilentlyContinue
             $revision = $stable
             continue
         }
-        if (-not $process.WaitForExit(10000)) {
+        Write-Host "[HOT] Waiting for controller PID $($process.Id) to stop..."
+        if (-not (Wait-ControllerExit -ProcessId $process.Id -TimeoutMilliseconds 10000)) {
             Write-Host "[WARN] Controller did not exit after graceful restart request; keeping the current binary."
-            Remove-Item -LiteralPath $nextExecutable -Force -ErrorAction SilentlyContinue
-            Remove-Item -LiteralPath $backupExecutable -Force -ErrorAction SilentlyContinue
             $revision = $stable
             continue
         }
+        Write-Host "[HOT] Previous controller stopped; starting $candidateExecutable."
 
-        $replaced = $false
-        try {
-            Move-Item -LiteralPath $nextExecutable -Destination $Executable -Force -ErrorAction Stop
-            $replaced = $true
+        $newProcess = Start-ControllerWithRetry -Path $candidateExecutable -MaximumAttempts 5
+        if ($null -eq $newProcess) {
+            Write-Host "[WARN] New controller could not start; restarting the previous binary."
+            $process = Start-ControllerWithRetry -Path $runningExecutable
         }
-        catch {
-            Write-Host "[WARN] Controller replacement failed: $($_.Exception.Message)"
-            Restore-ControllerBackup
+        else {
+            $process = $newProcess
+            $runningExecutable = $candidateExecutable
+            Write-Host "[HOT] Controller reloaded from $runningExecutable."
         }
-        if ($replaced) {
-            $process = Start-ControllerWithRetry -MaximumAttempts 5
-            if ($null -eq $process) {
-                Write-Host "[WARN] New controller could not start; rolling back."
-                Restore-ControllerBackup
-            }
-        }
-        if ($null -eq $process -or $process.HasExited) {
-            $process = Start-ControllerWithRetry
-        }
-        Remove-Item -LiteralPath $backupExecutable -Force -ErrorAction SilentlyContinue
         $revision = $stable
-        Write-Host "[HOT] Controller reloaded."
     }
+}
+catch {
+    Write-Host "[ERROR] Fish Controller supervisor stopped: $($_.Exception.Message)"
+    Write-Host $_.ScriptStackTrace
+    throw
 }
 finally {
     if ($null -ne $process -and -not $process.HasExited) {
         Request-GracefulRestart | Out-Null
-        if (-not $process.WaitForExit(5000)) {
+        if (-not (Wait-ControllerExit -ProcessId $process.Id -TimeoutMilliseconds 5000)) {
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
         }
     }
-    Remove-Item -LiteralPath $nextExecutable -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $backupExecutable -Force -ErrorAction SilentlyContinue
 }
