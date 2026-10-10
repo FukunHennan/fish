@@ -132,7 +132,7 @@ class _LatestFrameBuffer:
             self._condition.notify_all()
 
 
-VIDEO_PROFILES = {"smooth": (640, 480), "hd": (1280, 960), "full": (1920, 1440)}
+VIDEO_PROFILES = {"compact": (480, 360), "smooth": (640, 480), "hd": (1280, 960), "full": (1920, 1440)}
 
 def _resize_for_video(frame, quality="smooth"):
     height, width = frame.shape[:2]
@@ -265,7 +265,7 @@ class WebRTCServer:
             return None
         ok, encoded = cv2.imencode(
             ".jpg", _resize_for_video(frame, quality),
-            [cv2.IMWRITE_JPEG_QUALITY, 75],
+            [cv2.IMWRITE_JPEG_QUALITY, 58 if quality == "compact" else 75],
         )
         return (sequence, encoded.tobytes()) if ok else None
 

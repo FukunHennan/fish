@@ -129,6 +129,14 @@ class VisionWebApiTests(unittest.TestCase):
         frame = cv2.imdecode(np.frombuffer(response.data, dtype=np.uint8), cv2.IMREAD_COLOR)
         self.assertEqual(frame.shape[:2], (40, 60))
 
+        self.assertEqual(client.get(path + "&quality=unknown").status_code, 400)
+        video.set_crop_region({"x": 0, "y": 0, "width": 1, "height": 1})
+        video.update(np.full((480, 640, 3), 128, dtype=np.uint8), time.time())
+        compact = client.get(path + "&quality=compact")
+        self.assertEqual(compact.status_code, 200)
+        compact_frame = cv2.imdecode(np.frombuffer(compact.data, dtype=np.uint8), cv2.IMREAD_COLOR)
+        self.assertEqual(compact_frame.shape[:2], (360, 480))
+
     def test_service_subscribers_receive_status_updates(self):
         updates, unsubscribe = self.service.subscribe()
         try:

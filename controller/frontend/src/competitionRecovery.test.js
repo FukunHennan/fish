@@ -146,6 +146,54 @@ test("HTTPS 兼容画面在重绘和请求超时后继续轮询", async () => {
   assert.deepEqual(revoked, []);
 });
 
+test("公网兼容画面优先使用持续连接，断开后改用 HTTPS 轮询", async () => {
+  const begin = adapter.indexOf("  function startFrameFallback(reason) {");
+  const end = adapter.indexOf("  function scheduleVideoReconnect(reason, delay) {", begin);
+  assert.ok(begin >= 0 && end > begin);
+  const sockets = [];
+  const image = { src: "" };
+  const stage = { querySelector: () => image };
+  const statuses = [];
+  let httpPolls = 0;
+  const video = {
+    sessionId: "session-1", connectionGeneration: 0, fallback: false,
+    fallbackSocket: null, fallbackSocketTimer: null, fallbackObjectUrl: null,
+    lastFrameAt: 0,
+  };
+  class FakeSocket {
+    constructor(url) { this.url = url; sockets.push(this); }
+    close() { this.onclose?.(); }
+  }
+  class FakeImage {
+    set src(_value) { queueMicrotask(() => this.onload?.()); }
+  }
+  const context = {
+    video, window: { WebSocket: FakeSocket }, location: { protocol: "https:", host: "fish.example" },
+    Blob, Image: FakeImage,
+    URL: { createObjectURL: () => "blob:frame", revokeObjectURL() {} },
+    closeVideoPeer() { video.connectionGeneration++; video.fallback = false; },
+    mountVideoSurface() {}, videoSurface: () => stage,
+    requestFallbackFrame() { httpPolls++; },
+    isRefereePage: () => false,
+    setVisionStatus(value) { statuses.push(value); },
+    setBadge() {}, lastDeviceBadge: null,
+    renderCropEditor() {}, renderPlayerDetectionOverlay() {},
+    setTimeout: () => 1, clearTimeout() {},
+  };
+  const startFrameFallback = runInNewContext(adapter.slice(begin, end) + "\nstartFrameFallback", context);
+  startFrameFallback("WebRTC unavailable");
+  assert.equal(sockets.length, 1);
+  assert.match(sockets[0].url, /^wss:\/\/fish\.example\/api\/vision\/frame\.ws\?/);
+  assert.equal(httpPolls, 0);
+  sockets[0].onmessage({ data: new Blob([new Uint8Array([0xff, 0xd8])]) });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(image.src, "blob:frame");
+  assert.ok(statuses.some((value) => value.includes("实时通道")));
+  sockets[0].close();
+  assert.equal(httpPolls, 1);
+  assert.equal(video.fallbackSocket, null);
+});
+
 test("选手端结束比赛后保持控制并按账号领取一次通知", async () => {
   const begin = adapter.indexOf("  function setPlayerMatchHud(match, elapsedMs) {");
   const end = adapter.indexOf("  function refreshPlayerMatch() {", begin);

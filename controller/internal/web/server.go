@@ -283,6 +283,7 @@ func newHandler(h *hub.Hub, key []byte, apiAddress, streamAddress, firmwarePath 
 	m.HandleFunc("/api/firmware", s.firmwareAPI)
 	m.HandleFunc("/api/firmware/current.bin", s.firmware)
 	m.HandleFunc("/api/vision/device-command", s.visionDeviceCommand)
+	m.HandleFunc("/api/vision/frame.ws", s.visionFrameSocket)
 	m.Handle("/api/vision/", s.authenticatedVisionProxy(visionHandler))
 	m.HandleFunc("/ws/device", s.deviceSocket)
 	m.HandleFunc("/ws/control", s.controlSocket)

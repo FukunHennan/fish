@@ -200,7 +200,10 @@ def create_app(
         view = request.args.get("view", "cropped")
         if view not in ("cropped", "full"):
             return jsonify({"message": "无效的视频视图"}), 400
-        frame = webrtc_server.jpeg_snapshot(view=view, quality="smooth")
+        quality = request.args.get("quality", "smooth")
+        if quality not in ("smooth", "compact"):
+            return jsonify({"message": "无效的视频质量"}), 400
+        frame = webrtc_server.jpeg_snapshot(view=view, quality=quality)
         if frame is None:
             return jsonify({"message": "暂无新鲜摄像头画面"}), 503
         sequence, jpeg = frame
