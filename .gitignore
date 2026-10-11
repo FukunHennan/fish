@@ -10,6 +10,8 @@ firmware/.pio/
 controller/.runtime/*.exe
 controller/.runtime/*.pid
 controller/.runtime/*.log
+controller/.runtime/*.out.log
+controller/.runtime/*.err.log
 controller/.runtime/*.exe~
 controller/.runtime/cloudflared-live.yml
 controller/.runtime/users.json.previous
