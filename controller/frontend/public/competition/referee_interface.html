@@ -2361,7 +2361,7 @@ input:focus,select:focus{
      </div>
      <section id="replayPane" class="recordPane replayPanel panel">
       <div class="videoStage">
-       <video id="replayVideo" controls preload="metadata"></video>
+       <video id="replayVideo" controls preload="auto"></video>
        <div class="videoPlaceholder" id="videoPlaceholder"><div><div class="playCircle">▶</div><h3>本场视频回放</h3><p>选择已结束比赛后，服务器录像会自动载入。</p></div></div>
       </div>
       <div class="replayTools">
@@ -2513,8 +2513,7 @@ function hw(m){return m.blue.score>m.red.score?'蓝队获胜':m.red.score>m.blue
 function renderHistory(){const q=search.value.toLowerCase(),g=groupFilter.value;const list=history.filter(m=>(g==='all'||m.group===g)&&(!q||(m.no+m.blue.team+m.red.team).toLowerCase().includes(q)));historyCount.textContent=list.length+' 场';matchList.innerHTML=list.length?list.map(m=>`<button class="matchItem ${m.id===historySelected?'active':''}" data-id="${m.id}"><div class="matchTop"><b>${m.no} · ${m.group}</b><span>${m.date}</span></div><div class="matchTeams"><span class="blue">${m.blue.team}</span><strong>${m.blue.score}:${m.red.score}</strong><span class="red">${m.red.team}</span></div></button>`).join(''):'<div class="deviceOverviewEmpty"><b>暂无真实比赛记录</b><span>完成并保存比赛后将在此显示</span></div>';document.querySelectorAll('.matchItem').forEach(b=>b.onclick=()=>{
  historySelected=b.dataset.id;
  if(replayObjectUrl){URL.revokeObjectURL(replayObjectUrl);replayObjectUrl=null}
- replayVideo.removeAttribute('src');replayVideo.load();videoPlaceholder.classList.remove('hidden');
- videoFile.value='';videoFileName.textContent='正在载入服务器录像';videoElapsed.textContent='00:00';videoDuration.textContent='--:--';
+ videoFile.value='';videoFileName.textContent='正在载入服务器录像';
  renderHistory();renderHistoryDetail()
 })}
 function remainingToSeconds(t){
@@ -2539,6 +2538,7 @@ function renderReplay(m){
    if(replayVideo.dataset.recordUrl!==m.videoUrl){
      replayVideo.dataset.recordUrl=m.videoUrl;
      replayVideo.src=m.videoUrl;
+     replayVideo.preload='auto';
      replayVideo.load();
    }
    videoPlaceholder.classList.add('hidden');
@@ -2546,7 +2546,8 @@ function renderReplay(m){
    histVideoStatus.textContent='✓ 服务器录像已封存';
  }else{
    delete replayVideo.dataset.recordUrl;
-   replayVideo.removeAttribute('src');replayVideo.load();
+   replayVideo.removeAttribute('src');
+   replayVideo.removeAttribute('preload');
    videoPlaceholder.classList.remove('hidden');
    videoFileName.textContent=m.videoError||'本场没有可播放录像';
    histVideoStatus.textContent=m.videoError?'录像异常':'无录像';

@@ -3,12 +3,14 @@ vision/.venv/
 controller/frontend/node_modules/
 **/__pycache__/
 **/.pytest_cache/
+video/.venv/
 firmware/.pio/
 
 # Generated local processes and tunnel files; account snapshots and small logs remain tracked
 controller/.runtime/*.exe
 controller/.runtime/*.pid
 controller/.runtime/*.log
+controller/.runtime/*.exe~
 controller/.runtime/cloudflared-live.yml
 controller/.runtime/users.json.previous
 controller/.runtime/users.json.reservations.json.previous

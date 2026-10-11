@@ -4,6 +4,7 @@
     "ssid": "XiaoMi-Fish",
     "password": "12345678"
   },
+  "otaPassword": "fish123",
   "settings": {
     "CONTROLLER_HEARTBEAT_TIMEOUT_MS": 10000,
     "CONTROLLER_DISCOVERY_ANNOUNCE_INTERVAL_MS": 1000,

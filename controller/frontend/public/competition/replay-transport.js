@@ -89,7 +89,17 @@
     };
     video.muted = true;
     video.playsInline = true;
-    onStatus('正在连接 TURN 回放…');
+    // MP4 playback uses the HTTP endpoint so the browser can buffer ahead
+    // and seek with byte ranges; TURN remains available for downloads.
+    video.srcObject = null;
+    video.src = url;
+    video.currentTime = startMs / 1000;
+    video.preload = 'auto';
+    onStatus('正在加载录像…');
+    video.play().then(() => { if (!cancelled) onStatus('正在播放录像'); })
+      .catch(() => { if (!cancelled) onStatus('点击画面开始播放'); });
+    return controller;
+/*
     connect(url, 'play', {
       onTrack(track, connection) {
         if (cancelled) { connection.close(); return; }
@@ -103,7 +113,7 @@
       if (cancelled) connection.close();
       else session = connection;
     }).catch((error) => { if (!cancelled) onStatus(error.message); });
-    return controller;
+*/
   }
 
   async function download(url, onStatus) {

@@ -6418,7 +6418,7 @@ p {
 
     const videoAvailable = !!(selected && selected.videoUrl && selected.videoStatus === 'saved');
     const videoStage = videoAvailable
-      ? '<video id="studentReplayVideo" controls preload="metadata" src="' + escapeAttr(selected.videoUrl) + '"></video>'
+      ? '<video id="studentReplayVideo" controls preload="auto" src="' + escapeAttr(selected.videoUrl) + '"></video>'
       : '<div class="studentReplayEmpty"><div><b>' + (selected ? '本场暂无可播放录像' : '请选择比赛') + '</b><span>' + escapeAttr(selected && selected.videoError ? selected.videoError : '这里只播放裁判端封存的真实选手画面。') + '</span></div></div>';
     const title = selected ? escapeAttr(selected.matchNo) : (studentRecordsLoaded ? '暂无已保存比赛' : '正在读取比赛记录');
     const matchup = selected ? escapeAttr(selected.blueName) + ' <b>' + selected.blueScore + ' : ' + selected.redScore + '</b> ' + escapeAttr(selected.redName) : '等待真实赛事归档';

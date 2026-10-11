@@ -37,7 +37,7 @@ const maxFirmwareSize int64 = 8 << 20
 
 // Wi-Fi and ESP32 scheduling can briefly delay a heartbeat. A longer socket
 // deadline avoids turning short LAN jitter into a full reconnect.
-const deviceHeartbeatTimeout = 10 * time.Second
+const deviceHeartbeatTimeout = 60 * time.Second
 const visionMotionTimeout = 3 * time.Second
 
 // commandAckTimeout expands the ACK window using the measured device
