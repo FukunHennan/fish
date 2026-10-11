@@ -3817,6 +3817,18 @@
       });
   }
 
+  window.fishCompetitionDeleteRecord = function (recordId) {
+    var id = String(recordId || "").trim();
+    if (!id) return Promise.reject(new Error("比赛记录 ID 无效"));
+    return api("/api/competition/records", {
+      method: "DELETE",
+      body: { matchId: id },
+    }).then(function () {
+      setBadge("比赛记录已删除", "ok");
+      return refreshReferee();
+    });
+  };
+
   function paintReferee() {
     if (!referee.match) return;
     var match = referee.match;
@@ -4099,12 +4111,8 @@
     var rosterDevices = devices || refereeDevices();
     var blueTitle = document.querySelector(".teamCard.blue .teamHead h2");
     var redTitle = document.querySelector(".teamCard.red .teamHead h2");
-    if (blueTitle) blueTitle.textContent = "蓝队 · " + (match.blue && match.blue.name ? match.blue.name : "蓝队");
-    if (redTitle) redTitle.textContent = "红队 · " + (match.red && match.red.name ? match.red.name : "红队");
-    var blueSelectTitle = document.querySelector(".selectGroup.blue h3");
-    var redSelectTitle = document.querySelector(".selectGroup.red h3");
-    if (blueSelectTitle) blueSelectTitle.textContent = "蓝队 · " + (match.blue && match.blue.name ? match.blue.name : "蓝队");
-    if (redSelectTitle) redSelectTitle.textContent = "红队 · " + (match.red && match.red.name ? match.red.name : "红队");
+    if (blueTitle) blueTitle.textContent = match.blue && match.blue.name ? match.blue.name : "蓝队";
+    if (redTitle) redTitle.textContent = match.red && match.red.name ? match.red.name : "红队";
     var deviceStatuses = { online: 0, offline: 0, unassigned: 0 };
     document.querySelectorAll(".player").forEach(function (card) {
       var title = card.querySelector(".playerTop b");
@@ -4195,8 +4203,8 @@
     syncText("matchSyncHealth", "读取失败");
     var blueTitle = document.querySelector(".teamCard.blue .teamHead h2");
     var redTitle = document.querySelector(".teamCard.red .teamHead h2");
-    if (blueTitle) blueTitle.textContent = "蓝队 · 未读取真实账号";
-    if (redTitle) redTitle.textContent = "红队 · 未读取真实账号";
+    if (blueTitle) blueTitle.textContent = "蓝队";
+    if (redTitle) redTitle.textContent = "红队";
     document.querySelectorAll(".player").forEach(function (card) {
       var title = card.querySelector(".playerTop b");
       var slot = title ? normalizeSlot(String(title.textContent).split("·")[0]) : "";
@@ -4290,8 +4298,7 @@
       row.style.cssText = "margin-top:10px;display:flex;align-items:center;gap:8px";
       row.innerHTML =
         '<label style="font-size:12px;opacity:.85;white-space:nowrap">机器鱼</label>' +
-        '<select id="fishAssignSelect" style="flex:1;min-width:0;padding:6px 8px;border-radius:6px;' +
-        'background:#0b1b2e;color:#dff2ff;border:1px solid rgba(120,200,255,.35);font-size:12px"></select>' +
+        '<select id="fishAssignSelect" style="flex:1;min-width:0;padding:6px 8px;border-radius:6px;background:#0b1b2e;color:#dff2ff;border:1px solid rgba(120,200,255,.35);font-size:12px"></select>' +
         '<span id="fishAssignHint" style="font-size:11px;opacity:.7;white-space:nowrap"></span>';
       step.appendChild(row);
     }
@@ -4405,7 +4412,7 @@
     if (selectPlayer && selectPlayer.getAttribute("data-slot")) {
       var pickedSlot = selectPlayer.getAttribute("data-slot");
       setTimeout(function () { injectFishSelect(pickedSlot); }, 60);
-      return false;   // 保留原型自身的签到弹窗流程
+      return false;
     }
     if (target.closest("#confirmBtn")) {
       event.preventDefault();
@@ -4420,12 +4427,10 @@
         if (confirmButton) confirmButton.disabled = true;
         var chain = Promise.resolve();
         if (deviceId) {
-          // 先建立归属，再记录签到
           chain = chain.then(function () {
             return refereeAction("assign", { side: side, slot: slot, deviceId: deviceId }, true);
           });
         } else {
-          // 选择“暂不分配”即解除该席位的机器鱼归属
           chain = chain.then(function () {
             return refereeAction("unassign", { side: side, slot: slot }, true);
           });
@@ -4438,7 +4443,6 @@
           setBadge(slot + " 的选手与机器鱼分配已保存", "ok");
           return refreshFishAssignments();
         }).catch(function () {
-          // 保持弹窗打开，让裁判修正选择；错误已由 refereeAction 展示。
         }).finally(function () {
           if (confirmButton) confirmButton.disabled = false;
         });

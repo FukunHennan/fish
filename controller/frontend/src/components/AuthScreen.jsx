@@ -11,7 +11,7 @@ export default function AuthScreen({ onAuthenticated, bootstrap }) {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [remember, setRemember] = useState(true);
-  const [feedback, setFeedback] = useState("请使用已创建的裁判账号或战队账号登录。");
+  const [feedback, setFeedback] = useState("请输入已分配的账号和密码。");
   const [busy, setBusy] = useState(false);
 
   async function submitAuth(event) {
@@ -78,7 +78,7 @@ export default function AuthScreen({ onAuthenticated, bootstrap }) {
               {mode === "bootstrap" ? <div className="auth-two-col">
                 <label className="auth-field"><span>姓名</span><input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" placeholder="请输入姓名" /></label>
                 <label className="auth-field"><span>账号</span><input value={email} maxLength={20} onChange={(event) => setEmail(event.target.value)} autoComplete="username" placeholder="最多 20 个字符" /></label>
-              </div> : <label className="auth-field"><span>账号</span><input value={email} maxLength={20} onChange={(event) => setEmail(event.target.value)} autoComplete="username" placeholder="1、2 或 3" /></label>}
+              </div> : <label className="auth-field"><span>账号</span><input value={email} maxLength={20} onChange={(event) => setEmail(event.target.value)} autoComplete="username" placeholder="输入账号" /></label>}
               {mode === "bootstrap" ? <div className="auth-two-col">
                 <label className="auth-field"><span>设置密码</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" /></label>
                 <label className="auth-field"><span>确认密码</span><input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" /></label>

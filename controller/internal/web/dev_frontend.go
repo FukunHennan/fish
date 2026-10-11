@@ -42,6 +42,14 @@ func frontendHandler() http.Handler {
 	return http.FileServer(http.FS(staticFiles))
 }
 
+func embeddedFrontendHandler() http.Handler {
+	staticFiles, err := fs.Sub(frontendFiles, "dist")
+	if err != nil {
+		panic(err)
+	}
+	return http.FileServer(http.FS(staticFiles))
+}
+
 func developmentFrontendHandler(root string) http.Handler {
 	root, err := filepath.Abs(root)
 	if err != nil {
@@ -99,6 +107,8 @@ func developmentFrontendHandler(root string) http.Handler {
 func developmentFrontendPath(root, requestPath string) (string, bool) {
 	var relative string
 	switch {
+	case requestPath == "/index.html" || requestPath == "/console.html":
+		relative = "index.html"
 	case requestPath == "/competition.html":
 		relative = "competition.html"
 	case strings.HasPrefix(requestPath, "/competition/"):
@@ -115,7 +125,7 @@ func developmentFrontendPath(root, requestPath string) (string, bool) {
 
 func developmentFrontendRevision(root string) (string, error) {
 	hash := sha256.New()
-	paths := []string{filepath.Join(root, "competition.html"), filepath.Join(root, "public", "competition")}
+	paths := []string{filepath.Join(root, "index.html"), filepath.Join(root, "competition.html"), filepath.Join(root, "src"), filepath.Join(root, "public", "competition")}
 	for _, path := range paths {
 		err := filepath.WalkDir(path, func(current string, entry fs.DirEntry, walkErr error) error {
 			if walkErr != nil {

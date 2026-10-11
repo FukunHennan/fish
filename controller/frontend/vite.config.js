@@ -11,6 +11,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         competition: resolve(__dirname, "competition.html"),
+        console: resolve(__dirname, "index.html"),
       },
     },
   },

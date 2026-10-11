@@ -246,6 +246,13 @@ func competitionSideForUser(user authUser) string {
 	}
 }
 
+func (a *authStore) userByEmail(email string) (authUser, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	user, ok := a.users[normalizeLoginIdentifier(email)]
+	return user, ok
+}
+
 func isRefereeAccount(user authUser) bool {
 	return user.Status == "active" && user.Role == "Admin" &&
 		strings.EqualFold(strings.TrimSpace(user.Email), "3")

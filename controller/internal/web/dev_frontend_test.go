@@ -18,6 +18,9 @@ func TestDevelopmentFrontendServesSourcesAndInjectsReloadClient(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "competition.html"), []byte("<html><body>赛事页</body></html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(root, "index.html"), []byte("<html><body>管理台</body></html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(competitionDir, "adapter.js"), []byte("window.ready=true"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -33,6 +36,11 @@ func TestDevelopmentFrontendServesSourcesAndInjectsReloadClient(t *testing.T) {
 	handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/competition/adapter.js", nil))
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "window.ready") {
 		t.Fatalf("development asset = %d %s", w.Code, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/console.html", nil))
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "管理台") {
+		t.Fatalf("development console = %d %s", w.Code, w.Body.String())
 	}
 }
 

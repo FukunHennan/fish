@@ -224,19 +224,30 @@ func TestCompetitionFlow(t *testing.T) {
 	if entry["blueName"] != "海洋先锋队" || entry["blueScore"].(float64) != 3 {
 		t.Fatalf("记录内容异常: %+v", entry)
 	}
-	// 赛后更正应同时更新当前比赛和已保存的历史记录。
-	call(http.MethodPut, "/api/competition/match", `{"matchNo":"第 08 场（更正）"}`)
-	call(http.MethodPost, "/api/competition/match/score", `{"side":"blue","delta":-2}`)
-	corrected := call(http.MethodGet, "/api/competition/records", "")
-	correctedEntry := corrected["records"].([]any)[0].(map[string]any)
-	if correctedEntry["matchNo"] != "第 08 场（更正）" || correctedEntry["blueScore"].(float64) != 1 {
-		t.Fatalf("赛后更正未同步到历史记录: %+v", correctedEntry)
+	events, ok := entry["events"].([]any)
+	if !ok || len(events) != 2 {
+		t.Fatalf("历史记录应保留两条计分事件: %+v", entry["events"])
+	}
+	if events[0].(map[string]any)["side"] != "blue" || events[1].(map[string]any)["side"] != "red" {
+		t.Fatalf("历史计分事件队伍异常: %+v", events)
+	}
+	if events[0].(map[string]any)["time"] != "00:00" {
+		t.Fatalf("计分事件应从 00:00 正向计时: %+v", events[0])
+	}
+	// 结束比赛后自动切换到下一场，上一场记录应保留原比分。
+	current := matchOf(call(http.MethodGet, "/api/competition/match", ""))
+	if current["state"] != matchStateReady || current["blue"].(map[string]any)["score"].(float64) != 0 {
+		t.Fatalf("结束后未正确切换到新比赛: %+v", current)
 	}
 	if entry["videoUrl"] != "/api/vision/recordings/files/match-test.mp4" || entry["videoStatus"] != "saved" {
 		t.Fatalf("比赛记录应包含可回放录像: %+v", entry)
 	}
 	if len(recordingCalls) != 2 || recordingCalls[0] != "POST /recordings" || !strings.HasPrefix(recordingCalls[1], "DELETE /recordings/") {
 		t.Fatalf("比赛开始和结束应自动启停录像: %+v", recordingCalls)
+	}
+	deleted := call(http.MethodDelete, "/api/competition/records", `{"matchId":"`+entry["id"].(string)+`"}`)
+	if len(deleted["records"].([]any)) != 0 {
+		t.Fatalf("删除比赛记录后列表不应保留该记录: %+v", deleted)
 	}
 }
 
@@ -271,6 +282,31 @@ func TestCompetitionDoesNotStartWhenRecordingCannotStart(t *testing.T) {
 	_ = json.Unmarshal(current.Body.Bytes(), &payload)
 	if payload["running"] != false {
 		t.Fatalf("录像失败后计时器不应运行: %+v", payload)
+	}
+}
+
+func TestCompetitionAutomaticallyFinishesWhenDurationExpires(t *testing.T) {
+	t.Setenv("FISH_AUTH_DISABLED", "true")
+	path := filepath.Join(t.TempDir(), "competition.json")
+	store := newCompetitionStore(path)
+	store.Match = newMatchBlueRed("第 09 场", "学生组", "A 赛场")
+	store.Match.State = matchStateRunning
+	store.Match.DurationMs = 1000
+	store.Match.Blue.Score = 7
+	store.started = time.Now().Add(-2 * time.Second)
+	store.running = true
+	server := &server{competition: store}
+
+	recorder := httptest.NewRecorder()
+	server.competitionAPI(recorder, httptest.NewRequest(http.MethodGet, "/api/competition/match", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("超时比赛读取失败: %d %s", recorder.Code, recorder.Body.String())
+	}
+	if store.Match.State != matchStateReady || store.Match.Blue.Score != 0 {
+		t.Fatalf("超时后没有切换到新比赛: %+v", store.Match)
+	}
+	if len(store.Records) != 1 || store.Records[0].BlueScore != 7 || store.Records[0].ElapsedMs != 1000 {
+		t.Fatalf("超时比赛记录不完整: %+v", store.Records)
 	}
 }
 

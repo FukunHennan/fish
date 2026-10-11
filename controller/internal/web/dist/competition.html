@@ -27,7 +27,7 @@
 </div>
 <div id="loginGate" class="loginGate" hidden>
   <form id="loginForm" class="loginCard">
-    <h2>登录赛事平台</h2><p>账号 1 进入蓝队选手端，2 进入红队选手端，3 进入裁判端。</p>
+    <h2>登录 FISH CONTROL</h2><p>账号 1、2 进入选手端，裁判账号进入裁判端，其他管理员进入管理控制台。</p>
     <label>账号<input id="accountInput" maxlength="20" autocomplete="username" aria-label="账号"></label>
     <label>密码<input id="passwordInput" type="password" autocomplete="current-password" aria-label="密码"></label>
     <button id="loginButton" type="submit">登录</button>
@@ -35,7 +35,7 @@
   </form>
 </div>
 <script>
-const SRC={player:"/competition/player_interface.html",referee:"/competition/referee_interface.html"};
+const SRC={player:"/competition/player_interface.html",referee:"/competition/referee_interface.html",admin:"/console.html"};
 const frame=document.getElementById("appFrame");
 const playerBtn=document.getElementById("playerBtn");
 const refBtn=document.getElementById("refBtn");
@@ -53,7 +53,7 @@ let checking=false;
 let authRevision=0;
 function routeFor(user){
   if(user?.role==="User"&&(user.email==="1"||user.email==="2"))return "player";
-  if(user?.role==="Admin"&&user.email==="3")return "referee";
+  if(user?.role==="Admin")return user.email==="3"?"referee":"admin";
   return null;
 }
 function markerKey(user){return "fish-active-login:"+user.email}
@@ -86,7 +86,7 @@ function enter(user,takeover=false){
   try{localStorage.setItem(markerKey(user),JSON.stringify({tabId,email:user.email}))}catch(_){}
   activeUser=user;
   loginGate.hidden=true;
-  accountBadge.textContent=(user.email==="1"?"蓝队":user.email==="2"?"红队":"裁判")+" · "+user.email;
+  accountBadge.textContent=(route==="player"?(user.email==="1"?"蓝队":"红队"):route==="referee"?"裁判":"管理员")+" · "+user.email;
   accountBadge.hidden=false;
   playerBtn.hidden=route!=="player";
   refBtn.hidden=route!=="referee";
@@ -144,7 +144,7 @@ window.addEventListener("storage",event=>{
   if(activeUser&&event.key===markerKey(activeUser)&&!ownsTab(activeUser))showLogin("该账号已在另一标签页登录");
 });
 window.addEventListener("message",event=>{
-  if(event.origin===location.origin&&event.source===frame.contentWindow&&event.data?.type==="fish-auth-expired")checkSession();
+  if(event.origin===location.origin&&((event.source===frame.contentWindow)||event.source===window)&&event.data?.type==="fish-auth-expired")checkSession();
 });
 document.addEventListener("visibilitychange",()=>{if(!document.hidden)checkSession()});
 playerBtn.onclick=()=>checkSession();

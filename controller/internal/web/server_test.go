@@ -95,7 +95,7 @@ func TestHealthAndDashboard(t *testing.T) {
 
 func TestLegacyFrontendAliasesRedirectToCanonicalCompetitionUI(t *testing.T) {
 	handler := NewHandler(hub.New(), testKey())
-	for _, path := range []string{"/", "/console.html", "/index.html"} {
+	for _, path := range []string{"/", "/index.html"} {
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
 		if w.Code != http.StatusTemporaryRedirect || w.Header().Get("Location") != "/competition.html" {

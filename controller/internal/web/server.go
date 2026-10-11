@@ -225,12 +225,11 @@ func newHandler(h *hub.Hub, key []byte, apiAddress, streamAddress, firmwarePath 
 	if err != nil {
 		panic(err)
 	}
-	// Serve one public application. The competition shell is the canonical UI;
-	// old root/console/index aliases redirect there instead of exposing a
-	// second operator interface.
+	// Serve the competition shell and the role-protected management console.
 	// http.FileServer resolves index.html for directories and rejects paths
 	// that escape the embedded FS.
 	staticFrontend := frontendHandler()
+	adminFrontend := embeddedFrontendHandler()
 	m.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// The competition shell, iframe pages, and adapter script are deployed
 		// together. Do not let a public CDN/browser keep an older bundle after a
@@ -256,9 +255,37 @@ func newHandler(h *hub.Hub, key []byte, apiAddress, streamAddress, firmwarePath 
 				return
 			}
 		}
+		if r.URL.Path == "/console.html" {
+			user, authenticated := s.currentUser(r)
+			if !authenticated {
+				http.Error(w, "请先登录管理员账号", http.StatusUnauthorized)
+				return
+			}
+			if !canAdmin(user) || isRefereeAccount(user) {
+				http.Error(w, "仅管理账号可进入管理控制台", http.StatusForbidden)
+				return
+			}
+			w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
+		}
+		if strings.HasPrefix(r.URL.Path, "/assets/") {
+			adminFrontend.ServeHTTP(w, r)
+			return
+		}
 		switch r.URL.Path {
-		case "/", "/console.html", "/index.html":
+		case "/":
 			http.Redirect(w, r, "/competition.html", http.StatusTemporaryRedirect)
+		case "/console.html":
+			request := r.Clone(r.Context())
+			request.URL.Path = "/"
+			adminFrontend.ServeHTTP(w, request)
+			return
+		case "/index.html":
+			if strings.TrimSpace(os.Getenv("FISH_FRONTEND_DIR")) == "" {
+				http.Redirect(w, r, "/competition.html", http.StatusTemporaryRedirect)
+			} else {
+				staticFrontend.ServeHTTP(w, r)
+			}
+			return
 		default:
 			staticFrontend.ServeHTTP(w, r)
 		}

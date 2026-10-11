@@ -2,6 +2,7 @@ package web
 
 import (
 	"fish-controller/internal/hub"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -70,6 +71,66 @@ func TestAccountsOpenOnlyTheirAssignedPage(t *testing.T) {
 				t.Fatalf("账号 %s 执行裁判操作得到 %d，预期 %d", account.login, operationResponse.Code, account.status)
 			}
 		}
+	}
+}
+
+func TestAdminConsoleIsRestrictedToNonRefereeAdmins(t *testing.T) {
+	t.Setenv("FISH_AUTH_DISABLED", "false")
+	t.Setenv("FISH_AUTH_USERS", filepath.Join(t.TempDir(), "users.json"))
+	t.Setenv("FISH_FRONTEND_DIR", "")
+	store := newAuthStore(authStorePath())
+	for _, account := range []struct{ name, login, role string }{
+		{"裁判", "3", "Admin"}, {"管理员", "4", "Admin"}, {"选手", "1", "User"},
+	} {
+		if _, err := store.createUser(account.name, account.login, account.login, account.role); err != nil {
+			t.Fatal(err)
+		}
+	}
+	handler := NewHandler(hub.New(), testKey())
+	for _, account := range []struct {
+		login  string
+		status int
+	}{
+		{"3", http.StatusForbidden}, {"4", http.StatusOK}, {"1", http.StatusForbidden},
+	} {
+		login := httptest.NewRecorder()
+		handler.ServeHTTP(login, httptest.NewRequest(http.MethodPost, "/api/auth/login",
+			strings.NewReader(`{"email":"`+account.login+`","password":"`+account.login+`"}`)))
+		if login.Code != http.StatusOK {
+			t.Fatalf("账号 %s 登录失败: %d", account.login, login.Code)
+		}
+		server := httptest.NewServer(handler)
+		client := server.Client()
+		client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		httpRequest, err := http.NewRequest(http.MethodGet, server.URL+"/console.html", nil)
+		if err != nil {
+			server.Close()
+			t.Fatal(err)
+		}
+		httpRequest.AddCookie(login.Result().Cookies()[0])
+		response, err := client.Do(httpRequest)
+		if err != nil {
+			server.Close()
+			t.Fatal(err)
+		}
+		if response.StatusCode != account.status {
+			t.Fatalf("账号 %s 访问管理控制台得到 %d，预期 %d，Location=%q", account.login, response.StatusCode, account.status, response.Header.Get("Location"))
+		}
+		if account.login == "4" {
+			body, readErr := io.ReadAll(response.Body)
+			if readErr != nil {
+				server.Close()
+				t.Fatal(readErr)
+			}
+			response.Body.Close()
+			if !strings.Contains(string(body), "console-") {
+				server.Close()
+				t.Fatal("管理员访问没有返回管理控制台页面")
+			}
+		} else {
+			response.Body.Close()
+		}
+		server.Close()
 	}
 }
 

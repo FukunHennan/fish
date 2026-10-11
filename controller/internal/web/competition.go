@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -70,10 +71,11 @@ type competitionMatch struct {
 }
 
 type competitionEvent struct {
-	Side  string `json:"side"`
-	Label string `json:"label"`
-	Delta int    `json:"delta"`
-	Time  string `json:"time"`
+	Side      string `json:"side"`
+	Label     string `json:"label"`
+	Delta     int    `json:"delta"`
+	Time      string `json:"time"`
+	ElapsedMs int64  `json:"elapsedMs,omitempty"`
 }
 
 func valueOrZero(value *int) int {
@@ -84,26 +86,27 @@ func valueOrZero(value *int) int {
 }
 
 type competitionRecord struct {
-	ID                 string  `json:"id"`
-	MatchNo            string  `json:"matchNo"`
-	Group              string  `json:"group"`
-	Venue              string  `json:"venue"`
-	BlueName           string  `json:"blueName"`
-	RedName            string  `json:"redName"`
-	BlueScore          int     `json:"blueScore"`
-	RedScore           int     `json:"redScore"`
-	ElapsedMs          int64   `json:"elapsedMs"`
-	Finished           string  `json:"finishedAt"`
-	StartedAt          string  `json:"startedAt,omitempty"`
-	VideoURL           string  `json:"videoUrl,omitempty"`
-	VideoStatus        string  `json:"videoStatus"`
-	VideoDurationMs    int64   `json:"videoDurationMs,omitempty"`
-	VideoFrameCount    int64   `json:"videoFrameCount,omitempty"`
-	VideoDroppedFrames int64   `json:"videoDroppedFrames,omitempty"`
-	VideoAverageFPS    float64 `json:"videoAverageFps,omitempty"`
-	VideoWidth         int     `json:"videoWidth,omitempty"`
-	VideoHeight        int     `json:"videoHeight,omitempty"`
-	VideoError         string  `json:"videoError,omitempty"`
+	ID                 string             `json:"id"`
+	MatchNo            string             `json:"matchNo"`
+	Group              string             `json:"group"`
+	Venue              string             `json:"venue"`
+	BlueName           string             `json:"blueName"`
+	RedName            string             `json:"redName"`
+	BlueScore          int                `json:"blueScore"`
+	RedScore           int                `json:"redScore"`
+	Events             []competitionEvent `json:"events,omitempty"`
+	ElapsedMs          int64              `json:"elapsedMs"`
+	Finished           string             `json:"finishedAt"`
+	StartedAt          string             `json:"startedAt,omitempty"`
+	VideoURL           string             `json:"videoUrl,omitempty"`
+	VideoStatus        string             `json:"videoStatus"`
+	VideoDurationMs    int64              `json:"videoDurationMs,omitempty"`
+	VideoFrameCount    int64              `json:"videoFrameCount,omitempty"`
+	VideoDroppedFrames int64              `json:"videoDroppedFrames,omitempty"`
+	VideoAverageFPS    float64            `json:"videoAverageFps,omitempty"`
+	VideoWidth         int                `json:"videoWidth,omitempty"`
+	VideoHeight        int                `json:"videoHeight,omitempty"`
+	VideoError         string             `json:"videoError,omitempty"`
 }
 
 type competitionStore struct {
@@ -119,7 +122,7 @@ type competitionStore struct {
 // 已结束比赛允许裁判更正名称和比分，对应的历史记录也要保持一致。
 func (c *competitionStore) syncFinishedRecordLocked() {
 	match := c.Match
-	if match == nil || match.State != matchStateFinished {
+	if match == nil {
 		return
 	}
 	for i := range c.Records {
@@ -134,6 +137,7 @@ func (c *competitionStore) syncFinishedRecordLocked() {
 		record.RedName = match.Red.Name
 		record.BlueScore = match.Blue.Score
 		record.RedScore = match.Red.Score
+		record.Events = append([]competitionEvent(nil), match.Events...)
 		return
 	}
 }
@@ -187,6 +191,95 @@ func (c *competitionStore) elapsedLocked() int64 {
 	return total
 }
 
+func maxInt64(left, right int64) int64 {
+	if left > right {
+		return left
+	}
+	return right
+}
+
+func formatCompetitionClock(milliseconds int64) string {
+	seconds := maxInt64(0, milliseconds) / 1000
+	return fmt.Sprintf("%02d:%02d", seconds/60, seconds%60)
+}
+
+func (s *server) finishCompetitionLocked(ctx context.Context, store *competitionStore, operator string) {
+	match := store.Match
+	if match == nil || match.State == matchStateFinished {
+		return
+	}
+	if store.running {
+		match.ElapsedMs = store.elapsedLocked()
+		if match.DurationMs > 0 && match.ElapsedMs > match.DurationMs {
+			match.ElapsedMs = match.DurationMs
+		}
+		store.running = false
+	}
+	var recording competitionRecordingResult
+	if match.RecordingState == "recording" && match.RecordingID != "" {
+		result, err := s.stopCompetitionRecording(ctx, match.RecordingID, false)
+		if err != nil {
+			match.RecordingState = "error"
+			match.RecordingError = err.Error()
+		} else {
+			recording = result
+			match.RecordingState = "saved"
+			match.RecordingError = ""
+		}
+	}
+	match.State = matchStateFinished
+	match.Operator = operator
+	match.UpdatedAt = time.Now().Format(time.RFC3339)
+	store.Records = append([]competitionRecord{{
+		ID: match.ID, MatchNo: match.MatchNo, Group: match.Group, Venue: match.Venue,
+		BlueName: match.Blue.Name, RedName: match.Red.Name,
+		BlueScore: match.Blue.Score, RedScore: match.Red.Score,
+		Events:    append([]competitionEvent(nil), match.Events...),
+		ElapsedMs: match.ElapsedMs, Finished: time.Now().Format(time.RFC3339),
+		StartedAt: match.StartedAt,
+		VideoURL:  recordingPlaybackURL(recording.FileName), VideoStatus: match.RecordingState,
+		VideoDurationMs: recording.DurationMs, VideoFrameCount: recording.FrameCount,
+		VideoDroppedFrames: recording.DroppedFrames, VideoAverageFPS: recording.AverageFPS,
+		VideoWidth: recording.Width, VideoHeight: recording.Height,
+		VideoError: match.RecordingError,
+	}}, store.Records...)
+	if len(store.Records) > 200 {
+		store.Records = store.Records[:200]
+	}
+	if len(store.FinishedNoticeClaims) > 200 {
+		retained := make(map[string]bool, len(store.Records))
+		for _, record := range store.Records {
+			retained[record.ID] = true
+		}
+		for matchID := range store.FinishedNoticeClaims {
+			if !retained[matchID] {
+				delete(store.FinishedNoticeClaims, matchID)
+			}
+		}
+	}
+	_ = store.saveLocked()
+	match.MatchNo = incrementMatchNumber(match.MatchNo)
+	match.ID = fmt.Sprintf("match-%d", time.Now().UnixNano())
+	match.State = matchStateReady
+	match.Blue.Score, match.Red.Score, match.ElapsedMs = 0, 0, 0
+	match.Events = nil
+	match.StartedAt, match.RecordingID, match.RecordingState, match.RecordingStartedAt, match.RecordingError = "", "", "", "", ""
+	match.UpdatedAt = time.Now().Format(time.RFC3339)
+	_ = store.saveLocked()
+}
+
+func syncCompetitionTeamNameForUser(match *competitionMatch, user authUser) bool {
+	if match == nil || strings.TrimSpace(user.Name) == "" {
+		return false
+	}
+	team := match.teamForSide(competitionSideForUser(user))
+	if team == nil || team.Name == user.Name {
+		return false
+	}
+	team.Name = user.Name
+	return true
+}
+
 func newMatchBlueRed(matchNo, group, venue string) *competitionMatch {
 	return &competitionMatch{
 		ID:         fmt.Sprintf("match-%d", time.Now().UnixNano()),
@@ -216,11 +309,11 @@ func newDevelopmentMatch() *competitionMatch {
 		DurationMs: 180000,
 		UpdatedAt:  now,
 		Operator:   "local@fish",
-		Blue: competitionTeam{Side: "blue", Name: "海洋先锋队", Players: []competitionPlayer{
+		Blue: competitionTeam{Side: "blue", Name: "蓝队", Players: []competitionPlayer{
 			{Slot: "B1", Name: "陈同学", Email: "stu-24018@fish.local", SignedIn: true, SignedAt: now},
 			{Slot: "B2", Name: "李同学", Email: "stu-24027@fish.local", SignedIn: true, SignedAt: now},
 		}},
-		Red: competitionTeam{Side: "red", Name: "深海动力队", Players: []competitionPlayer{
+		Red: competitionTeam{Side: "red", Name: "红队", Players: []competitionPlayer{
 			{Slot: "R1", Name: "王同学", Email: "stu-24031@fish.local", SignedIn: true, SignedAt: now},
 			{Slot: "R2", Name: "赵同学", Email: "stu-24039@fish.local", SignedIn: true, SignedAt: now},
 		}},
@@ -257,6 +350,17 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	teamNameChanged := syncCompetitionTeamNameForUser(store.Match, user)
+	if s.auth != nil && s.authActive() && store.Match != nil {
+		for _, email := range []string{"1", "2"} {
+			if account, ok := s.auth.userByEmail(email); ok {
+				teamNameChanged = syncCompetitionTeamNameForUser(store.Match, account) || teamNameChanged
+			}
+		}
+	}
+	if teamNameChanged {
+		_ = store.saveLocked()
+	}
 
 	action := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/competition/"), "/")
 	// 形如 match/signin 的子操作只取最后一段作为动作名
@@ -268,7 +372,9 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		switch action {
 		case "match":
-			if s.clearUnavailableReadinessLocked(store) {
+			if store.Match != nil && store.running && store.Match.DurationMs > 0 && store.elapsedLocked() >= store.Match.DurationMs {
+				s.finishCompetitionLocked(r.Context(), store, "system")
+			} else if s.clearUnavailableReadinessLocked(store) {
 				store.saveLocked()
 			}
 			writeJSONValue(w, s.matchSnapshotLocked(store))
@@ -288,8 +394,8 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if r.Method != http.MethodPost && r.Method != http.MethodPut {
-		http.Error(w, "仅支持 GET/POST/PUT", http.StatusMethodNotAllowed)
+	if r.Method != http.MethodPost && r.Method != http.MethodPut && r.Method != http.MethodDelete {
+		http.Error(w, "仅支持 GET/POST/PUT/DELETE", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -335,6 +441,40 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch action {
+	case "records":
+		if r.Method != http.MethodDelete {
+			http.Error(w, "比赛记录仅支持 DELETE", http.StatusMethodNotAllowed)
+			return
+		}
+		recordID := strings.TrimSpace(input.MatchID)
+		if recordID == "" {
+			recordID = strings.TrimSpace(r.URL.Query().Get("recordId"))
+		}
+		if recordID == "" {
+			http.Error(w, "缺少比赛记录 ID", http.StatusBadRequest)
+			return
+		}
+		found := false
+		filtered := make([]competitionRecord, 0, len(store.Records))
+		for _, record := range store.Records {
+			if record.ID == recordID {
+				found = true
+				continue
+			}
+			filtered = append(filtered, record)
+		}
+		if !found {
+			http.Error(w, "比赛记录不存在", http.StatusNotFound)
+			return
+		}
+		store.Records = filtered
+		delete(store.FinishedNoticeClaims, recordID)
+		if err := store.saveLocked(); err != nil {
+			http.Error(w, "比赛记录删除失败", http.StatusInternalServerError)
+			return
+		}
+		writeJSONValue(w, map[string]any{"records": store.Records})
+		return
 	case "finish-notice":
 		match := store.Match
 		side := competitionSideForUser(user)
@@ -713,7 +853,12 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 				label = "越界"
 			}
 		}
-		match.Events = append(match.Events, competitionEvent{Side: input.Side, Label: label, Delta: valueOrZero(input.Delta), Time: time.Now().Format("15:04:05")})
+		eventElapsed := store.elapsedLocked()
+		match.Events = append(match.Events, competitionEvent{
+			Side: input.Side, Label: label, Delta: valueOrZero(input.Delta),
+			Time:      formatCompetitionClock(maxInt64(0, eventElapsed)),
+			ElapsedMs: eventElapsed,
+		})
 		match.Operator = user.Email
 		match.UpdatedAt = time.Now().Format(time.RFC3339)
 		store.syncFinishedRecordLocked()
@@ -813,64 +958,7 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 			writeJSONValue(w, s.matchSnapshotLocked(store))
 			return
 		}
-		if store.running {
-			match.ElapsedMs = store.elapsedLocked()
-			store.running = false
-		}
-		var recording competitionRecordingResult
-		var recordingErr error
-		if match.RecordingState == "recording" && match.RecordingID != "" {
-			recording, recordingErr = s.stopCompetitionRecording(r.Context(), match.RecordingID, false)
-			if recordingErr != nil {
-				match.RecordingState = "error"
-				match.RecordingError = recordingErr.Error()
-			} else {
-				match.RecordingState = "saved"
-				match.RecordingError = ""
-			}
-		}
-		match.State = matchStateFinished
-		match.UpdatedAt = time.Now().Format(time.RFC3339)
-		store.Records = append([]competitionRecord{{
-			ID:      match.ID,
-			MatchNo: match.MatchNo, Group: match.Group, Venue: match.Venue,
-			BlueName: match.Blue.Name, RedName: match.Red.Name,
-			BlueScore: match.Blue.Score, RedScore: match.Red.Score,
-			ElapsedMs: match.ElapsedMs, Finished: time.Now().Format(time.RFC3339),
-			StartedAt:          match.StartedAt,
-			VideoURL:           recordingPlaybackURL(recording.FileName),
-			VideoStatus:        match.RecordingState,
-			VideoDurationMs:    recording.DurationMs,
-			VideoFrameCount:    recording.FrameCount,
-			VideoDroppedFrames: recording.DroppedFrames,
-			VideoAverageFPS:    recording.AverageFPS,
-			VideoWidth:         recording.Width,
-			VideoHeight:        recording.Height,
-			VideoError:         match.RecordingError,
-		}}, store.Records...)
-		if len(store.Records) > 200 {
-			store.Records = store.Records[:200]
-		}
-		if len(store.FinishedNoticeClaims) > 200 {
-			retained := make(map[string]bool, len(store.Records))
-			for _, record := range store.Records {
-				retained[record.ID] = true
-			}
-			for matchID := range store.FinishedNoticeClaims {
-				if !retained[matchID] {
-					delete(store.FinishedNoticeClaims, matchID)
-				}
-			}
-		}
-		store.saveLocked()
-		match.MatchNo = incrementMatchNumber(match.MatchNo)
-		match.ID = fmt.Sprintf("match-%d", time.Now().UnixNano())
-		match.State = matchStateReady
-		match.Blue.Score, match.Red.Score, match.ElapsedMs = 0, 0, 0
-		match.Events = nil
-		match.StartedAt, match.RecordingID, match.RecordingState, match.RecordingStartedAt, match.RecordingError = "", "", "", "", ""
-		match.UpdatedAt = time.Now().Format(time.RFC3339)
-		store.saveLocked()
+		s.finishCompetitionLocked(r.Context(), store, user.Email)
 		writeJSONValue(w, s.matchSnapshotLocked(store))
 
 	default:
