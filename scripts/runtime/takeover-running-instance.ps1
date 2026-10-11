@@ -17,7 +17,8 @@ function Get-ProcessPath($process) {
 function Stop-ProcessTree([int] $processId, [string] $label) {
     if (-not (Get-Process -Id $processId -ErrorAction SilentlyContinue)) { return }
     Write-Output "[INFO] Stopping previous $label (PID $processId)..."
-    & taskkill.exe /PID $processId /T /F 2>$null | Out-Null
+    $taskkillOutput = cmd.exe /d /c "taskkill.exe /PID $processId /T /F >nul 2>&1"
+    if ($LASTEXITCODE -ne 0) { Write-Output "[INFO] Previous $label was already stopped." }
 }
 
 $processes = @(Get-CimInstance Win32_Process)

@@ -2333,11 +2333,11 @@ input:focus,select:focus{
   </aside>
   <section class="arenaCard panel"><div class="arenaHead"><h2>比赛画面</h2><span>原始视频</span></div><div class="arena" id="refereeMatchStage" aria-label="原始比赛视频"></div><div class="arenaFoot"><span>裁判全画面</span><span>视觉独立处理</span></div></section>
   <aside class="scoreSidePanel">
-   <section class="teamQuick panel"><div class="teamQuickHead"><h3 class="blueTxt">蓝队</h3><b id="blueQuick">0</b></div><div class="quickBtns"><button class="goalBtn" data-team="blue" data-score="10">⚽ 进球<br>+10</button><button class="assistBtn" data-team="blue" data-score="2">⇄ 配合<br>+2</button><button class="outBtn" data-team="blue" data-score="-2">⚠ 越界<br>-2</button></div></section>
-   <section class="teamQuick panel"><div class="teamQuickHead"><h3 class="redTxt">红队</h3><b id="redQuick">0</b></div><div class="quickBtns"><button class="goalBtn" data-team="red" data-score="10">⚽ 进球<br>+10</button><button class="assistBtn" data-team="red" data-score="2">⇄ 配合<br>+2</button><button class="outBtn" data-team="red" data-score="-2">⚠ 越界<br>-2</button></div></section>
+   <section class="teamQuick panel"><div class="teamQuickHead"><h3 class="blueTxt">蓝队</h3><b id="blueQuick">0</b></div><div class="quickBtns"><button class="goalBtn" data-team="blue" data-score="10" disabled>⚽ 进球<br>+10</button><button class="assistBtn" data-team="blue" data-score="2" disabled>⇄ 配合<br>+2</button><button class="outBtn" data-team="blue" data-score="-2" disabled>⚠ 越界<br>-2</button></div></section>
+   <section class="teamQuick panel"><div class="teamQuickHead"><h3 class="redTxt">红队</h3><b id="redQuick">0</b></div><div class="quickBtns"><button class="goalBtn" data-team="red" data-score="10" disabled>⚽ 进球<br>+10</button><button class="assistBtn" data-team="red" data-score="2" disabled>⇄ 配合<br>+2</button><button class="outBtn" data-team="red" data-score="-2" disabled>⚠ 越界<br>-2</button></div></section>
    <section class="events panel"><h3>计分记录</h3><div class="eventList" id="eventList"></div></section>
   </aside>
-  <section class="bottom"><section class="health panel"><div class="h"><span>签到</span><b id="matchSignupHealth">等待上报</b></div><div class="h"><span>设备</span><b id="matchDeviceHealth">等待上报</b></div><div class="h"><span>场地</span><b id="matchFieldHealth">待确认</b></div><div class="h"><span>同步</span><b id="matchSyncHealth">等待服务器</b></div></section><section class="controls panel"><button class="btn good" id="startBtn">开始比赛</button><button class="btn" id="pauseBtn">暂停比赛</button><button class="btn warn" id="endBtn">结束比赛</button></section></section>
+  <section class="bottom"><section class="health panel"><div class="h"><span>签到</span><b id="matchSignupHealth">等待上报</b></div><div class="h"><span>设备</span><b id="matchDeviceHealth">等待上报</b></div><div class="h"><span>场地</span><b id="matchFieldHealth">待确认</b></div><div class="h"><span>同步</span><b id="matchSyncHealth">等待服务器</b></div></section><section class="controls panel"><button class="btn good" id="startBtn">开始比赛</button><button class="btn warn" id="endBtn">结束比赛</button></section></section>
  </section>
 
  <section id="records" class="page records hidden">
@@ -2418,7 +2418,18 @@ const modal=$('modal'), modalTitle=$('modalTitle'), closeBtn=$('close'), selectS
 const avatar=$('avatar'), confirmName=$('confirmName'), confirmTeam=$('confirmTeam'), confirmId=$('confirmId'), confirmSlot=$('confirmSlot'), confirmFish=$('confirmFish'), back=$('back'), confirmBtn=$('confirmBtn');
 const lockCal=$('lockCal'), calNext=$('calNext'), preMatchHint=$('preMatchHint');
 const blueScore=$('blueScore'), blueQuick=$('blueQuick'), redScore=$('redScore'), redQuick=$('redQuick'), clock=$('clock'), clockState=$('clockState'), eventList=$('eventList');
-const startBtn=$('startBtn'), pauseBtn=$('pauseBtn'), endBtn=$('endBtn');
+window.renderLiveMatch=function(match,elapsedMs,running){
+ if(!match)return;
+ const active=match.state==='running';
+ document.querySelectorAll('[data-score]').forEach(button=>button.disabled=!active);
+ blueScore.textContent=match.blue.score; blueQuick.textContent=match.blue.score;
+ redScore.textContent=match.red.score; redQuick.textContent=match.red.score;
+ clockState.textContent=running?'比赛进行中':'';
+ eventList.innerHTML=(Array.isArray(match.events)?match.events:[]).map(event=>
+  '<div class="event '+(event.side==='red'?'red':'')+'"><small>'+String(event.time||'')+'</small><span>'+String(event.label||'计分')+'</span><b>'+(Number(event.delta)>0?'+':'')+String(event.delta||0)+'</b></div>'
+ ).join('');
+};
+const startBtn=$('startBtn'), endBtn=$('endBtn'), nextBtn=$('nextBtn');
 const historyCount=$('historyCount'), search=$('search'), groupFilter=$('groupFilter'), matchList=$('matchList');
 const histBlueTeam=$('histBlueTeam'), histBluePlayers=$('histBluePlayers'), histBlueScore=$('histBlueScore'), histRedScore=$('histRedScore'), histWinner=$('histWinner'), histRedTeam=$('histRedTeam'), histRedPlayers=$('histRedPlayers');
 const histNo=$('histNo'), histGroup=$('histGroup'), histArena=$('histArena'), histEnd=$('histEnd'), hbg=$('hbg'), hba=$('hba'), hbo=$('hbo'), hrg=$('hrg'), hra=$('hra'), hro=$('hro');
@@ -2486,11 +2497,17 @@ function compactStamp(d=new Date()){
  const p=n=>String(n).padStart(2,'0');
  return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
 }
-function unavailableCompetitionFallback(){toast('真实比赛服务暂不可用')}
-startBtn.onclick=unavailableCompetitionFallback;
-pauseBtn.onclick=unavailableCompetitionFallback;
-endBtn.onclick=unavailableCompetitionFallback;
-document.querySelectorAll('[data-score]').forEach(button=>button.onclick=unavailableCompetitionFallback);
+function unavailableCompetitionFallback(){toast('比赛尚未开始')}
+startBtn.onclick=()=>window.fishCompetitionRefereeAction?window.fishCompetitionRefereeAction('clock',{action:'start'}):unavailableCompetitionFallback();
+endBtn.onclick=()=>window.fishCompetitionRefereeAction?window.fishCompetitionRefereeAction('finish'):unavailableCompetitionFallback();
+
+document.querySelectorAll('[data-score]').forEach(button=>button.addEventListener('click',()=>{
+ const side=button.dataset.team;
+ const delta=Number(button.dataset.score);
+ if(!window.fishCompetitionRefereeAction)return unavailableCompetitionFallback();
+ window.fishCompetitionRefereeAction('score',{side,delta});
+}));
+
 
 function hw(m){return m.blue.score>m.red.score?'蓝队获胜':m.red.score>m.blue.score?'红队获胜':'平局'}
 function renderHistory(){const q=search.value.toLowerCase(),g=groupFilter.value;const list=history.filter(m=>(g==='all'||m.group===g)&&(!q||(m.no+m.blue.team+m.red.team).toLowerCase().includes(q)));historyCount.textContent=list.length+' 场';matchList.innerHTML=list.length?list.map(m=>`<button class="matchItem ${m.id===historySelected?'active':''}" data-id="${m.id}"><div class="matchTop"><b>${m.no} · ${m.group}</b><span>${m.date}</span></div><div class="matchTeams"><span class="blue">${m.blue.team}</span><strong>${m.blue.score}:${m.red.score}</strong><span class="red">${m.red.team}</span></div></button>`).join(''):'<div class="deviceOverviewEmpty"><b>暂无真实比赛记录</b><span>完成并保存比赛后将在此显示</span></div>';document.querySelectorAll('.matchItem').forEach(b=>b.onclick=()=>{

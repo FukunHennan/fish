@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -45,26 +46,41 @@ type competitionTeam struct {
 }
 
 type competitionMatch struct {
-	ID                 string          `json:"id"`
-	MatchNo            string          `json:"matchNo"`
-	Group              string          `json:"group"`
-	Venue              string          `json:"venue"`
-	State              string          `json:"state"`
-	Blue               competitionTeam `json:"blue"`
-	Red                competitionTeam `json:"red"`
-	ElapsedMs          int64           `json:"elapsedMs"`
-	RunningIf          bool            `json:"-"`
-	StartedAt          string          `json:"startedAt,omitempty"`
-	UpdatedAt          string          `json:"updatedAt"`
-	Operator           string          `json:"operator,omitempty"`
-	RecordingID        string          `json:"recordingId,omitempty"`
-	RecordingState     string          `json:"recordingState,omitempty"`
-	RecordingStartedAt string          `json:"recordingStartedAt,omitempty"`
-	RecordingError     string          `json:"recordingError,omitempty"`
-	FieldWidthCm       float64         `json:"fieldWidthCm,omitempty"`
-	FieldHeightCm      float64         `json:"fieldHeightCm,omitempty"`
-	FieldLocked        bool            `json:"fieldLocked"`
-	DurationMs         int64           `json:"durationMs"`
+	ID                 string             `json:"id"`
+	MatchNo            string             `json:"matchNo"`
+	Group              string             `json:"group"`
+	Venue              string             `json:"venue"`
+	State              string             `json:"state"`
+	Blue               competitionTeam    `json:"blue"`
+	Red                competitionTeam    `json:"red"`
+	ElapsedMs          int64              `json:"elapsedMs"`
+	RunningIf          bool               `json:"-"`
+	StartedAt          string             `json:"startedAt,omitempty"`
+	UpdatedAt          string             `json:"updatedAt"`
+	Operator           string             `json:"operator,omitempty"`
+	RecordingID        string             `json:"recordingId,omitempty"`
+	RecordingState     string             `json:"recordingState,omitempty"`
+	RecordingStartedAt string             `json:"recordingStartedAt,omitempty"`
+	RecordingError     string             `json:"recordingError,omitempty"`
+	FieldWidthCm       float64            `json:"fieldWidthCm,omitempty"`
+	FieldHeightCm      float64            `json:"fieldHeightCm,omitempty"`
+	FieldLocked        bool               `json:"fieldLocked"`
+	DurationMs         int64              `json:"durationMs"`
+	Events             []competitionEvent `json:"events,omitempty"`
+}
+
+type competitionEvent struct {
+	Side  string `json:"side"`
+	Label string `json:"label"`
+	Delta int    `json:"delta"`
+	Time  string `json:"time"`
+}
+
+func valueOrZero(value *int) int {
+	if value == nil {
+		return 0
+	}
+	return *value
 }
 
 type competitionRecord struct {
@@ -686,6 +702,18 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 		if team.Score < 0 {
 			team.Score = 0
 		}
+		label := "计分"
+		if input.Delta != nil {
+			switch *input.Delta {
+			case 10:
+				label = "进球"
+			case 2:
+				label = "配合"
+			case -2:
+				label = "越界"
+			}
+		}
+		match.Events = append(match.Events, competitionEvent{Side: input.Side, Label: label, Delta: valueOrZero(input.Delta), Time: time.Now().Format("15:04:05")})
 		match.Operator = user.Email
 		match.UpdatedAt = time.Now().Format(time.RFC3339)
 		store.syncFinishedRecordLocked()
@@ -756,6 +784,25 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 		store.saveLocked()
 		writeJSONValue(w, s.matchSnapshotLocked(store))
 
+	case "next":
+		match := store.Match
+		if match == nil {
+			http.Error(w, "尚未创建比赛", http.StatusConflict)
+			return
+		}
+		if match.State != matchStateFinished {
+			http.Error(w, "请先结束当前比赛", http.StatusConflict)
+			return
+		}
+		match.MatchNo = incrementMatchNumber(match.MatchNo)
+		match.ID = fmt.Sprintf("match-%d", time.Now().UnixNano())
+		match.State = matchStateReady
+		match.Blue.Score, match.Red.Score, match.ElapsedMs = 0, 0, 0
+		match.StartedAt, match.RecordingID, match.RecordingState, match.RecordingStartedAt, match.RecordingError = "", "", "", "", ""
+		match.Operator, match.UpdatedAt = user.Email, time.Now().Format(time.RFC3339)
+		store.running = false
+		store.saveLocked()
+		writeJSONValue(w, s.matchSnapshotLocked(store))
 	case "finish":
 		match := store.Match
 		if match == nil {
@@ -815,6 +862,14 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+		store.saveLocked()
+		match.MatchNo = incrementMatchNumber(match.MatchNo)
+		match.ID = fmt.Sprintf("match-%d", time.Now().UnixNano())
+		match.State = matchStateReady
+		match.Blue.Score, match.Red.Score, match.ElapsedMs = 0, 0, 0
+		match.Events = nil
+		match.StartedAt, match.RecordingID, match.RecordingState, match.RecordingStartedAt, match.RecordingError = "", "", "", "", ""
+		match.UpdatedAt = time.Now().Format(time.RFC3339)
 		store.saveLocked()
 		writeJSONValue(w, s.matchSnapshotLocked(store))
 
@@ -1034,4 +1089,28 @@ func (s *server) competitionDevicesLocked(store *competitionStore) map[string]an
 		}
 	}
 	return map[string]any{"devices": devices}
+}
+
+func incrementMatchNumber(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "1"
+	}
+	for index := len(value) - 1; index >= 0; index-- {
+		if value[index] < '0' || value[index] > '9' {
+			if index == len(value)-1 {
+				return value + "1"
+			}
+			number, err := strconv.Atoi(value[index+1:])
+			if err != nil {
+				return value + "1"
+			}
+			return fmt.Sprintf("%s%d", value[:index+1], number+1)
+		}
+	}
+	number, err := strconv.Atoi(value)
+	if err != nil {
+		return value + "1"
+	}
+	return strconv.Itoa(number + 1)
 }

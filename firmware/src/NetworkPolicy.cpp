@@ -8,6 +8,8 @@ void NetworkPolicy::begin(bool configured, uint32_t nowMs, uint32_t recoveryMs, 
     attempted_ = false;
     provisioning_ = false;
     registered_ = false;
+    everRegistered_ = false;
+    serverRecoveryOffered_ = false;
     recoveryMs_ = recoveryMs;
     provisioningWindowMs_ = provisioningWindowMs;
     lastRegisteredAt_ = nowMs;
@@ -34,11 +36,12 @@ NetworkAction NetworkPolicy::next(uint32_t nowMs) {
         provisioningHasDeadline_ = false;
         return NetworkAction::StartProvisioning;
     }
-    if (!registered_ && !provisioningRequested_ && nowMs - lastRegisteredAt_ >= recoveryMs_) {
+    if (!registered_ && !everRegistered_ && !serverRecoveryOffered_ && nowMs - lastRegisteredAt_ >= recoveryMs_) {
         provisioning_ = true;
         provisioningRequested_ = true;
         provisioningStartedAt_ = nowMs;
         provisioningHasDeadline_ = true;
+        serverRecoveryOffered_ = true;
         return NetworkAction::StartProvisioning;
     }
     if (connected_) return NetworkAction::None;
@@ -56,6 +59,9 @@ void NetworkPolicy::setConnected(bool connected, uint32_t nowMs) {
 }
 
 void NetworkPolicy::setRegistered(bool registered, uint32_t nowMs) {
+    if (registered) {
+        everRegistered_ = true;
+    }
     if (registered || registered_) {
         lastRegisteredAt_ = nowMs;
         provisioningRequested_ = false;

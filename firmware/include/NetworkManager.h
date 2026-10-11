@@ -18,6 +18,7 @@ private:
     void registerRoutes();
     String scanNetworksJson();
     void printConnectionInfo();
+    void printWifiStatus(int status, const char* context);
     ConfigStore& store_;
     DeviceConfig* config_ = nullptr;
     bool hasSavedWifi_ = false;
@@ -27,8 +28,13 @@ private:
     DNSServer dnsServer_;
     bool uploadOk_ = false;
     bool uploadFailed_ = false;
+    bool uploadAuthorized_ = false;
     bool portalStarted_ = false;
     bool lastConnected_ = false;
+    bool wifiConnectInProgress_ = false;
+    uint8_t wifiReconnectAttempt_ = 0;
+    int lastWifiStatus_ = -1;
+    uint32_t lastWifiStatusLog_ = 0;
     uint32_t lastReconnect_ = 0;
     String scannedNetworksJson_ = "{\"networks\":[]}";
 };

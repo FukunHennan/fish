@@ -9,11 +9,15 @@
 
 
 /* Wi-Fi 和控制器配置通过 Fish-Setup-XXXXXX 热点写入 NVS。 */
-#define FIRMWARE_VERSION "2.0.0"
+#define FIRMWARE_VERSION "2.0.2"
+
+#ifndef FISH_OTA_PASSWORD
+#define FISH_OTA_PASSWORD "fish123"
+#endif
 
 /* Allow short Wi-Fi stalls without falsely declaring the controller lost. */
 #ifndef CONTROLLER_HEARTBEAT_TIMEOUT_MS
-#define CONTROLLER_HEARTBEAT_TIMEOUT_MS 10000
+#define CONTROLLER_HEARTBEAT_TIMEOUT_MS 60000
 #endif
 
 /* If Wi-Fi is connected but the controller is not registered, keep announcing

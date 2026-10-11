@@ -3539,6 +3539,8 @@
     })[state] || state || "未知";
   }
 
+  window.fishCompetitionRefereeAction = function (action, body) { return refereeAction(action, body); };
+
   function refereeAction(action, body, propagateError) {
     return api("/api/competition/match/" + action, { method: "POST", body: body || {} })
       .then(function () { return refreshReferee(); })
@@ -3848,7 +3850,7 @@
     }
     syncText("currentBlueTeam", match.blue && match.blue.name ? match.blue.name : "蓝队");
     syncText("currentRedTeam", match.red && match.red.name ? match.red.name : "红队");
-    syncText("globalState", stateText(match.state));
+    syncText("globalState", "");
     if (typeof window.applyCompetitionFieldLock === "function") {
       window.applyCompetitionFieldLock(match.fieldLocked === true);
     }
@@ -3864,6 +3866,7 @@
     syncText("matchFieldHealth", match.fieldLocked === true ? "已锁定" : "待确认");
     syncText("matchSyncHealth", "已同步");
     paintRefereeRoster(match);
+    if (typeof window.renderLiveMatch === "function") window.renderLiveMatch(match, referee.elapsedMs, referee.running);
   }
 
   function paintRefereeClock() {

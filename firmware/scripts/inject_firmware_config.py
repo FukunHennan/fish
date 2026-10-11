@@ -15,6 +15,12 @@ deployment_key = config.get("deploymentKey", "")
 if not re.fullmatch(r"[0-9a-fA-F]{64}", deployment_key):
     raise RuntimeError("deploymentKey 必须是 32 字节十六进制")
 
+ota_password = config.get("otaPassword", "")
+if not isinstance(ota_password, str) or not 1 <= len(ota_password) <= 64 or any(
+    ord(character) < 33 or ord(character) > 126 for character in ota_password
+):
+    raise RuntimeError("otaPassword 必须是 1-64 位可打印 ASCII 字符")
+
 wifi = config.get("factoryWifi", {})
 if not isinstance(wifi, dict):
     raise RuntimeError("factoryWifi 必须是对象")
@@ -39,10 +45,15 @@ allowed = {
 if set(settings) != allowed:
     raise RuntimeError("settings 字段必须与 AppConfig.h 中的固件参数完全一致")
 
+def c_string_define(value):
+    return "\\\"" + value.encode("unicode_escape").decode("ascii").replace("\"", "\\\"") + "\\\""
+
+
 defines = [
     ("FISH_DEPLOYMENT_KEY_HEX", deployment_key.lower()),
-    ("FISH_FACTORY_WIFI_SSID", json.dumps(ssid, ensure_ascii=True)),
-    ("FISH_FACTORY_WIFI_PASSWORD", json.dumps(password, ensure_ascii=True)),
+    ("FISH_OTA_PASSWORD", c_string_define(ota_password)),
+    ("FISH_FACTORY_WIFI_SSID", c_string_define(ssid)),
+    ("FISH_FACTORY_WIFI_PASSWORD", c_string_define(password)),
 ]
 for name, value in settings.items():
     if isinstance(value, bool):

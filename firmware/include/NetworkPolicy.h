@@ -17,6 +17,8 @@ private:
     bool attempted_ = false;
     bool provisioning_ = false;
     bool registered_ = false;
+    bool everRegistered_ = false;
+    bool serverRecoveryOffered_ = false;
     uint32_t lastRegisteredAt_ = 0;
     uint32_t recoveryMs_ = 180000;
     uint32_t provisioningWindowMs_ = 300000;

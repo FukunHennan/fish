@@ -479,6 +479,7 @@ void ControllerClient::onEvent(WStype_t type, uint8_t* payload, size_t length) {
         return;
     }
     if (type == WStype_DISCONNECTED) {
+        if (registered_) endpointAttemptAt_ = millis();
         registered_ = false;
         motion_.safeStop();
         motionDeadlineAt_ = 0;
@@ -487,7 +488,7 @@ void ControllerClient::onEvent(WStype_t type, uint8_t* payload, size_t length) {
         return;
     }
     if (type == WStype_PONG) {
-        // The controller sends a WebSocket ping every second. Transport-level
+        // The controller sends periodic WebSocket pings. Transport-level
         // pong proves the connection is alive even when application messages
         // are briefly queued behind a burst of motion frames.
         lastHeartbeat_ = millis();
@@ -559,6 +560,7 @@ void ControllerClient::update(uint32_t nowMs, bool online) {
     if (otaPhase_ == OtaPhase::Rebooting && hasElapsed(nowMs, otaRebootAt_, 300)) ESP.restart();
     if (registered_ && hasElapsed(nowMs, lastHeartbeat_, CONTROLLER_HEARTBEAT_TIMEOUT_MS)) {
         registered_ = false;
+        endpointAttemptAt_ = nowMs;
         motion_.safeStop();
         motionDeadlineAt_ = 0;
         controlSource_ = "";
