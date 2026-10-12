@@ -12,11 +12,6 @@ fi
 
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
-if ! command -v node >/dev/null 2>&1; then
-  echo "Diagnostic archive check requires Node.js." >&2
-  exit 1
-fi
-node scripts/diagnostics/compact-runtime-logs.mjs --check
 while read -r local_ref local_sha remote_ref remote_sha; do
   case "$local_sha" in
     0000000000000000000000000000000000000000) continue ;;

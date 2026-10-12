@@ -16,15 +16,15 @@ class DocsCheckTests(unittest.TestCase):
     def test_only_relevant_categories_are_required(self):
         self.assertEqual(
             check_docs.required_categories([("M", "controller/main.go")]),
-            {"程序", "开发日志"},
+            {"程序"},
         )
         self.assertEqual(
             check_docs.required_categories([("M", "config/firmware.json")]),
-            {"程序", "硬件", "开发日志"},
+            {"程序", "硬件"},
         )
         self.assertEqual(
             check_docs.required_categories([("A", "vision/new_module.py")]),
-            {"程序", "概述", "开发日志"},
+            {"程序", "概述"},
         )
         self.assertEqual(
             check_docs.required_categories([("A", "controller/diagnostics/runs/run-1/controller.txt")]),

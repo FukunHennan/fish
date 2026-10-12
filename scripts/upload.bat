@@ -33,9 +33,6 @@ if errorlevel 1 (
 node scripts\diagnostics\snapshot-runtime-data.mjs
 if errorlevel 1 goto :fail
 
-node scripts\diagnostics\compact-runtime-logs.mjs --apply
-if errorlevel 1 goto :fail
-
 echo.
 git status --short
 echo.

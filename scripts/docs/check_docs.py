@@ -14,7 +14,7 @@ from urllib.parse import unquote
 
 ROOT = Path(__file__).resolve().parents[2]
 DOCS = ROOT / "docs"
-CATEGORIES = ("程序", "硬件", "概述", "开发日志")
+CATEGORIES = ("程序", "硬件", "概述")
 LINK = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
 
 
@@ -50,7 +50,6 @@ def required_categories(changes: list[tuple[str, str]]) -> set[str]:
             continue
         if path.startswith(("controller/diagnostics/", "controller/.runtime/", "output/")):
             continue
-        required.add("开发日志")
         if path.startswith("controller/") or path.startswith("vision/") or path.startswith("scripts/") or path == "environment-build.ps1":
             required.add("程序")
         if path.startswith("firmware/") or path == "config/firmware.json" or path.startswith("protocol/"):
@@ -110,7 +109,6 @@ def check_stale(days: int) -> list[str]:
         "程序": ("controller", "vision", "scripts", "config/program.json", "config/tunnel.json", "protocol"),
         "硬件": ("firmware", "config/firmware.json", "vision/camera_stream.py", "vision/camera_policy.py"),
         "概述": ("controller", "vision", "firmware", "config", "scripts", "protocol"),
-        "开发日志": ("controller", "vision", "firmware", "config", "scripts", "protocol", ".github"),
     }
     now = int(time.time())
     errors = []

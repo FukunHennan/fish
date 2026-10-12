@@ -6,7 +6,7 @@ controller/frontend/node_modules/
 video/.venv/
 firmware/.pio/
 
-# Generated local processes and tunnel files; account snapshots and small logs remain tracked
+# Generated local processes, tunnel files, and account snapshots
 controller/.runtime/*.exe
 controller/.runtime/*.pid
 controller/.runtime/*.log
@@ -18,9 +18,14 @@ controller/.runtime/users.json.previous
 controller/.runtime/users.json.reservations.json.previous
 controller/.runtime/users.json.sessions.json*
 
-# Raw diagnostic sessions are archived before upload
+# Diagnostic data is local-only
 controller/diagnostics/runs/
 controller/diagnostics/restored/
+controller/diagnostics/archives/
+controller/diagnostics/ARCHIVE_INDEX.md
+
+# Development logs are local-only
+docs/开发日志/
 
 # Video is local-only data
 output/vision/recordings/
