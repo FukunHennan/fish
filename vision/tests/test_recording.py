@@ -1,4 +1,5 @@
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -11,6 +12,20 @@ from webrtc import _LatestFrameBuffer
 
 
 class MatchVideoRecorderTests(unittest.TestCase):
+    def test_waits_briefly_for_the_first_fresh_frame(self):
+        source = _LatestFrameBuffer()
+        with tempfile.TemporaryDirectory() as folder:
+            frame = np.zeros((48, 64, 3), dtype=np.uint8)
+            producer = threading.Thread(
+                target=lambda: (time.sleep(0.05), source.update(frame, time.time()))
+            )
+            producer.start()
+            recorder = MatchVideoRecorder(folder, "delayed-frame", source)
+            producer.join()
+            status = recorder.stop()
+            self.assertGreaterEqual(status["frameCount"], 1)
+            self.assertTrue((Path(folder) / status["fileName"]).is_file())
+
     def test_records_the_same_cropped_view_used_by_player_webrtc(self):
         source = _LatestFrameBuffer()
         source.set_crop_region({"x": 0.25, "y": 0.25, "width": 0.5, "height": 0.5})

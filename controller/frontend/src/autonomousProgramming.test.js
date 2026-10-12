@@ -138,6 +138,8 @@ test("进阶控制只显示并驱动真实绑定设备", () => {
 test("设备在线状态不依赖比赛操控卡片是否显示", () => {
   assert.match(competitionAdapter, /function publishPlayerDeviceAvailability\(localPlayer\)/);
   assert.match(competitionAdapter, /state\.bound\[localPlayer\] === deviceId/);
+  assert.match(competitionAdapter, /var online = !!\(hasAssignment && device && device\.online\)/);
+  assert.doesNotMatch(competitionAdapter, /heartbeatAtMs/);
   assert.match(competitionAdapter, /PLAYERS\.forEach\(publishPlayerDeviceAvailability\)/);
 });
 

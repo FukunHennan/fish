@@ -1,6 +1,8 @@
 import unittest
 import time
+import tempfile
 from queue import Empty
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -304,6 +306,23 @@ class VisionWebApiTests(unittest.TestCase):
         ).test_client()
         response = client.post("/recordings", json={"recordingId": "match-1"})
         self.assertEqual(response.status_code, 409)
+
+    def test_delete_recording_file_is_safe_and_idempotent(self):
+        with tempfile.TemporaryDirectory() as folder:
+            recordings = Path(folder) / "recordings"
+            recordings.mkdir()
+            video = recordings / "match-1.mp4"
+            video.write_bytes(b"video")
+            with patch("web_api.OUTPUT_DIR", folder):
+                deleted = self.client.delete("/recordings/files/match-1.mp4")
+                repeated = self.client.delete("/recordings/files/match-1.mp4")
+                invalid = self.client.delete("/recordings/files/not-a-video.txt")
+            self.assertEqual(deleted.status_code, 200)
+            self.assertTrue(deleted.get_json()["deleted"])
+            self.assertEqual(repeated.status_code, 200)
+            self.assertFalse(repeated.get_json()["deleted"])
+            self.assertEqual(invalid.status_code, 400)
+            self.assertFalse(video.exists())
 
 
 if __name__ == "__main__":

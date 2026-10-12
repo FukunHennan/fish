@@ -38,6 +38,7 @@ const maxFirmwareSize int64 = 8 << 20
 // Wi-Fi and ESP32 scheduling can briefly delay a heartbeat. A longer socket
 // deadline avoids turning short LAN jitter into a full reconnect.
 const deviceHeartbeatTimeout = 60 * time.Second
+const deviceOnlineFreshness = 5 * time.Second
 const visionMotionTimeout = 3 * time.Second
 
 // commandAckTimeout expands the ACK window using the measured device
@@ -60,6 +61,7 @@ func (s *server) commandAckTimeout(deviceID string, base, maximum time.Duration)
 type server struct {
 	hub              *hub.Hub
 	key              []byte
+	deviceNames      *deviceNameStore
 	firmwarePath     string
 	firmwareName     string
 	firmwareMu       sync.RWMutex
@@ -195,6 +197,7 @@ func motionCalibrationPath() string {
 func newHandler(h *hub.Hub, key []byte, apiAddress, streamAddress, firmwarePath string, logger *slog.Logger) http.Handler {
 	s := &server{
 		hub: h, key: append([]byte(nil), key...), firmwarePath: firmwarePath,
+		deviceNames:     newDeviceNameStore(deviceNamesPath()),
 		calibrationPath: motionCalibrationPath(), auth: newAuthStore(authStorePath()),
 		leases:           newLeaseStore(60 * time.Second),
 		competition:      newCompetitionStore(competitionPath()),
@@ -298,6 +301,7 @@ func newHandler(h *hub.Hub, key []byte, apiAddress, streamAddress, firmwarePath 
 	m.HandleFunc("/api/auth/logout", s.authLogout)
 	m.HandleFunc("/api/auth/users", s.authUsers)
 	m.HandleFunc("/api/devices", s.devices)
+	m.HandleFunc("/api/device-names", s.deviceNamesAPI)
 	m.HandleFunc("/api/events", s.deviceEvents)
 	m.HandleFunc("/api/logs", s.logsAPI)
 	m.HandleFunc("/api/leases", s.leasesAPI)
@@ -847,7 +851,7 @@ func (s *server) status(w http.ResponseWriter, r *http.Request) {
 	devices := s.hub.List()
 	online := 0
 	for _, device := range devices {
-		if device.Online {
+		if deviceFreshlyOnline(device) {
 			online++
 		}
 	}
@@ -932,6 +936,9 @@ func (s *server) connectedDeviceID(requested string) string {
 	}
 	for _, device := range s.hub.List() {
 		if strings.EqualFold(strings.TrimSpace(device.ID), requested) {
+			if !deviceFreshlyOnline(device) {
+				return ""
+			}
 			return device.ID
 		}
 	}
@@ -956,6 +963,8 @@ func (s *server) deviceSnapshot() []deviceView {
 	devices := s.hub.List()
 	out := make([]deviceView, 0, len(devices))
 	for _, device := range devices {
+		device.Online = deviceFreshlyOnline(device)
+		device.Name = s.deviceNames.Name(device.ID, device.Name)
 		view := deviceView{Device: device}
 		if lease, ok := leases[device.ID]; ok {
 			view.Lease = &lease
@@ -966,6 +975,13 @@ func (s *server) deviceSnapshot() []deviceView {
 		out = append(out, view)
 	}
 	return out
+}
+
+func deviceFreshlyOnline(device hub.Device) bool {
+	if !device.Online || device.HeartbeatAtMs <= 0 {
+		return false
+	}
+	return time.Since(time.UnixMilli(device.HeartbeatAtMs)) <= deviceOnlineFreshness
 }
 
 func (s *server) deviceEvents(w http.ResponseWriter, r *http.Request) {
@@ -1004,8 +1020,8 @@ func (s *server) deviceEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	keepAlive := time.NewTicker(15 * time.Second)
-	defer keepAlive.Stop()
+	snapshotTicker := time.NewTicker(2 * time.Second)
+	defer snapshotTicker.Stop()
 	for {
 		select {
 		case <-r.Context().Done():
@@ -1017,14 +1033,13 @@ func (s *server) deviceEvents(w http.ResponseWriter, r *http.Request) {
 			if err := writeSnapshot(); err != nil {
 				return
 			}
-		case <-keepAlive.C:
+		case <-snapshotTicker.C:
 			if _, valid := s.currentUser(r); !valid {
 				return
 			}
-			if _, err := fmt.Fprint(w, ": keep-alive\n\n"); err != nil {
+			if err := writeSnapshot(); err != nil {
 				return
 			}
-			flusher.Flush()
 		}
 	}
 }

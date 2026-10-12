@@ -47,6 +47,17 @@ test("WebRTC 连接假在线但无新帧时主动重连", () => {
   assert.match(adapter, /event\.track\.onended/);
 });
 
+test("选手实时画面只解码一条视频流并清理旧背景副本", () => {
+  assert.match(adapter, /function removeVideoBackdrop\(\)[\s\S]*?element\.pause\(\)[\s\S]*?element\.srcObject = null[\s\S]*?element\.remove\(\)/);
+  const begin = adapter.indexOf("  function mountVideoSurface() {");
+  const end = adapter.indexOf("  function cameraText(camera, index) {", begin);
+  assert.ok(begin >= 0 && end > begin);
+  const mount = adapter.slice(begin, end);
+  assert.match(mount, /removeVideoBackdrop\(\)/);
+  assert.doesNotMatch(mount, /data-fish-video-backdrop|backdrop\.srcObject/);
+  assert.doesNotMatch(playerPage, /video\[data-fish-video-backdrop\].*blur/i);
+});
+
 test("非 trickle 信令等待 ICE 候选完成才提交 Offer", async () => {
   const begin = adapter.indexOf("  function waitForIce(peer) {");
   const end = adapter.indexOf("  function requestFallbackFrame() {", begin);

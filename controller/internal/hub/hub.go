@@ -188,6 +188,7 @@ func (h *Hub) Register(d Device, c Conn) {
 	}
 	d.Online = true
 	d.LastSeen = time.Now()
+	d.HeartbeatAtMs = d.LastSeen.UnixMilli()
 	if d.ProtocolVersion >= 2 {
 		d.IdentityAtMs = d.LastSeen.UnixMilli()
 	}

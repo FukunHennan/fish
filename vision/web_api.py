@@ -266,6 +266,20 @@ def create_app(
             conditional=True,
         )
 
+    @app.delete("/recordings/files/<path:file_name>")
+    def delete_recording_file(file_name):
+        if file_name != os.path.basename(file_name) or not file_name.lower().endswith(".mp4"):
+            return jsonify({"message": "录像文件名无效"}), 400
+        path = os.path.join(OUTPUT_DIR, "recordings", file_name)
+        try:
+            os.remove(path)
+            deleted = True
+        except FileNotFoundError:
+            deleted = False
+        except OSError as error:
+            return jsonify({"message": f"录像文件删除失败：{error}"}), 500
+        return jsonify({"deleted": deleted})
+
     @app.post("/webrtc/offer")
     def webrtc_offer():
         body = request.get_json(silent=True) or {}

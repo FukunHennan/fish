@@ -109,6 +109,24 @@ func (s *server) stopCompetitionRecording(
 	return s.callVisionRecording(ctx, http.MethodDelete, path, nil)
 }
 
+func (s *server) deleteCompetitionRecordingFile(ctx context.Context, playbackURL string) error {
+	parsed, err := url.Parse(playbackURL)
+	if err != nil {
+		return fmt.Errorf("录像地址无效: %w", err)
+	}
+	const prefix = "/api/vision/recordings/files/"
+	const visionPrefix = "/recordings/files/"
+	if !strings.HasPrefix(parsed.Path, prefix) {
+		return fmt.Errorf("录像地址无效")
+	}
+	fileName := strings.TrimPrefix(parsed.Path, prefix)
+	if fileName == "" || strings.ContainsAny(fileName, "/\\") || !strings.HasSuffix(strings.ToLower(fileName), ".mp4") {
+		return fmt.Errorf("录像文件名无效")
+	}
+	_, err = s.callVisionRecording(ctx, http.MethodDelete, visionPrefix+url.PathEscape(fileName), nil)
+	return err
+}
+
 func recordingPlaybackURL(fileName string) string {
 	if strings.TrimSpace(fileName) == "" {
 		return ""

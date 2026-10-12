@@ -1,4 +1,4 @@
-import { batteryLevel, deviceLabel, leaseSummary } from "../ui/devicePresentation.js";
+import { batteryLevel, batteryVoltage, deviceLabel, leaseSummary } from "../ui/devicePresentation.js";
 
 const MODE_LABELS = {
   stop: "停止",
@@ -48,7 +48,7 @@ export default function DeviceRail({
           const status = page === "manual"
             ? leaseSummary(device, user).label
             : deviceState(device, page, selected, visionState, user);
-          const batteryLabel = battery == null ? "电量 —" : `电量 ${battery}%`;
+          const batteryLabel = battery == null ? "电量 —" : `电量 ${battery}% · ${batteryVoltage(device)}`;
           const lease = page === "manual" ? leaseSummary(device, user) : null;
           const visionBound = visionState?.targetDeviceId === device.deviceId;
           const visionBinding = visionBound && visionState?.targetTrackId != null

@@ -16,6 +16,8 @@ import cv2
 
 _SAFE_ID = re.compile(r"[^A-Za-z0-9_-]+")
 _TIME_BASE = Fraction(1, 1000)
+_FIRST_FRAME_TIMEOUT_S = 3.0
+_MAX_FRAME_AGE_S = 2.0
 
 
 class RecordingError(RuntimeError):
@@ -61,9 +63,16 @@ class MatchVideoRecorder:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
+        deadline = time.monotonic() + _FIRST_FRAME_TIMEOUT_S
         latest = source.latest_frame(view="cropped")
-        if latest is None:
-            raise RecordingError("当前没有可录制的选手视频帧")
+        sequence = latest[0] if latest is not None else 0
+        while latest is None or time.time() - float(latest[2]) > _MAX_FRAME_AGE_S:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RecordingError("等待选手视频画面超时，请检查相机是否正常出帧")
+            latest = source.wait_for_frame(sequence, timeout=remaining, view="cropped")
+            if latest is not None:
+                sequence = latest[0]
         sequence, frame, timestamp = latest
         if frame is None or getattr(frame, "ndim", 0) != 3:
             raise RecordingError("选手视频帧无效")
@@ -176,9 +185,12 @@ class MatchVideoRecorder:
         finally:
             self._close_container_quietly()
             try:
-                if self._discard or self._error:
+                with self._lock:
+                    discard = self._discard
+                    has_error = bool(self._error)
+                if discard or has_error:
                     self.partial_path.unlink(missing_ok=True)
-                    if self._discard:
+                    if discard:
                         self.path.unlink(missing_ok=True)
                 else:
                     os.replace(self.partial_path, self.path)
@@ -187,7 +199,8 @@ class MatchVideoRecorder:
                     self._error = self._error or str(error)
 
     def stop(self, discard=False, timeout=10.0):
-        self._discard = bool(discard)
+        with self._lock:
+            self._discard = bool(discard)
         self._stop_event.set()
         self._thread.join(timeout=timeout)
         if self._thread.is_alive():

@@ -256,13 +256,7 @@
   function deviceName(device) {
     if (!device) return "";
     var deviceId = String(device.deviceId || device.id || "").trim();
-    var aliases = {};
-    try { aliases = JSON.parse(window.localStorage.getItem("fish-controller-device-aliases-v1") || "{}"); } catch (e) { aliases = {}; }
-    if (deviceId && !aliases[deviceId]) {
-      var aliasKey = Object.keys(aliases).filter(function (key) { return sameDeviceId(key, deviceId); })[0];
-      if (aliasKey) deviceId = aliasKey;
-    }
-    return (deviceId && aliases[deviceId]) || device.name || deviceId;
+    return device.name || deviceId;
   }
 
   function shortAccount(email) {
@@ -643,7 +637,7 @@
         ensureVideoSurface();
         observeRenders();
         ensureRefereeIntegration();
-        return refreshDevices();
+        return migrateLocalDeviceAliases().then(refreshDevices);
       })
       .catch(function (error) {
         setBadge("登录失败：" + error.message, "error");
@@ -1067,8 +1061,10 @@
   }
 
   function deviceBatteryLabel(device) {
-    if (!device || device.batteryPercent == null || !Number.isFinite(Number(device.batteryPercent))) return "未上报";
-    return Math.max(0, Math.min(100, Math.round(Number(device.batteryPercent)))) + "%";
+    if (!device || device.batteryPercent == null || !Number.isFinite(Number(device.batteryPercent)) || !(Number(device.batteryAtMs) > 0 || Number(device.batteryVoltage) > 0)) return "未上报";
+    var voltage = Number(device.batteryVoltage);
+    var voltageLabel = Number.isFinite(voltage) && voltage > 0 ? voltage.toFixed(2) + " V" : "电压 —";
+    return Math.max(0, Math.min(100, Math.round(Number(device.batteryPercent)))) + "% · " + voltageLabel;
   }
 
   function deviceLatencyLabel(device) {
@@ -1338,14 +1334,11 @@
     var assignedDeviceId = assignedDeviceIdForSlot(slot);
     var deviceId = assignedDeviceId || state.bound[localPlayer] || "";
     var device = findDevice(deviceId);
-    var heartbeatAt = Number(device && device.heartbeatAtMs);
     var healthy = !!(
       assignedDeviceId &&
       (state.bound[localPlayer] === deviceId || sameDeviceId(state.bound[localPlayer], deviceId)) &&
       device &&
-      device.online &&
-      Number.isFinite(heartbeatAt) &&
-      heartbeatAt > 0
+      device.online
     );
     var availabilityKey = deviceId + ":" + (healthy ? "1" : "0");
     if (lastReadinessAvailability[localPlayer] === availabilityKey) return;
@@ -1361,9 +1354,10 @@
     var deviceId = assignedDeviceId || state.bound[localPlayer];
     var device = findDevice(deviceId);
     var hasAssignment = !!assignedDeviceId;
-    var heartbeatAt = Number(device && device.heartbeatAtMs);
-    var healthy = !!(hasAssignment && device && device.online && Number.isFinite(heartbeatAt) && heartbeatAt > 0);
-    var statusText = hasAssignment ? (healthy ? "在线" : "设备离线") : "未分配";
+    var online = !!(hasAssignment && device && device.online);
+    var bound = !!(device && (state.bound[localPlayer] === deviceId || sameDeviceId(state.bound[localPlayer], deviceId)));
+    var healthy = online && bound;
+    var statusText = hasAssignment ? (online ? "在线" : "设备离线") : "未分配";
     var unavailableMetricText = hasAssignment ? "设备离线" : "未分配";
     var deviceText = hasAssignment ? (device ? deviceName(device) : assignedDeviceId) : "裁判未分配机器鱼";
     var seatSelect = card.querySelector("[data-player-seat]");
@@ -1390,8 +1384,8 @@
         var visionText = video.statusText || "未启用";
         value.textContent = visionText || "未启用";
       }
-      if (text === "电量") value.textContent = healthy ? deviceBatteryLabel(device) : unavailableMetricText;
-      if (text === "延迟") value.textContent = healthy ? deviceLatencyLabel(device) : unavailableMetricText;
+      if (text === "电量") value.textContent = online ? deviceBatteryLabel(device) : unavailableMetricText;
+      if (text === "延迟") value.textContent = online ? deviceLatencyLabel(device) : unavailableMetricText;
       value.title = value.textContent;
       if (metric.classList.contains("deviceMetric")) {
         metric.classList.remove("good", "warn");
@@ -1410,7 +1404,7 @@
       readyButton.disabled = !healthy;
       if (readyButton.dataset.ready !== "true") {
         var readyText = readyButton.querySelector("span");
-        if (readyText) readyText.textContent = healthy ? "准备完成" : "设备未就绪";
+        if (readyText) readyText.textContent = healthy ? "准备完成" : online ? "控制绑定中" : "设备未就绪";
       }
     }
     publishPlayerDeviceAvailability(localPlayer);
@@ -1876,25 +1870,19 @@
     }
   }
 
+  function removeVideoBackdrop() {
+    document.querySelectorAll("video[data-fish-video-backdrop]").forEach(function (element) {
+      try { element.pause(); } catch (_) {}
+      element.srcObject = null;
+      element.remove();
+    });
+  }
+
   function mountVideoSurface() {
     var stage = videoSurface();
     if (!stage) return;
+    removeVideoBackdrop();
     ensureVideoControls(stage);
-    var backdrop = stage.querySelector("video[data-fish-video-backdrop]");
-    if (!isRefereePage() && stage.classList.contains("matchPool") && !backdrop) {
-      backdrop = document.createElement("video");
-      backdrop.setAttribute("data-fish-video-backdrop", "1");
-      backdrop.setAttribute("aria-hidden", "true");
-      backdrop.autoplay = true;
-      backdrop.muted = true;
-      backdrop.setAttribute("playsinline", "");
-      backdrop.style.cssText = [
-        "position:absolute", "inset:-6%", "width:112%", "height:112%",
-        "object-fit:cover", "z-index:0", "filter:blur(18px) brightness(.34) saturate(1.18)",
-        "transform:scale(1.04)", "pointer-events:none",
-      ].join(";");
-      stage.insertBefore(backdrop, stage.firstChild);
-    }
     var element = stage.querySelector("video[data-fish-video]");
     if (!element) {
       element = document.createElement("video");
@@ -1956,11 +1944,6 @@
     if (fallbackImage) {
       fallbackImage.hidden = !video.fallback;
       if (video.fallback) video.fallbackElement = fallbackImage;
-    }
-    if (backdrop && video.stream && backdrop.srcObject !== video.stream) {
-      backdrop.srcObject = video.stream;
-      var backdropPlayed = backdrop.play();
-      if (backdropPlayed && backdropPlayed.catch) backdropPlayed.catch(function () {});
     }
     element.hidden = video.fallback;
     renderCropEditor();
@@ -3277,6 +3260,7 @@
       URL.revokeObjectURL(video.fallbackObjectUrl);
       video.fallbackObjectUrl = null;
     }
+    removeVideoBackdrop();
     if (video.peer) {
       try { video.peer.close(); } catch (e) { /* 忽略关闭异常 */ }
     }
@@ -4485,15 +4469,37 @@
     }, 2000);
   }
 
+  function migrateLocalDeviceAliases() {
+    if (!isRefereePage()) return Promise.resolve();
+    var legacy = {};
+    try { legacy = JSON.parse(window.localStorage.getItem("fish-controller-device-aliases-v1") || "{}"); } catch (e) { legacy = {}; }
+    if (!Object.keys(legacy).length) return Promise.resolve();
+    return api("/api/device-names").then(function (payload) {
+      var names = payload && payload.names || {};
+      var savedIds = Object.keys(names).reduce(function (set, id) { set[id.toUpperCase()] = true; return set; }, {});
+      return Object.keys(legacy).reduce(function (pending, id) {
+        var name = String(legacy[id] || "").trim();
+        if (!name || savedIds[id.toUpperCase()]) return pending;
+        return pending.then(function () {
+          return api("/api/device-names", { method: "PATCH", body: { deviceId: id, name: name } })
+            .then(function () { savedIds[id.toUpperCase()] = true; });
+        });
+      }, Promise.resolve());
+    }).then(function () {
+      window.localStorage.removeItem("fish-controller-device-aliases-v1");
+    }).catch(function () { /* Keep legacy aliases if the server cannot import them. */ });
+  }
+
   function saveDeviceAlias(deviceId, name) {
     var normalizedId = String(deviceId || "").trim();
     var normalizedName = String(name || "").trim();
     if (!normalizedId) return;
-    var aliases = {};
-    try { aliases = JSON.parse(window.localStorage.getItem("fish-controller-device-aliases-v1") || "{}"); } catch (e) { aliases = {}; }
-    if (normalizedName && normalizedName.toUpperCase() !== normalizedId.toUpperCase()) aliases[normalizedId] = normalizedName;
-    else delete aliases[normalizedId];
-    window.localStorage.setItem("fish-controller-device-aliases-v1", JSON.stringify(aliases));
+    return api("/api/device-names", {
+      method: "PATCH",
+      body: { deviceId: normalizedId, name: normalizedName },
+    }).then(function () {
+      return refreshDevices();
+    });
   }
 
   function ensureDeviceManagerModal() {
@@ -4515,7 +4521,17 @@
         var row = rename.closest(".deviceRow");
         var input = row && row.querySelector("[data-device-name]");
         var id = row && row.getAttribute("data-device-id");
-        if (input && id) { saveDeviceAlias(id, input.value); input.value = deviceLabel({ deviceId: id, name: input.value }); setBadge("设备昵称已保存（" + id + "）", "ok"); }
+        if (input && id) {
+          var save = rename.querySelector("button");
+          if (save) save.disabled = true;
+          saveDeviceAlias(id, input.value).then(function () {
+            setBadge("设备昵称已按设备 ID 保存到服务器（" + id + "）", "ok");
+          }).catch(function (error) {
+            setBadge("设备昵称保存失败：" + error.message, "error");
+          }).finally(function () {
+            if (save) save.disabled = false;
+          });
+        }
       }
     });
     modal.addEventListener("change", function (event) {

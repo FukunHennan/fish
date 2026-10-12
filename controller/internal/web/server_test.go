@@ -800,8 +800,8 @@ func TestProtocolV2SmallAckKeepsHTTPAppliedContract(t *testing.T) {
 	}
 }
 
-func TestMotionCommandSupportsStopAndIdleModes(t *testing.T) {
-	for _, mode := range []string{"stop", "idle"} {
+func TestMotionCommandSupportsStopIdleAndZeroBatteryMotion(t *testing.T) {
+	for _, mode := range []string{"forward", "stop", "idle"} {
 		t.Run(mode, func(t *testing.T) {
 			h := hub.New()
 			c := &captureConn{onWrite: func(value any) {
@@ -811,7 +811,7 @@ func TestMotionCommandSupportsStopAndIdleModes(t *testing.T) {
 					"code": "OK", "message": "applied",
 				})
 			}}
-			h.Register(hub.Device{ID: "fish-1"}, c)
+			h.Register(hub.Device{ID: "fish-1", BatteryPercent: 0, BatteryVoltage: 3.12, BatteryAtMs: time.Now().UnixMilli()}, c)
 			handler := NewHandler(h, testKey())
 			body := fmt.Sprintf(`{"deviceId":"fish-1","mode":"%s","frequency":2.5,"amplitudePercent":40}`, mode)
 			r := httptest.NewRequest(http.MethodPost, "/api/command", strings.NewReader(body))
@@ -838,7 +838,7 @@ func TestMotionCommandSupportsStopAndIdleModes(t *testing.T) {
 func TestRealtimeCommandDropsOutOfOrderKeyboardFrame(t *testing.T) {
 	h := hub.New()
 	c := &captureConn{}
-	h.Register(hub.Device{ID: "fish-1"}, c)
+	h.Register(hub.Device{ID: "fish-1", BatteryPercent: 0, BatteryVoltage: 3.12, BatteryAtMs: time.Now().UnixMilli()}, c)
 	handler := NewHandler(h, testKey())
 
 	post := func(sequence uint64, mode string) *httptest.ResponseRecorder {
@@ -860,7 +860,7 @@ func TestRealtimeMatchCommandIsAllowedOutsideRunningCompetition(t *testing.T) {
 	h := hub.New()
 	sent := make(chan map[string]any, 2)
 	c := &captureConn{onWrite: func(value any) { sent <- value.(map[string]any) }}
-	h.Register(hub.Device{ID: "fish-1"}, c)
+	h.Register(hub.Device{ID: "fish-1", BatteryPercent: 0, BatteryVoltage: 3.12, BatteryAtMs: time.Now().UnixMilli()}, c)
 	handler := NewHandler(h, testKey())
 
 	forward := httptest.NewRecorder()

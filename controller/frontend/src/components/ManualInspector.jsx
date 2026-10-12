@@ -1,5 +1,5 @@
 import TelemetryIcon from "./TelemetryIcon.jsx";
-import { batteryLevel, deviceLabel, formatTime, leaseIsMine, leaseSummary } from "../ui/devicePresentation.js";
+import { batteryLevel, batteryVoltage, deviceLabel, formatTime, leaseIsMine, leaseSummary } from "../ui/devicePresentation.js";
 
 const MODE_LABELS = {
   stop: "停止",
@@ -55,7 +55,7 @@ export default function ManualInspector({
               </div>
               <div className={`metric icon-metric ${battery != null && battery <= 20 ? "telemetry-low" : ""}`}>
                 <TelemetryIcon kind="battery" value={battery} />
-                <span>电量</span><strong>{battery == null ? "—" : `${battery}%`}</strong>
+                <span>电量</span><strong>{battery == null ? "—" : `${battery}% · ${batteryVoltage(device)}`}</strong>
               </div>
               <div className="metric icon-metric" title="图标表示信号强弱，数值为设备上报 RSSI">
                 <TelemetryIcon kind="signal" value={rssi} />

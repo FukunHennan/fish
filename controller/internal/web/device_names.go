@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -87,6 +88,19 @@ func (d *deviceNameStore) Name(deviceID, fallback string) string {
 	return strings.TrimSpace(deviceID)
 }
 
+func (d *deviceNameStore) Snapshot() map[string]string {
+	if d == nil {
+		return map[string]string{}
+	}
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	names := make(map[string]string, len(d.Names))
+	for id, name := range d.Names {
+		names[id] = name
+	}
+	return names
+}
+
 func (d *deviceNameStore) Set(deviceID, name string) (string, error) {
 	if d == nil {
 		return normalizeDeviceDisplayName(name), nil
@@ -122,4 +136,40 @@ func (d *deviceNameStore) saveLocked() error {
 		return err
 	}
 	return os.Rename(temporary, d.path)
+}
+
+func (s *server) deviceNamesAPI(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.requireUser(w, r)
+	if !ok {
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		writeJSONValue(w, map[string]any{"names": s.deviceNames.Snapshot()})
+	case http.MethodPatch:
+		if !canAdmin(user) && !isRefereeAccount(user) {
+			writeAuthError(w, http.StatusForbidden, "需要裁判或管理员权限")
+			return
+		}
+		var input struct {
+			DeviceID string `json:"deviceId"`
+			Name     string `json:"name"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&input); err != nil {
+			http.Error(w, "请求格式错误", http.StatusBadRequest)
+			return
+		}
+		if normalizeDeviceNameID(input.DeviceID) == "" || len([]rune(normalizeDeviceDisplayName(input.Name))) > 24 {
+			http.Error(w, "设备 ID 无效或昵称超过 24 个字符", http.StatusBadRequest)
+			return
+		}
+		name, err := s.deviceNames.Set(input.DeviceID, input.Name)
+		if err != nil {
+			http.Error(w, "设备昵称保存失败: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSONValue(w, map[string]any{"deviceId": normalizeDeviceNameID(input.DeviceID), "name": name})
+	default:
+		http.Error(w, "仅支持 GET/PATCH", http.StatusMethodNotAllowed)
+	}
 }

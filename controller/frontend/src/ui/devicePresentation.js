@@ -59,8 +59,15 @@ export function formatTime(value) {
 }
 
 export function batteryLevel(device) {
-  const value = Number(device?.batteryPercent);
-  return Number.isFinite(value) && Number(device?.batteryVoltage) > 0 ? value : null;
+  const raw = device?.batteryPercent;
+  const value = Number(raw);
+  const hasSample = Number(device?.batteryAtMs) > 0 || Number(device?.batteryVoltage) > 0;
+  return raw != null && raw !== "" && Number.isFinite(value) && hasSample ? value : null;
+}
+
+export function batteryVoltage(device) {
+  const value = Number(device?.batteryVoltage);
+  return Number.isFinite(value) && value > 0 ? `${value.toFixed(2)} V` : "电压 —";
 }
 
 export function batteryTone(percent) {

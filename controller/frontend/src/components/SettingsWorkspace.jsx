@@ -95,7 +95,7 @@ function DeviceOverview({ devices = [], onlineDevices = [], lowBatteryCount = 0 
               </span>
               <span>{MODE_LABELS[device.mode] || "未知"}</span>
               <span>{device.online && device.rssi ? `${device.rssi} dBm` : "信号 —"}</span>
-              <span>{device.online && Number.isFinite(device.batteryPercent) ? `${device.batteryPercent}%` : "电量 —"}</span>
+              <span>{device.online && (Number(device.batteryAtMs) > 0 || Number(device.batteryVoltage) > 0) && Number.isFinite(Number(device.batteryPercent)) ? `${Math.round(Number(device.batteryPercent))}% · ${Number(device.batteryVoltage) > 0 ? `${Number(device.batteryVoltage).toFixed(2)} V` : "电压 —"}` : "电量 —"}</span>
             </div>
           ))}
           {!devices.length && <p>等待 ESP32 设备上线。</p>}

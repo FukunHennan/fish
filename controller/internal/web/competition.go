@@ -454,18 +454,36 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "缺少比赛记录 ID", http.StatusBadRequest)
 			return
 		}
+		var playbackURL string
+		for _, record := range store.Records {
+			if record.ID == recordID {
+				playbackURL = record.VideoURL
+				break
+			}
+		}
 		found := false
-		filtered := make([]competitionRecord, 0, len(store.Records))
 		for _, record := range store.Records {
 			if record.ID == recordID {
 				found = true
-				continue
+				break
 			}
-			filtered = append(filtered, record)
 		}
 		if !found {
 			http.Error(w, "比赛记录不存在", http.StatusNotFound)
 			return
+		}
+		if playbackURL != "" {
+			if err := s.deleteCompetitionRecordingFile(r.Context(), playbackURL); err != nil {
+				http.Error(w, "录像文件删除失败："+err.Error(), http.StatusBadGateway)
+				return
+			}
+		}
+		filtered := make([]competitionRecord, 0, len(store.Records))
+		for _, record := range store.Records {
+			if record.ID == recordID {
+				continue
+			}
+			filtered = append(filtered, record)
 		}
 		store.Records = filtered
 		delete(store.FinishedNoticeClaims, recordID)
@@ -1106,7 +1124,7 @@ func (s *server) clearUnavailableReadinessLocked(store *competitionStore) bool {
 // deviceOnline 判断机器鱼是否在线。
 func (s *server) deviceOnline(deviceID string) bool {
 	for _, device := range s.hub.List() {
-		if strings.EqualFold(strings.TrimSpace(device.ID), strings.TrimSpace(deviceID)) && device.Online {
+		if strings.EqualFold(strings.TrimSpace(device.ID), strings.TrimSpace(deviceID)) && deviceFreshlyOnline(device) {
 			return true
 		}
 	}
@@ -1118,17 +1136,19 @@ func (s *server) competitionDevicesLocked(store *competitionStore) map[string]an
 	devices := []map[string]any{}
 	seen := map[string]bool{}
 	for _, device := range s.hub.List() {
+		online := deviceFreshlyOnline(device)
 		seen[strings.ToLower(device.ID)] = true
 		item := map[string]any{
 			"deviceId":             device.ID,
-			"name":                 device.Name,
-			"online":               device.Online,
+			"name":                 s.deviceNames.Name(device.ID, device.Name),
+			"online":               online,
 			"ip":                   device.IP,
 			"firmwareVersion":      device.FirmwareVersion,
 			"rssi":                 device.RSSI,
 			"batteryVoltage":       device.BatteryVoltage,
 			"batteryPercent":       device.BatteryPercent,
 			"heartbeatRttMs":       device.HeartbeatRTTMs,
+			"heartbeatAtMs":        device.HeartbeatAtMs,
 			"lastSeen":             device.LastSeen,
 			"mode":                 device.Mode,
 			"frequency":            device.Frequency,
@@ -1167,7 +1187,7 @@ func (s *server) competitionDevicesLocked(store *competitionStore) map[string]an
 				seen[strings.ToLower(deviceID)] = true
 				devices = append(devices, map[string]any{
 					"deviceId":   deviceID,
-					"name":       deviceID,
+					"name":       s.deviceNames.Name(deviceID, deviceID),
 					"online":     false,
 					"side":       team.Side,
 					"slot":       player.Slot,

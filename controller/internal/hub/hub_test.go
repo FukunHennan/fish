@@ -28,6 +28,9 @@ func TestRegisterAndRouteCommand(t *testing.T) {
 	h := New()
 	c := &fakeConn{}
 	h.Register(Device{ID: "AC:27:6E:7C:37:18", Name: "测试鱼"}, c)
+	if device := h.List()[0]; !device.Online || device.HeartbeatAtMs <= 0 {
+		t.Fatalf("newly registered devices should immediately have a live heartbeat timestamp: %+v", device)
+	}
 	result := h.Send("AC:27:6E:7C:37:18", map[string]any{"type": "command"})
 	if !result || len(c.sent) != 1 {
 		t.Fatalf("命令没有发送到已注册设备")

@@ -249,6 +249,9 @@ func TestCompetitionFlow(t *testing.T) {
 	if len(deleted["records"].([]any)) != 0 {
 		t.Fatalf("删除比赛记录后列表不应保留该记录: %+v", deleted)
 	}
+	if len(recordingCalls) != 3 || recordingCalls[2] != "DELETE /recordings/files/match-test.mp4" {
+		t.Fatalf("删除比赛记录时应同时删除录像文件: %+v", recordingCalls)
+	}
 }
 
 func TestCompetitionDoesNotStartWhenRecordingCannotStart(t *testing.T) {
@@ -439,6 +442,7 @@ func TestCompetitionVisionTrackBindingPersistsAndSwaps(t *testing.T) {
 func TestCompetitionDeviceAssignment(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "competition.json")
 	t.Setenv("FISH_COMPETITION_STATE", statePath)
+	t.Setenv("FISH_DEVICE_NAMES", filepath.Join(t.TempDir(), "device-names.json"))
 	h := hub.New()
 	handler := NewHandler(h, testKey())
 	h.Register(hub.Device{ID: "fish-a", Name: "机器鱼A", Online: true, IP: "192.168.1.10", RSSI: -42, BatteryPercent: 86}, assignmentTestConn{})
@@ -474,6 +478,9 @@ func TestCompetitionDeviceAssignment(t *testing.T) {
 	if code, _ := call(http.MethodPut, "/api/competition/match", `{"matchNo":"第 01 场"}`); code != http.StatusOK {
 		t.Fatalf("建赛失败: %d", code)
 	}
+	if code, saved := call(http.MethodPatch, "/api/device-names", `{"deviceId":"FISH-A","name":"池塘一号"}`); code != http.StatusOK || saved["name"] != "池塘一号" {
+		t.Fatalf("保存设备昵称失败: %d %+v", code, saved)
+	}
 
 	// 设备列表：两台均未分配
 	code, listed := call(http.MethodGet, "/api/competition/devices", "")
@@ -491,6 +498,9 @@ func TestCompetitionDeviceAssignment(t *testing.T) {
 	}
 	for _, raw := range devices {
 		item := raw.(map[string]any)
+		if item["deviceId"] == "fish-a" && item["name"] != "池塘一号" {
+			t.Fatalf("比赛设备列表应使用服务器保存的昵称: %+v", item)
+		}
 		if item["deviceId"] == "fish-a" && (item["ip"] != "192.168.1.10" || item["batteryPercent"].(float64) != 86) {
 			t.Fatalf("设备列表应返回真实状态字段: %+v", item)
 		}

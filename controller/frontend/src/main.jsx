@@ -24,7 +24,7 @@ const MODE_LABELS = {
   stop: "停止", idle: "待机", forward: "前进", left: "左转", right: "右转",
   0: "停止", 1: "待机", 2: "前进", 3: "左转", 4: "右转",
 };
-const ALIAS_STORAGE_KEY = "fish-controller-device-aliases-v1";
+const LEGACY_ALIAS_STORAGE_KEY = "fish-controller-device-aliases-v1";
 const CALIBRATION_STORAGE_KEY = "fish-controller-motion-calibration-v1";
 const MANUAL_MOTION_STORAGE_KEY = "fish-controller-manual-motion-v1";
 const DEFAULT_AMPLITUDE_PERCENT = 40;
@@ -35,9 +35,9 @@ function clamp(value, min, max, fallback) {
   if (!Number.isFinite(number)) return fallback;
   return Math.min(max, Math.max(min, number));
 }
-function loadAliases() {
+function loadLegacyAliases() {
   try {
-    const parsed = JSON.parse(localStorage.getItem(ALIAS_STORAGE_KEY) || "{}");
+    const parsed = JSON.parse(localStorage.getItem(LEGACY_ALIAS_STORAGE_KEY) || "{}");
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch { return {}; }
 }
@@ -90,7 +90,6 @@ function App() {
   }
   const [page, setPage] = useState("manual");
   const [devices, setDevices] = useState([]);
-  const [aliases, setAliases] = useState(loadAliases);
   const [manualMotionByDevice, setManualMotionByDevice] = useState({});
   useEffect(() => {
     try { setManualMotionByDevice(JSON.parse(localStorage.getItem(`${MANUAL_MOTION_STORAGE_KEY}:${auth.user?.id || "guest"}`) || "{}")); } catch { setManualMotionByDevice({}); }
@@ -99,6 +98,39 @@ function App() {
   const [otaSelectedIds, setOtaSelectedIds] = useState(() => new Set());
   const [feedback, setFeedback] = useState("等待控制指令");
   const [sending, setSending] = useState(false);
+  useEffect(() => {
+    if (!auth.authenticated) return undefined;
+    let active = true;
+    (async () => {
+      const legacy = loadLegacyAliases();
+      if (!Object.keys(legacy).length) return;
+      try {
+        const response = await fetch("/api/device-names", { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = await response.json();
+        const saved = payload.names && typeof payload.names === "object" ? payload.names : {};
+        const savedIds = new Set(Object.keys(saved).map((id) => id.toUpperCase()));
+        for (const [deviceId, name] of Object.entries(legacy)) {
+          if (savedIds.has(deviceId.toUpperCase()) || !String(name || "").trim()) continue;
+          const migrated = await fetch("/api/device-names", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ deviceId, name }),
+          });
+          if (!migrated.ok) return;
+        }
+        if (active) {
+          localStorage.removeItem(LEGACY_ALIAS_STORAGE_KEY);
+          const devicesResponse = await fetch("/api/devices", { cache: "no-store" });
+          if (devicesResponse.ok) {
+            const currentDevices = await devicesResponse.json();
+            if (active && Array.isArray(currentDevices)) commitDeviceSnapshot(currentDevices, true);
+          }
+        }
+      } catch { /* Keep the legacy alias cache until the server is reachable. */ }
+    })();
+    return () => { active = false; };
+  }, [auth.authenticated]);
   const [manualCommandBusy, setManualCommandBusy] = useState(false);
   const [leaseBusy, setLeaseBusy] = useState(false);
   const [error, setError] = useState("");
@@ -234,7 +266,7 @@ function App() {
         return;
       }
       if (!Array.isArray(raw)) return;
-      const incoming = raw.map((device) => ({ ...device, name: aliases[device.deviceId] || device.name }));
+      const incoming = raw;
       const previous = devicesRef.current;
       const next = mergeDevicesInStableOrder(previous, incoming);
       const nextByID = new Map(next.map((device) => [device.deviceId, device]));
@@ -281,7 +313,7 @@ function App() {
       active = false;
       source.close();
     };
-  }, [aliases, auth.authenticated, auth.user?.email]);
+  }, [auth.authenticated, auth.user?.email]);
 
   useEffect(() => {
     if (!auth.authenticated) return;
@@ -338,7 +370,7 @@ function App() {
     setRenameDraft("");
     setRenameError("");
   }
-  function saveRename() {
+  async function saveRename() {
     if (!renameDevice) return;
     const nextName = renameDraft.trim();
     if (!nextName) { setRenameError("设备名称不能为空"); return; }
@@ -346,12 +378,20 @@ function App() {
     const normalized = normalizeDeviceName(nextName);
     const duplicate = devices.some((device) => device.deviceId !== renameDevice.deviceId && normalizeDeviceName(deviceLabel(device)) === normalized);
     if (duplicate) { setRenameError("该名称已被其他设备使用，请换一个名称"); return; }
-    const nextAliases = { ...aliases, [renameDevice.deviceId]: nextName };
-    localStorage.setItem(ALIAS_STORAGE_KEY, JSON.stringify(nextAliases));
-    setAliases(nextAliases);
-    patchDevice(renameDevice.deviceId, { name: nextName });
-    setFeedback(`${deviceLabel(renameDevice)} 已重命名为 ${nextName}`);
-    closeRename();
+    try {
+      const response = await fetch("/api/device-names", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deviceId: renameDevice.deviceId, name: nextName }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.message || "设备昵称保存失败");
+      patchDevice(renameDevice.deviceId, { name: payload.name || nextName });
+      setFeedback(`${nextName} 已按设备 ID 保存到服务器`);
+      closeRename();
+    } catch (error) {
+      setRenameError(error.message || "设备昵称保存失败");
+    }
   }
 
   async function logout() {
