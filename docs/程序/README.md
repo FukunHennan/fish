@@ -18,7 +18,7 @@
 
 ## 启动
 
-先修改[三个配置文件](../../config/README.md)。Windows 新电脑先运行 `scripts\setup.bat --local --cpu` 安装电脑端依赖并关闭隧道、改用 CPU；这两个选项会改动对应 JSON，若已配好公网和 GPU 则运行不带选项的 `scripts\setup.bat`。随后从项目根目录运行 `scripts\start.bat`：脚本构建前端和 Go、启动控制器与视觉服务；仅当 `config/tunnel.json` 的 `enabled` 为 `true` 时启动 Cloudflare Tunnel。Linux/macOS 运行 `bash scripts/start.sh`，该脚本不启动 Tunnel。浏览器打开 `http://127.0.0.1:8081/competition.html`。
+先修改[三个配置文件](../../config/README.md)。Windows 新电脑先运行 `scripts\setup.bat --local --cpu` 安装电脑端依赖并关闭隧道、改用 CPU；这两个选项会改动对应 JSON，若已配好公网和 GPU 则运行不带选项的 `scripts\setup.bat`。随后从项目根目录运行 `scripts\start.bat`：脚本检查配置和 Go/npm，缺少前端依赖时运行 `npm ci`，再构建前端与 Go 控制器；启动后等待控制器和视觉服务健康检查通过。仅当 `config/tunnel.json` 的 `enabled` 为 `true` 时校验隧道配置并启动 Cloudflare Tunnel。启动窗口按 `Q` 可清理本次启动的进程。Linux/macOS 运行 `bash scripts/start.sh`，该脚本不启动 Tunnel。浏览器打开 `http://127.0.0.1:8081/competition.html`。
 
 Windows 启动脚本只在手动运行时启动服务，不创建登录或开机计划任务。首次公网配置按[公网访问配置](公网访问配置.md)操作；需要 Go、npm 和 Python 环境。编译和烧录步骤见[环境与构建](环境与构建.md)，完整运行行为见[系统运行手册](系统运行手册.md)。
 
