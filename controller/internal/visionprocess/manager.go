@@ -203,6 +203,10 @@ func (m *Manager) restartProcess() (bool, error) {
 		return false, nil
 	}
 	old := m.process
+	if old == nil {
+		m.mu.Unlock()
+		return false, fmt.Errorf("视觉后端由外部进程管理，不能自动重启或接管，请重启项目启动脚本")
+	}
 	m.process = nil
 	m.mu.Unlock()
 	if old != nil {

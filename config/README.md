@@ -19,6 +19,8 @@ Windows 新电脑若只有 Node.js/npm，可从项目根目录运行 `scripts\se
 
 `camera.rotationAngle`（-180°～180°）和 `camera.exposure`（相机驱动的曝光值）也在同一文件中。裁判端应用旋转或成功调整曝光时会分别更新对应字段，并保留另一个字段；视觉服务每次打开或重连相机时从这里恢复两项设置。手工修改后重新打开相机预览生效；驱动不接受曝光值时仍以实际回读结果为准。
 
+实时视频采用双端 TURN：`FISH_WEBRTC_ICE_TRANSPORT_POLICY=relay` 与 `FISH_WEBRTC_BROWSER_ICE_TRANSPORT_POLICY=relay`。浏览器强制 relay；连接失败只重试 WebRTC，不使用 JPEG 轮询或 WebSocket 备用画面。修改后需重启服务。
+
 `firmware/include/AppConfig.h` 和 `vision/config.py` 仍保留编译默认值、类型及读取逻辑，不再作为日常修改入口。`firmware/platformio.ini`、`go.mod`、`package.json`、`requirements.txt` 等是构建依赖清单。视觉标定产生的 `vision/assets/*.local.json`、Go 用户数据、诊断日志、模型和录像是运行数据或资源，不计入三个手动部署配置文件。
 
 目标 GitHub 仓库是公开仓库；`firmware.json` 中的部署密钥和 Wi-Fi 值上传后可被公开读取。启动与停止见[程序文档](../docs/程序/README.md)。

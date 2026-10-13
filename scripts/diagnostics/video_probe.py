@@ -52,6 +52,28 @@ def interval(previous, current):
     return result
 
 
+def select_turn_servers(servers, transport):
+    if transport == "auto":
+        return servers
+    selected = []
+    for server in servers:
+        urls = server.get("urls", [])
+        if isinstance(urls, str):
+            urls = [urls]
+        matching = []
+        for url in urls:
+            if not url.startswith(("turn:", "turns:")):
+                continue
+            protocol = "tcp" if url.startswith("turns:") or "transport=tcp" in url else "udp"
+            if protocol == transport:
+                matching.append(url)
+        if matching:
+            selected.append({**server, "urls": matching})
+    if not selected:
+        raise RuntimeError("No TURN URLs for requested transport")
+    return selected
+
+
 def summarize(samples, events, policy, min_fps, max_gap_ms, max_loss_percent=3):
     active = [sample for sample in samples if sample.get("framesDecoded", 0)]
     reasons = []
@@ -102,7 +124,7 @@ async def run(args, report):
             await page.set_content('<video autoplay muted playsinline style="width:640px;height:480px"></video>')
             await page.add_script_tag(path=str(Path(__file__).with_suffix(".js")))
             report["phase"] = "gather_ice"
-            offer = await page.evaluate("setupVideoProbe", {"iceServers": config.get("iceServers", []),
+            offer = await page.evaluate("setupVideoProbe", {"iceServers": select_turn_servers(config.get("iceServers", []), args.turn_transport),
                 "policy": args.policy, "bufferMs": args.buffer_ms, "timeoutMs": args.timeout * 1000})
             report["phase"] = "offer"
             answer = await asyncio.to_thread(request_json, base, "/webrtc/offer", cookie, args.timeout,
@@ -112,7 +134,16 @@ async def run(args, report):
             await page.wait_for_function("window.videoProbe.firstFrameMs !== null", timeout=args.timeout * 1000)
             report["phase"] = "sample_video"
             started = time.monotonic()
+            last_view_slot = 0
             while True:
+                elapsed = time.monotonic() - started
+                view_slot = int(elapsed / 5)
+                if args.switch_views and view_slot > last_view_slot:
+                    view = "full" if view_slot % 2 else "cropped"
+                    await asyncio.to_thread(request_json, base, "/webrtc/view", cookie, args.timeout,
+                        {"peerId": answer["peerId"], "view": view})
+                    last_view_slot = view_slot
+                    report.setdefault("viewChanges", []).append({"atSeconds": round(elapsed, 2), "view": view})
                 sample = await page.evaluate("sampleVideoProbe")
                 samples = report["samples"]
                 if samples:
@@ -142,6 +173,8 @@ def main():
     parser.add_argument("--timeout", type=int, default=30)
     parser.add_argument("--browser", default="msedge" if os.name == "nt" else "chromium", choices=("msedge", "chrome", "chromium"))
     parser.add_argument("--policy", default="relay", choices=("relay", "all"))
+    parser.add_argument("--turn-transport", default="auto", choices=("auto", "udp", "tcp"))
+    parser.add_argument("--switch-views", action="store_true", help="Switch full/cropped every five seconds on the same TURN connection")
     parser.add_argument("--buffer-ms", type=int, default=200)
     parser.add_argument("--min-fps", type=float, default=20)
     parser.add_argument("--max-gap-ms", type=int, default=3000)
@@ -155,7 +188,7 @@ def main():
         parser.error("invalid duration, timeout, buffer or acceptance threshold")
     timestamp = datetime.now(timezone.utc)
     report_path = args.report or ROOT / "controller/diagnostics/runs" / f"video-{timestamp:%Y%m%dT%H%M%S}-{args.policy}.json"
-    report = {"startedAt": timestamp.isoformat(), "base": args.base, "policy": args.policy,
+    report = {"startedAt": timestamp.isoformat(), "base": args.base, "policy": args.policy, "turnTransport": args.turn_transport,
               "bufferMs": args.buffer_ms, "durationSeconds": args.seconds,
               "thresholds": {"minFps": args.min_fps, "maxFrameGapMs": args.max_gap_ms, "maxLossPercent": args.max_loss_percent},
               "scope": "Network path from the computer running this script; not proof of another viewer's network",

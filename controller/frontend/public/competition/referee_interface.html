@@ -240,6 +240,7 @@ select,.formrow input[type=number],.filters input,.filters select,.recordPath{he
 }
 .arenaHead h2{font-size:12px}
 .arenaHead span,.arenaFoot{font-size:8px}
+.arenaFoot [data-video-diagnostics]{min-width:0;max-width:62%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#9effcf;text-align:right}
 .scoreSidePanel{
   grid-column:2;
   grid-row:2;
@@ -1333,7 +1334,7 @@ html,body{
 
 /* Replay area fills the available panel without its own scrollbar */
 .recordMain{
-  grid-template-rows:34px minmax(0,1fr) !important;
+  grid-template-rows:minmax(0,1fr) !important;
   min-height:0;
   overflow:hidden !important;
 }
@@ -1345,7 +1346,7 @@ html,body{
   height:100%;
   min-height:0;
   padding:7px !important;
-  grid-template-rows:minmax(0,1fr) 32px 86px !important;
+  grid-template-rows:minmax(0,1fr) auto auto !important;
   gap:6px !important;
   overflow:hidden !important;
 }
@@ -1369,9 +1370,15 @@ html,body{
 
 /* Compact file/status row */
 .replayTools{
-  grid-template-columns:84px minmax(0,1fr) 90px !important;
+  grid-template-columns:minmax(0,1fr) auto auto auto !important;
+  grid-template-areas:"status clock play download";
   gap:5px !important;
 }
+.replayTools>.fileLabel{display:none}
+.replayTools>.videoStatus{grid-area:status}
+.replayTools>.replayClock{grid-area:clock;grid-column:auto}
+#replayPlay{grid-area:play;min-width:42px;min-height:34px;font-size:12px}
+#replayDownload{grid-area:download;min-width:50px;min-height:34px;font-size:11px}
 .fileLabel{
   min-height:28px !important;
   padding:5px 7px !important;
@@ -1442,7 +1449,7 @@ html,body{
     grid-template-rows:70px minmax(0,1fr) !important;
   }
   .replayPanel{
-    grid-template-rows:minmax(0,1fr) 30px 76px !important;
+    grid-template-rows:minmax(0,1fr) auto auto !important;
   }
   .videoPlaceholder .playCircle{
     width:46px !important;
@@ -2288,6 +2295,16 @@ input:focus,select:focus{
   .match .bottom{height:44px}
 }
 
+@media(max-width:900px){
+  .records{grid-template-columns:180px minmax(0,1fr)!important}
+  .detailBody{grid-template-columns:minmax(0,1fr)!important;grid-template-rows:minmax(0,90px) minmax(0,1fr)}
+  .summary{overflow:auto!important}
+}
+@media(max-width:600px){
+  .records{grid-template-columns:130px minmax(0,1fr)!important}
+  .replayTools{grid-template-columns:minmax(0,1fr) auto auto auto!important}
+  .replayTools>.videoStatus{display:none}
+}
 .clockConfig{margin-top:2px;padding:3px 7px;border:1px solid rgba(57,216,255,.25);border-radius:5px;background:#0a2946;color:#bfeeff;font:inherit;font-size:8px;cursor:pointer}.clockConfig:disabled{opacity:.45;cursor:not-allowed}
 </style>
 </head>
@@ -2321,7 +2338,7 @@ input:focus,select:focus{
    <div class="viewFoot"><span class="badge">裁判端完整实时画面</span></div>
   </section>
   <aside class="side">
-   <section class="card panel" id="refereeCameraPanel" data-referee-video-controls><h3>摄像头与视觉</h3><div class="formrow"><label>视频设备</label><select data-video-camera><option value="">正在读取真实摄像头…</option></select></div><button class="btn wide good" type="button" data-video-action>启动真实视频</button><div class="visionFeaturePanel"><header><span>YOLO 与画面叠加</span><small>原始视频保持高帧率</small></header><div class="visionSwitchGrid"><button class="visionSwitch" type="button" data-vision-processing-action aria-pressed="false"><span><b>YOLO 识别</b><small data-vision-processing-status>未启动</small></span><em>关闭</em></button><button class="visionSwitch" type="button" data-vision-overlay="detections" aria-pressed="false"><span><b>识别框</b><small>位置、编号与置信度</small></span><em>关闭</em></button><button class="visionSwitch" type="button" data-vision-overlay="plannedPath" aria-pressed="false"><span><b>规划路径</b><small>紫色目标路线</small></span><em>关闭</em></button><button class="visionSwitch" type="button" data-vision-overlay="trajectory" aria-pressed="false"><span><b>运动轨迹</b><small>黄色真实轨迹</small></span><em>关闭</em></button></div></div><button class="btn wide" type="button" id="trackingEntryBtn" aria-expanded="false">打开循迹控制</button><section class="trackingPanel" id="trackingPanel" hidden><div class="trackingPanelHead"><strong>循迹控制</strong><small>裁判端控制真实设备</small></div><div class="trackingGrid"><label>循迹模式<select id="trackingModeSelect"><option value="single_fish">单鱼循迹</option><option value="yolo">YOLO 目标</option></select></label><label>目标设备<select id="trackingDeviceSelect"><option value="">请选择已分配设备</option></select></label><label id="trackingTrackField">YOLO Track ID<select id="trackingTrackSelect"><option value="">请选择识别目标</option></select></label></div><div class="trackingActions"><button class="btn trackingCalibrate" type="button" id="trackingCalibrateBtn">可选：校准方向</button><button class="btn" type="button" id="trackingDrawBtn">绘制循迹线</button><button class="btn" type="button" id="trackingClearBtn">清除路径</button><button class="btn good" type="button" id="trackingStartBtn">启动循迹</button><button class="btn warn" type="button" id="trackingStopBtn">停止循迹</button></div><p class="trackingStatus" id="trackingStatus" role="status">先启动真实视频和 YOLO，再选择设备。</p></section><div class="inlineStatus"><span>实际分辨率</span><b data-camera-resolution>正在读取…</b></div><div class="inlineStatus"><span>实际帧率</span><b data-camera-fps>正在读取…</b></div></section>
+   <section class="card panel" id="refereeCameraPanel" data-referee-video-controls><h3>摄像头与视觉</h3><div class="formrow"><label>视频设备</label><select data-video-camera><option value="">正在读取真实摄像头…</option></select></div><button class="btn wide good" type="button" data-video-action>启动真实视频</button><div class="visionFeaturePanel"><header><span>YOLO 与画面叠加</span><small>原始视频保持高帧率</small></header><div class="visionSwitchGrid"><button class="visionSwitch" type="button" data-vision-processing-action aria-pressed="false"><span><b>YOLO 识别</b><small data-vision-processing-status>未启动</small></span><em>关闭</em></button><button class="visionSwitch" type="button" data-vision-overlay="detections" aria-pressed="false"><span><b>识别框</b><small>位置、编号与置信度</small></span><em>关闭</em></button><button class="visionSwitch" type="button" data-vision-overlay="plannedPath" aria-pressed="false"><span><b>规划路径</b><small>紫色目标路线</small></span><em>关闭</em></button><button class="visionSwitch" type="button" data-vision-overlay="trajectory" aria-pressed="false"><span><b>运动轨迹</b><small>黄色真实轨迹</small></span><em>关闭</em></button></div></div><button class="btn wide" type="button" id="trackingEntryBtn" aria-expanded="false">打开循迹控制</button><section class="trackingPanel" id="trackingPanel" hidden><div class="trackingPanelHead"><strong>循迹控制</strong><small>裁判端控制真实设备</small></div><div class="trackingGrid"><label>循迹模式<select id="trackingModeSelect"><option value="single_fish">单鱼循迹</option><option value="yolo">YOLO 目标</option></select></label><label id="trackingDeviceField">目标设备<select id="trackingDeviceSelect"><option value="">请选择已分配设备</option></select></label><label id="trackingTrackField">YOLO Track ID<select id="trackingTrackSelect"><option value="">请选择识别目标</option></select></label></div><div class="trackingActions"><button class="btn trackingCalibrate" type="button" id="trackingCalibrateBtn">可选：校准方向</button><button class="btn" type="button" id="trackingDrawBtn">绘制循迹线</button><button class="btn" type="button" id="trackingClearBtn">清除路径</button><button class="btn good" type="button" id="trackingStartBtn">启动循迹</button><button class="btn warn" type="button" id="trackingStopBtn">停止循迹</button></div><p class="trackingStatus" id="trackingStatus" role="status">先启动真实视频和 YOLO，再选择设备。</p></section><div class="inlineStatus"><span>实际分辨率</span><b data-camera-resolution>正在读取…</b></div><div class="inlineStatus"><span>实际帧率</span><b data-camera-fps>正在读取…</b></div><div class="inlineStatus"><span>公网链路</span><b data-video-diagnostics>等待视频连接</b></div></section>
    <section class="card panel"><h3>曝光</h3><div class="formrow"><label for="exposureRange">设置值 <b id="exposureSetpoint">-6</b></label><input id="exposureRange" type="range" min="-13" max="-1" step="1" value="-6"></div><div class="inlineStatus"><span>相机实际值</span><b id="exposureValue">正在读取…</b></div><div class="fieldDimensionActions exposureActions"><small id="exposureSaveStatus" aria-live="polite">调整后点击保存</small><button class="btn good" id="saveExposureBtn" type="button" disabled>保存曝光</button></div></section>
    <section class="card panel"><h3>选手有效画面</h3><p class="cropHint">拖动全画面中的四个角自由选择区域；裁判始终查看完整画面，选手端只显示框内内容。</p><div class="inlineStatus"><span>当前有效区</span><b id="cropValue">读取中…</b></div><div class="cropActions"><button class="btn" id="applyCropBtn">应用有效区</button><button class="btn" id="resetCropBtn">全画面</button></div><div class="transformDivider"></div><div class="rotationHead"><span>画面旋转（逆时针为正）</span><b id="rotationValue">0°</b></div><div class="rotationFields"><input id="rotationRange" type="range" min="-180" max="180" step="1" value="0"><input id="rotationNumber" type="number" min="-180" max="180" step="0.1" value="0" aria-label="画面旋转角度"></div><div class="rotationActions"><button class="btn" id="resetRotationBtn">角度归零</button><button class="btn" id="applyRotationBtn">应用旋转</button></div><div class="inlineStatus"><span>旋转处理耗时</span><b id="rotationCost">等待测量</b></div></section>
    <section class="card panel fieldDimensionCard"><h3>场地尺寸 <span class="unitBadge">单位：cm</span></h3><div class="formrow"><label for="fieldWidthCm">宽度 X</label><div class="numberWithUnit"><input id="fieldWidthCm" type="number" min="1" max="100000" step="0.1" inputmode="decimal" data-unit="cm" placeholder="填写实际宽度" aria-label="场地宽度（厘米）"><span>cm</span></div></div><div class="formrow"><label for="fieldHeightCm">高度 Y</label><div class="numberWithUnit"><input id="fieldHeightCm" type="number" min="1" max="100000" step="0.1" inputmode="decimal" data-unit="cm" placeholder="填写实际高度" aria-label="场地高度（厘米）"><span>cm</span></div></div><div class="fieldDimensionActions"><small id="fieldDimensionStatus">填写后在有效区显示标尺</small><button class="btn good" id="saveFieldDimensions" type="button">保存尺寸</button></div></section>
@@ -2337,7 +2354,7 @@ input:focus,select:focus{
    <div class="deviceOverviewList" id="deviceOverviewList"><div class="deviceOverviewEmpty"><b>等待设备上线</b><span>电量、WebSocket 往返延迟和控制者将在这里显示</span></div></div>
    <footer><i></i><span>数据来自设备心跳与控制租约</span></footer>
   </aside>
-  <section class="arenaCard panel"><div class="arenaHead"><h2>比赛画面</h2><span>原始视频</span></div><div class="arena" id="refereeMatchStage" aria-label="原始比赛视频"></div><div class="arenaFoot"><span>裁判全画面</span><span>视觉独立处理</span></div></section>
+  <section class="arenaCard panel"><div class="arenaHead"><h2>比赛画面</h2><span>原始视频</span></div><div class="arena" id="refereeMatchStage" aria-label="原始比赛视频"></div><div class="arenaFoot"><span>裁判全画面</span><span>视觉独立处理</span><span data-video-diagnostics>等待视频连接</span></div></section>
   <aside class="scoreSidePanel">
    <section class="teamQuick panel"><div class="teamQuickHead"><h3 class="blueTxt">蓝队</h3><b id="blueQuick">0</b></div><div class="quickBtns"><button class="goalBtn" data-team="blue" data-score="10" disabled>⚽ 进球<br>+10</button><button class="assistBtn" data-team="blue" data-score="2" disabled>⇄ 配合<br>+2</button><button class="outBtn" data-team="blue" data-score="-2" disabled>⚠ 越界<br>-2</button></div></section>
    <section class="teamQuick panel"><div class="teamQuickHead"><h3 class="redTxt">红队</h3><b id="redQuick">0</b></div><div class="quickBtns"><button class="goalBtn" data-team="red" data-score="10" disabled>⚽ 进球<br>+10</button><button class="assistBtn" data-team="red" data-score="2" disabled>⇄ 配合<br>+2</button><button class="outBtn" data-team="red" data-score="-2" disabled>⚠ 越界<br>-2</button></div></section>
@@ -2347,7 +2364,7 @@ input:focus,select:focus{
  </section>
 
  <section id="records" class="page records hidden">
-  <aside class="history panel"><div class="historyHead"><h2>历史比赛</h2><span id="historyCount"></span></div><div class="filters"><input id="search" placeholder="搜索队伍 / 场次"><select id="groupFilter"><option value="all">全部组别</option><option>学生组</option><option>公开组</option></select></div><div class="matchList" id="matchList"></div></aside>
+   <aside class="history panel"><div class="historyHead"><h2>历史比赛</h2><span id="historyCount"></span></div><div class="filters"><input id="search" placeholder="搜索队伍"></div><div class="matchList" id="matchList"></div></aside>
   <section class="detail"><section class="hero panel"><div class="teamInfo"><h2 class="blueTxt" id="histBlueTeam"></h2><p id="histBluePlayers"></p></div><div><div class="score"><b class="blueTxt" id="histBlueScore"></b><em>:</em><b class="redTxt" id="histRedScore"></b></div><span class="winner" id="histWinner"></span></div><div class="teamInfo red"><h2 class="redTxt" id="histRedTeam"></h2><p id="histRedPlayers"></p></div></section>
    <section class="detailBody">
     <aside class="summary panel">
@@ -2361,27 +2378,24 @@ input:focus,select:focus{
      </div>
     </aside>
     <section class="recordMain">
-     <div class="recordTabs">
-      <button class="active" data-record-tab="replay">视频回放</button>
-      <button data-record-tab="scorelog">计分记录</button>
-     </div>
      <section id="replayPane" class="recordPane replayPanel panel">
       <div class="videoStage">
-       <video id="replayVideo" controls preload="auto"></video>
+       <video id="replayVideo" preload="metadata"></video>
        <div class="videoPlaceholder" id="videoPlaceholder"><div><div class="playCircle">▶</div><h3>本场视频回放</h3><p>选择已结束比赛后，服务器录像会自动载入。</p></div></div>
       </div>
       <div class="replayTools">
        <span class="fileLabel">服务器录像</span><input id="videoFile" type="file" accept="video/*" hidden>
        <div class="videoStatus" id="videoFileName">选择比赛后自动载入</div>
        <div class="replayClock"><span id="videoElapsed">00:00</span> / <span id="videoDuration">--:--</span></div>
+       <button class="btn" id="replayPlay" type="button" aria-label="播放或暂停录像">▶</button>
+       <button class="btn" id="replayDownload" type="button" aria-label="通过 TURN 下载录像">下载</button>
       </div>
       <div class="replayTimeline">
-       <div class="timelineLabels"><span>比赛开始 03:00</span><span>比赛结束 00:00</span></div>
+       <div class="timelineLabels"><span>比赛开始</span><span>比赛结束</span></div>
+       <input id="replaySeek" type="range" min="0" max="0" step="1000" value="0" aria-label="录像进度">
        <div class="track" id="replayTrack"></div>
-       <div class="replayEvents" id="replayEvents"></div>
       </div>
      </section>
-     <section id="scorelogPane" class="recordPane timeline panel hidden"><div class="table" id="recordTable"></div></section>
     </section>
    </section>
   </section>
@@ -2431,16 +2445,17 @@ window.renderLiveMatch=function(match,elapsedMs,running){
  blueScore.textContent=match.blue.score; blueQuick.textContent=match.blue.score;
  redScore.textContent=match.red.score; redQuick.textContent=match.red.score;
  clockState.textContent=running?'比赛进行中':'';
- eventList.innerHTML=(Array.isArray(match.events)?match.events:[]).map(event=>
-  '<div class="event '+(event.side==='red'?'red':'')+'"><small>'+String(event.time||'')+'</small><span>'+String(event.label||'计分')+'</span><b>'+(Number(event.delta)>0?'+':'')+String(event.delta||0)+'</b></div>'
- ).join('');
+  if(typeof window.paintRefereeScoreEvents==='function') window.paintRefereeScoreEvents(match);
+  else eventList.innerHTML=(Array.isArray(match.events)?match.events:[]).map(event=>
+   '<div class="event '+(event.side==='red'?'red':'')+'"><small>'+String(event.time||'')+'</small><span>'+String(event.label||'计分')+'</span><b>'+(Number(event.delta)>0?'+':'')+String(event.delta||0)+'</b></div>'
+  ).join('');
 };
 const startBtn=$('startBtn'), endBtn=$('endBtn'), nextBtn=$('nextBtn');
-const historyCount=$('historyCount'), search=$('search'), groupFilter=$('groupFilter'), matchList=$('matchList');
+const historyCount=$('historyCount'), search=$('search'), matchList=$('matchList');
 const histBlueTeam=$('histBlueTeam'), histBluePlayers=$('histBluePlayers'), histBlueScore=$('histBlueScore'), histRedScore=$('histRedScore'), histWinner=$('histWinner'), histRedTeam=$('histRedTeam'), histRedPlayers=$('histRedPlayers');
 const histNo=$('histNo'), histGroup=$('histGroup'), histArena=$('histArena'), histEnd=$('histEnd'), hbg=$('hbg'), hba=$('hba'), hbo=$('hbo'), hrg=$('hrg'), hra=$('hra'), hro=$('hro');
 const histVideoStatus=$('histVideoStatus'), histVideoFile=$('histVideoFile'), histJsonFile=$('histJsonFile'), histSavePath=$('histSavePath');
-const replayPane=$('replayPane'), replayVideo=$('replayVideo'), videoPlaceholder=$('videoPlaceholder'), videoFile=$('videoFile'), videoFileName=$('videoFileName'), videoElapsed=$('videoElapsed'), videoDuration=$('videoDuration'), replayTrack=$('replayTrack'), replayEvents=$('replayEvents'), scorelogPane=$('scorelogPane'), recordTable=$('recordTable');
+const replayPane=$('replayPane'), replayVideo=$('replayVideo'), videoPlaceholder=$('videoPlaceholder'), videoFile=$('videoFile'), videoFileName=$('videoFileName'), videoElapsed=$('videoElapsed'), videoDuration=$('videoDuration'), replayPlay=$('replayPlay'), replayDownload=$('replayDownload'), replaySeek=$('replaySeek'), replayTrack=$('replayTrack');
 const exposureRange=$('exposureRange'), exposureValue=$('exposureValue'), applyCropBtn=$('applyCropBtn'), resetCropBtn=$('resetCropBtn');
 const history=[];
 function now(){return new Date().toLocaleTimeString('zh-CN',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})}
@@ -2516,7 +2531,8 @@ document.querySelectorAll('[data-score]').forEach(button=>button.addEventListene
 
 
 function hw(m){return m.blue.score>m.red.score?'蓝队获胜':m.red.score>m.blue.score?'红队获胜':'平局'}
-function renderHistory(){const q=search.value.toLowerCase(),g=groupFilter.value;const list=history.filter(m=>(g==='all'||m.group===g)&&(!q||(m.no+m.blue.team+m.red.team).toLowerCase().includes(q)));historyCount.textContent=list.length+' 场';matchList.innerHTML=list.length?list.map(m=>`<div class="matchItem ${m.id===historySelected?'active':''}" data-id="${m.id}"><button class="matchSelect" data-id="${m.id}"><div class="matchTop"><b>${m.no} · ${m.group}</b><span>${m.date}</span></div><div class="matchTeams"><span class="blue">${m.blue.team}</span><strong>${m.blue.score}:${m.red.score}</strong><span class="red">${m.red.team}</span></div></button><button class="matchDelete" data-delete-record="${m.id}" title="删除比赛记录" aria-label="删除比赛记录">×</button></div>`).join(''):'<div class="deviceOverviewEmpty"><b>暂无真实比赛记录</b><span>完成并保存比赛后将在此显示</span></div>';document.querySelectorAll('.matchSelect').forEach(b=>b.onclick=()=>{
+function filteredHistory(){const q=String(search.value||'').trim().toLowerCase();return history.filter(m=>!q||[m.blue.team,m.red.team].some(team=>String(team||'').toLowerCase().includes(q)))}
+function renderHistory(){const list=filteredHistory();historyCount.textContent=list.length+' 场';matchList.innerHTML=list.length?list.map(m=>`<div class="matchItem ${m.id===historySelected?'active':''}" data-id="${m.id}"><button class="matchSelect" data-id="${m.id}"><div class="matchTop"><b>${m.no} · ${m.group}</b><span>${m.date}</span></div><div class="matchTeams"><span class="blue">${m.blue.team}</span><strong>${m.blue.score}:${m.red.score}</strong><span class="red">${m.red.team}</span></div></button><button class="matchDelete" data-delete-record="${m.id}" title="删除比赛记录" aria-label="删除比赛记录">×</button></div>`).join(''):'<div class="deviceOverviewEmpty"><b>暂无真实比赛记录</b><span>完成并保存比赛后将在此显示</span></div>';document.querySelectorAll('.matchSelect').forEach(b=>b.onclick=()=>{
  historySelected=b.dataset.id;
  if(replayObjectUrl){URL.revokeObjectURL(replayObjectUrl);replayObjectUrl=null}
  videoFile.value='';videoFileName.textContent='正在载入服务器录像';
@@ -2531,14 +2547,15 @@ function replayElapsedForEvent(matchTime,elapsedMs){
 }
 function seekReplay(matchTime,elapsedMs){
  const elapsed=replayElapsedForEvent(matchTime,elapsedMs);
- if(replayVideo.src){
-   const max=Number.isFinite(replayVideo.duration)?replayVideo.duration:elapsed;
-   replayVideo.currentTime=Math.min(elapsed,max||elapsed);
-   replayVideo.play().catch(()=>{});
-   toast('已跳转到 '+matchTime+' 的计分片段');
- }else{
-   toast('请先载入本场录像');
- }
+ playReplayAt(elapsed*1000);
+ if(replayVideo.src) toast('已跳转到 '+matchTime+' 的计分片段');
+}
+function playReplayAt(requestedMs){
+ const milliseconds=Math.max(0,Number(requestedMs)||0);
+ if(!replayVideo.src){toast('请先载入本场录像');return}
+ const max=Number.isFinite(replayVideo.duration)?replayVideo.duration*1000:milliseconds;
+ replayVideo.currentTime=Math.min(milliseconds,max||milliseconds)/1000;
+ replayVideo.play().catch(()=>{});
 }
 function renderReplay(m){
  if(m.videoUrl){
@@ -2559,12 +2576,15 @@ function renderReplay(m){
    videoFileName.textContent=m.videoError||'本场没有可播放录像';
    histVideoStatus.textContent=m.videoError?'录像异常':'无录像';
  }
+ replaySeek.max=String(Math.max(0,Number(m.durationMs)||Number(m.videoDurationMs)||MATCH_DURATION*1000));
+ replaySeek.value='0';
+ replayDownload.disabled=!m.videoUrl;
  replayTrack.innerHTML=m.events.map(e=>{
    const elapsed=replayElapsedForEvent(e[0],e[5]);
-   const left=Math.min(100,Math.max(0,elapsed/MATCH_DURATION*100));
+   const total=Math.max(1,Number(m.durationMs)||Number(m.videoDurationMs)||MATCH_DURATION*1000);
+   const left=Math.min(100,Math.max(0,elapsed*1000/total*100));
    return `<button class="eventMark ${e[2]==='红队'?'red':''}" style="left:${left}%" data-replay-time="${e[0]}" data-replay-elapsed-ms="${Number(e[5])||0}" title="${e[0]} ${e[2]} ${e[3]}"></button>`;
  }).join('');
- replayEvents.innerHTML=m.events.length?m.events.map(e=>`<button class="replayEvent ${e[2]==='红队'?'red':''}" data-replay-time="${e[0]}" data-replay-elapsed-ms="${Number(e[5])||0}"><small>${e[0]} · ${e[1]}</small>${e[2]} · ${e[3]} · ${e[4]}</button>`).join(''):'<span class="videoStatus">本场暂未记录独立计分事件</span>';
  document.querySelectorAll('[data-replay-time]').forEach(b=>b.onclick=()=>seekReplay(b.dataset.replayTime,b.dataset.replayElapsedMs));
 }
 function renderHistoryDetail(){
@@ -2575,8 +2595,7 @@ function renderHistoryDetail(){
   histNo.textContent='—';histGroup.textContent='—';histArena.textContent='—';histEnd.textContent='—';
   histVideoFile.textContent='—';histJsonFile.textContent='—';histSavePath.textContent='—';histVideoStatus.textContent='暂无真实记录';
   [hbg,hba,hbo,hrg,hra,hro].forEach(el=>el.textContent='—');
-  recordTable.innerHTML='<div class="deviceOverviewEmpty"><b>暂无计分记录</b><span>这里只显示真实比赛数据</span></div>';
-  replayTrack.innerHTML='';replayEvents.innerHTML='';return;
+  replayTrack.innerHTML='';replaySeek.value='0';replaySeek.max='0';replayDownload.disabled=true;return;
  }
  histBlueTeam.textContent=m.blue.team;histRedTeam.textContent=m.red.team;
  histBluePlayers.textContent=m.blue.players;histRedPlayers.textContent=m.red.players;
@@ -2587,10 +2606,7 @@ function renderHistoryDetail(){
  histSavePath.textContent=m.savePath||'-';
  histVideoStatus.textContent=m.videoStatus==='saved'?'✓ 服务器录像已封存':(m.videoError?'录像异常':'无录像');
  hbg.textContent=m.blue.g;hba.textContent=m.blue.a;hbo.textContent=m.blue.o;hrg.textContent=m.red.g;hra.textContent=m.red.a;hro.textContent=m.red.o;
- recordTable.innerHTML=`<div class="tr head"><span>比赛时间</span><span>现场时间</span><span>队伍</span><span>事件</span><span>分值</span></div>`+
- m.events.map(e=>`<div class="tr"><span>${e[0]}</span><span>${e[1]}</span><span class="${e[2]==='蓝队'?'blueTxt':'redTxt'}">${e[2]}</span><button class="btn" data-replay-time="${e[0]}" style="text-align:left;padding:4px 6px">${e[3]}</button><b>${e[4]}</b></div>`).join('');
  renderReplay(m);
- document.querySelectorAll('#recordTable [data-replay-time]').forEach((b,index)=>{const e=m.events[index];b.dataset.replayElapsedMs=Number(e&&e[5])||0;b.onclick=()=>seekReplay(b.dataset.replayTime,b.dataset.replayElapsedMs)});
 }
 window.applyCompetitionRecords=function(records){
  function formatElapsed(milliseconds){
@@ -2615,15 +2631,21 @@ window.applyCompetitionRecords=function(records){
   });
   return result;
  }
- const mapped=(Array.isArray(records)?records:[]).map((record,index)=>{
+  const usedIds=new Set();
+  const mapped=(Array.isArray(records)?records:[]).map((record,index)=>{
    const finished=record.finishedAt?new Date(record.finishedAt):null;
    const validDate=finished&&!Number.isNaN(finished.getTime());
    const fileName=record.videoUrl?decodeURIComponent(String(record.videoUrl).split('/').pop()||''):'';
    const events=mapEvents(record.events);
    const blueBreakdown=breakdown(events,'蓝队');
    const redBreakdown=breakdown(events,'红队');
-   return {
-     id:String(record.id||`${record.matchNo||'match'}-${record.finishedAt||index}`),
+    const baseId=String(record.id||`${record.matchNo||'match'}-${record.finishedAt||index}`);
+    let id=baseId;
+    let suffix=2;
+    while(usedIds.has(id)) id=baseId+'#'+suffix++;
+    usedIds.add(id);
+    return {
+      id,
      no:record.matchNo||'未命名比赛',group:record.group||'未设置',arena:record.venue||'未设置',
      date:validDate?finished.toLocaleDateString('zh-CN'):'未记录',
      end:validDate?finished.toLocaleString('zh-CN',{hour12:false}):(record.finishedAt||'未记录'),
@@ -2637,14 +2659,8 @@ window.applyCompetitionRecords=function(records){
  if(!history.some(item=>item.id===historySelected))historySelected=history[0]?history[0].id:null;
  renderHistory();renderHistoryDetail();
 };
-search.oninput=renderHistory;groupFilter.onchange=renderHistory;
+ search.oninput=renderHistory;
 
-document.querySelectorAll('[data-record-tab]').forEach(btn=>btn.onclick=()=>{
- document.querySelectorAll('[data-record-tab]').forEach(x=>x.classList.toggle('active',x===btn));
- const replay=btn.dataset.recordTab==='replay';
- replayPane.classList.toggle('hidden',!replay);
- scorelogPane.classList.toggle('hidden',replay);
-});
 videoFile.onchange=e=>{
  const file=e.target.files&&e.target.files[0];
  if(!file)return;
@@ -2659,6 +2675,7 @@ videoFile.onchange=e=>{
 };
 replayVideo.onloadedmetadata=()=>{
  videoDuration.textContent=fmt(Math.floor(replayVideo.duration||0));
+ replaySeek.max=String(Math.max(0,Math.round((replayVideo.duration||0)*1000)));
 };
 replayVideo.onerror=()=>{
  videoPlaceholder.classList.remove('hidden');
@@ -2667,10 +2684,24 @@ replayVideo.onerror=()=>{
 };
 replayVideo.ontimeupdate=()=>{
  videoElapsed.textContent=fmt(Math.floor(replayVideo.currentTime||0));
+ replaySeek.value=String(Math.round((replayVideo.currentTime||0)*1000));
+};
+replayPlay.onclick=()=>replayVideo.paused?replayVideo.play():replayVideo.pause();
+replayVideo.onplay=()=>replayPlay.textContent='❚❚';
+replayVideo.onpause=()=>replayPlay.textContent='▶';
+replaySeek.oninput=()=>playReplayAt(replaySeek.value);
+replayDownload.onclick=async()=>{
+ const record=history.find(item=>item.id===historySelected)||history[0];
+ if(!record||!record.videoUrl||!window.FishReplayTransport){toast('当前录像不可下载');return}
+ replayDownload.disabled=true;
+ try{await window.FishReplayTransport.download(record.videoUrl,status=>{videoFileName.textContent=status});videoFileName.textContent='录像下载完成'}
+ catch(error){videoFileName.textContent=error&&error.message?error.message:'录像下载失败'}
+ finally{replayDownload.disabled=false}
 };
 
 renderSignup();renderCalibrationLock();renderHistory();renderHistoryDetail();show('signup');
 </script>
-<script src="competition-adapter.js?v=20260923-referee-roster"></script>
+<script src="replay-transport.js?v=20261013-replay"></script>
+<script src="competition-adapter.js?v=20261013-single-turn-relay"></script>
 </body>
 </html>

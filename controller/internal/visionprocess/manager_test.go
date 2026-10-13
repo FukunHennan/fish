@@ -78,6 +78,25 @@ func TestEnsureStartsAndLaterStopsOwnedVisionProcess(t *testing.T) {
 	}
 }
 
+func TestUnhealthyExternalBackendDoesNotStartConflictingProcess(t *testing.T) {
+	var starts atomic.Int32
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer backend.Close()
+	manager, err := Ensure(backend.URL, func(string) (Process, error) {
+		starts.Add(1)
+		return &fakeProcess{}, nil
+	}, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+	if restarted, err := manager.restartProcess(); restarted || err == nil || starts.Load() != 0 {
+		t.Fatalf("external process was taken over: restarted=%v error=%v starts=%d", restarted, err, starts.Load())
+	}
+}
+
 func TestWatchdogRestartsBackendAfterConsecutiveHealthFailures(t *testing.T) {
 	t.Setenv("FISH_VISION_WATCHDOG_FAILURES", "2")
 	var healthy atomic.Bool
@@ -101,6 +120,9 @@ func TestWatchdogRestartsBackendAfterConsecutiveHealthFailures(t *testing.T) {
 	}
 	defer manager.Close()
 	healthy.Store(false)
+	manager.mu.Lock()
+	manager.process = &fakeProcess{}
+	manager.mu.Unlock()
 	deadline := time.Now().Add(6 * time.Second)
 	for time.Now().Before(deadline) && starts.Load() == 0 {
 		time.Sleep(50 * time.Millisecond)

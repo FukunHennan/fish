@@ -4,19 +4,25 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import secrets
 import time
 from fractions import Fraction
 
 import cv2
 import crop_region
+from cloudflare_turn import CloudflareTurnProvider
 from recording import MatchVideoRecorder, RecordingError
 
 from config import (
     WEBRTC_OFFER_TIMEOUT_S,
+    WEBRTC_MAX_FPS,
+    WEBRTC_MAX_FRAME_AGE_S,
     WEBRTC_STUN_URL,
     WEBRTC_TURN_CREDENTIAL,
     WEBRTC_TURN_URL,
     WEBRTC_TURN_USERNAME,
+    WEBRTC_ICE_TRANSPORT_POLICY,
+    WEBRTC_BROWSER_ICE_TRANSPORT_POLICY,
 )
 
 # A browser can remain in ICE ``disconnected`` after the network path has
@@ -133,6 +139,7 @@ class _LatestFrameBuffer:
 
 
 VIDEO_PROFILES = {"compact": (480, 360), "smooth": (640, 480), "hd": (1280, 960), "full": (1920, 1440)}
+TURN_PROVIDER = CloudflareTurnProvider()
 
 def _resize_for_video(frame, quality="smooth"):
     height, width = frame.shape[:2]
@@ -150,30 +157,86 @@ def _resize_for_video(frame, quality="smooth"):
     return cv2.resize(frame, target, interpolation=interpolation)
 
 
-def _ice_servers():
-    servers = []
-    if WEBRTC_STUN_URL:
-        servers.append(RTCIceServer(urls=WEBRTC_STUN_URL))
-    if WEBRTC_TURN_URL:
-        servers.append(RTCIceServer(
-            urls=WEBRTC_TURN_URL,
-            username=WEBRTC_TURN_USERNAME,
-            credential=WEBRTC_TURN_CREDENTIAL,
-        ))
-    return servers
+def _static_turn_servers():
+    if not WEBRTC_TURN_URL or not WEBRTC_TURN_USERNAME or not WEBRTC_TURN_CREDENTIAL:
+        return []
+    urls = [item.strip() for item in WEBRTC_TURN_URL.split(",") if item.strip()]
+    return [{
+        "urls": urls,
+        "username": WEBRTC_TURN_USERNAME,
+        "credential": WEBRTC_TURN_CREDENTIAL,
+    }] if urls else []
 
 
-def browser_ice_servers():
+def _turn_servers():
+    dynamic = TURN_PROVIDER.get_ice_servers()
+    return dynamic or _static_turn_servers()
+
+
+def _turn_only(server):
+    urls = server.get("urls", [])
+    if isinstance(urls, str):
+        urls = [urls]
+    urls = [url for url in urls if str(url).lower().startswith(("turn:", "turns:"))]
+    if not urls:
+        return None
+    filtered = dict(server)
+    filtered["urls"] = urls
+    return filtered
+
+
+def _ice_server_dicts():
+    turn_servers = _turn_servers()
+    if WEBRTC_ICE_TRANSPORT_POLICY == "relay":
+        return [filtered for server in turn_servers if (filtered := _turn_only(server))]
     servers = []
     if WEBRTC_STUN_URL:
         servers.append({"urls": WEBRTC_STUN_URL})
-    if WEBRTC_TURN_URL:
-        servers.append({
-            "urls": WEBRTC_TURN_URL,
-            "username": WEBRTC_TURN_USERNAME,
-            "credential": WEBRTC_TURN_CREDENTIAL,
-        })
+    servers.extend(turn_servers)
     return servers
+
+
+def _ice_servers():
+    return [
+        RTCIceServer(
+            urls=server["urls"],
+            username=server.get("username", ""),
+            credential=server.get("credential", ""),
+        )
+        for server in _ice_server_dicts()
+    ]
+
+
+def browser_ice_servers():
+    turn_servers = _turn_servers()
+    if WEBRTC_BROWSER_ICE_TRANSPORT_POLICY == "relay":
+        return [filtered for server in turn_servers if (filtered := _turn_only(server))]
+    servers = []
+    if WEBRTC_STUN_URL:
+        servers.append({"urls": WEBRTC_STUN_URL})
+    servers.extend(turn_servers)
+    return servers
+
+
+def _relay_only_sdp(sdp):
+    lines = sdp.splitlines()
+    candidate_lines = [line for line in lines if line.startswith("a=candidate:")]
+    relay_lines = [line for line in candidate_lines if " typ relay " in line]
+    if not relay_lines:
+        raise WebRTCUnavailable("未收集到 Cloudflare TURN relay 候选")
+    result = [
+        line for line in lines
+        if not line.startswith("a=candidate:") or " typ relay " in line
+    ]
+    return "\r\n".join(result) + "\r\n"
+
+
+def _without_host_candidates(sdp):
+    lines = [
+        line for line in sdp.splitlines()
+        if not (line.startswith("a=candidate:") and " typ host" in line)
+    ]
+    return "\r\n".join(lines) + "\r\n"
 
 
 if _IMPORT_ERROR is None:
@@ -186,6 +249,10 @@ if _IMPORT_ERROR is None:
             self._sequence = -1
             self._pts = 0
             self._timestamp_origin = None
+            self._next_capture_timestamp = None
+            self._frame_interval = (
+                1.0 / WEBRTC_MAX_FPS if WEBRTC_MAX_FPS > 0 else 0.0
+            )
 
         async def recv(self):
             while True:
@@ -203,12 +270,28 @@ if _IMPORT_ERROR is None:
                 self._sequence = sequence
                 if (
                     frame_timestamp > 0
-                    and time.time() - frame_timestamp > 2.0
+                    and time.time() - frame_timestamp > WEBRTC_MAX_FRAME_AGE_S
                 ):
                     # Viewing tolerates processing jitter independently of motion safety.
                     # Never push an excessively old frame into the browser after a
                     # processing/network stall. Wait for a newer capture.
                     continue
+                if (
+                    self._frame_interval > 0
+                    and frame_timestamp > 0
+                    and self._next_capture_timestamp is not None
+                    and frame_timestamp + 1e-6 < self._next_capture_timestamp
+                ):
+                    # The camera can run faster than the public transport.
+                    # Advance the sequence and wait for the newest frame at
+                    # the next transport tick instead of queuing old frames.
+                    continue
+                if self._frame_interval > 0 and frame_timestamp > 0:
+                    if self._next_capture_timestamp is None:
+                        self._next_capture_timestamp = frame_timestamp + self._frame_interval
+                    else:
+                        elapsed_slots = max(1, int((frame_timestamp - self._next_capture_timestamp + 1e-6) / self._frame_interval) + 1)
+                        self._next_capture_timestamp += elapsed_slots * self._frame_interval
                 video_frame = VideoFrame.from_ndarray(_resize_for_video(frame, self._quality), format="bgr24")
                 if self._timestamp_origin is None:
                     self._timestamp_origin = frame_timestamp
@@ -233,6 +316,7 @@ class WebRTCServer:
         self.available = _IMPORT_ERROR is None
         self._source = _LatestFrameBuffer()
         self._pcs = set()
+        self._peer_views = {}
         self._pcs_lock = threading.Lock()
         self._loop = None
         self._thread = None
@@ -252,6 +336,25 @@ class WebRTCServer:
 
     def browser_ice_servers(self):
         return browser_ice_servers()
+
+    def set_peer_view(self, peer_id, view):
+        if view not in ("full", "cropped"):
+            raise ValueError("无效的视频视图")
+        with self._pcs_lock:
+            entry = self._peer_views.get(peer_id)
+            if entry is None or entry[0].connectionState == "closed":
+                return False
+            entry[1]._view = view
+            return True
+
+    def browser_ice_config(self):
+        return {
+            "iceServers": browser_ice_servers(),
+            "iceTransportPolicy": WEBRTC_BROWSER_ICE_TRANSPORT_POLICY,
+            "turnRequired": WEBRTC_ICE_TRANSPORT_POLICY == "relay",
+            "turnConfigured": bool(_turn_servers()),
+            "turnError": TURN_PROVIDER.last_error or None,
+        }
 
     def jpeg_snapshot(self, view="cropped", quality="smooth"):
         """Return one fresh frame for the HTTPS fallback when ICE cannot connect."""
@@ -360,8 +463,9 @@ class WebRTCServer:
             raise
 
     async def _handle_offer(self, sdp, offer_type, quality="smooth", view="cropped"):
+        ice_servers = await asyncio.to_thread(_ice_servers)
         pc = RTCPeerConnection(
-            configuration=RTCConfiguration(iceServers=_ice_servers())
+            configuration=RTCConfiguration(iceServers=ice_servers)
         )
         with self._pcs_lock:
             self._pcs.add(pc)
@@ -387,15 +491,26 @@ class WebRTCServer:
                 await self._remove_peer(pc)
 
         try:
+            remote_sdp = sdp
+            if WEBRTC_ICE_TRANSPORT_POLICY == "relay":
+                remote_sdp = _without_host_candidates(remote_sdp)
             await pc.setRemoteDescription(
-                RTCSessionDescription(sdp=sdp, type=offer_type)
+                RTCSessionDescription(sdp=remote_sdp, type=offer_type)
             )
-            pc.addTrack(_LatestVideoTrack(self._source, quality, view))
+            track = _LatestVideoTrack(self._source, quality, view)
+            pc.addTrack(track)
+            peer_id = secrets.token_urlsafe(24)
+            with self._pcs_lock:
+                self._peer_views[peer_id] = (pc, track)
             answer = await pc.createAnswer()
             await pc.setLocalDescription(answer)
+            answer_sdp = pc.localDescription.sdp
+            if WEBRTC_ICE_TRANSPORT_POLICY == "relay":
+                answer_sdp = _relay_only_sdp(answer_sdp)
             return {
-                "sdp": pc.localDescription.sdp,
+                "sdp": answer_sdp,
                 "type": pc.localDescription.type,
+                "peerId": peer_id,
             }
         except Exception:
             await self._remove_peer(pc)
@@ -405,6 +520,7 @@ class WebRTCServer:
         with self._pcs_lock:
             existed = pc in self._pcs
             self._pcs.discard(pc)
+            self._peer_views = {key: value for key, value in self._peer_views.items() if value[0] is not pc}
         if existed and pc.connectionState != "closed":
             await pc.close()
 
@@ -433,6 +549,7 @@ class WebRTCServer:
         with self._pcs_lock:
             peers = list(self._pcs)
             self._pcs.clear()
+            self._peer_views.clear()
         if peers:
             await asyncio.gather(*(pc.close() for pc in peers), return_exceptions=True)
 

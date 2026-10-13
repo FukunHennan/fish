@@ -13,14 +13,14 @@
     "rightAmplitudePercent": 0.4,
     "transitionMs": 600,
     "playerControl": {
-      "frequency": 2.5,
+      "frequency": 4.6,
       "amplitudePercent": 60
     },
     "manualControl": {
       "frequency": 2.5,
       "amplitudePercent": 40
     },
-    "updatedAt": "2026-10-09T13:01:38+08:00"
+    "updatedAt": "2026-10-12T18:55:36+08:00"
   },
   "90:DA:72:85:B9:A4": {
     "deviceId": "90:DA:72:85:B9:A4",
@@ -36,14 +36,14 @@
     "rightAmplitudePercent": 0.4,
     "transitionMs": 600,
     "playerControl": {
-      "frequency": 2.5,
-      "amplitudePercent": 60
+      "frequency": 2.3,
+      "amplitudePercent": 84
     },
     "manualControl": {
       "frequency": 2.5,
       "amplitudePercent": 40
     },
-    "updatedAt": "2026-10-09T13:02:01+08:00"
+    "updatedAt": "2026-10-12T11:13:16+08:00"
   },
   "90:DA:72:85:EC:C8": {
     "deviceId": "90:DA:72:85:EC:C8",
@@ -91,6 +91,29 @@
     },
     "updatedAt": "2026-10-11T17:04:57+08:00"
   },
+  "90:DA:72:85:FF:A4": {
+    "deviceId": "90:DA:72:85:FF:A4",
+    "servoMax": 180,
+    "straightCenter": 90,
+    "forwardFrequency": 2.5,
+    "forwardAmplitudePercent": 0.4,
+    "leftCenterRatio": 0.5,
+    "leftFrequency": 2.3,
+    "leftAmplitudePercent": 0.4,
+    "rightCenterRatio": 0.5,
+    "rightFrequency": 2.3,
+    "rightAmplitudePercent": 0.4,
+    "transitionMs": 600,
+    "playerControl": {
+      "frequency": 2.5,
+      "amplitudePercent": 60
+    },
+    "manualControl": {
+      "frequency": 2.5,
+      "amplitudePercent": 40
+    },
+    "updatedAt": "2026-10-12T09:30:05+08:00"
+  },
   "AC:27:6E:5E:AB:7C": {
     "deviceId": "AC:27:6E:5E:AB:7C",
     "servoMax": 180,
@@ -105,13 +128,13 @@
     "rightAmplitudePercent": 0.4,
     "transitionMs": 600,
     "playerControl": {
-      "frequency": 3,
+      "frequency": 2.7,
       "amplitudePercent": 60
     },
     "manualControl": {
       "frequency": 2.5,
       "amplitudePercent": 40
     },
-    "updatedAt": "2026-10-09T19:11:54+08:00"
+    "updatedAt": "2026-10-12T15:37:36+08:00"
   }
 }

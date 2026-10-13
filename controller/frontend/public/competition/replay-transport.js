@@ -35,7 +35,7 @@
     });
   }
 
-  async function connect(url, mode, handlers, startMs = 0) {
+  async function connect(url, handlers) {
     const fileName = fileNameFromUrl(url);
     const config = await jsonResponse('/api/vision/webrtc/replay/config');
     if (!config.available || !config.iceServers.length) throw new Error('Cloudflare TURN 不可用');
@@ -52,21 +52,16 @@
       if (!stopped && peer.connectionState === 'failed') handlers.onError(new Error('TURN 回放连接失败'));
     });
     try {
-      if (mode === 'play') {
-        peer.addTransceiver('video', { direction: 'recvonly' });
-        peer.addEventListener('track', (event) => handlers.onTrack(event.track, session));
-      } else {
-        const channel = peer.createDataChannel('recording-download', { ordered: true });
-        channel.binaryType = 'arraybuffer';
-        handlers.onChannel(channel, session);
-      }
+      const channel = peer.createDataChannel('recording-download', { ordered: true });
+      channel.binaryType = 'arraybuffer';
+      handlers.onChannel(channel, session);
       await peer.setLocalDescription(await peer.createOffer());
       await waitForIce(peer);
       if (stopped) return session;
       const answer = await jsonResponse('/api/vision/webrtc/replay/offer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fileName, mode, startMs, type: peer.localDescription.type, sdp: peer.localDescription.sdp }),
+        body: JSON.stringify({ fileName, mode: 'download', type: peer.localDescription.type, sdp: peer.localDescription.sdp }),
       });
       if (!stopped) await peer.setRemoteDescription(answer);
       return session;
@@ -89,8 +84,7 @@
     };
     video.muted = true;
     video.playsInline = true;
-    // MP4 playback uses the HTTP endpoint so the browser can buffer ahead
-    // and seek with byte ranges; TURN remains available for downloads.
+    // Playback uses the HTTP endpoint so the browser can buffer MP4 ranges.
     video.srcObject = null;
     video.src = url;
     video.currentTime = startMs / 1000;
@@ -99,21 +93,6 @@
     video.play().then(() => { if (!cancelled) onStatus('正在播放录像'); })
       .catch(() => { if (!cancelled) onStatus('点击画面开始播放'); });
     return controller;
-/*
-    connect(url, 'play', {
-      onTrack(track, connection) {
-        if (cancelled) { connection.close(); return; }
-        video.srcObject = new MediaStream([track]);
-        track.addEventListener('ended', () => { if (!cancelled) onStatus('回放结束'); });
-        video.play().then(() => { if (!cancelled) onStatus('正在通过 TURN 播放'); })
-          .catch(() => { if (!cancelled) onStatus('点击画面开始播放'); });
-      },
-      onError(error) { if (!cancelled) onStatus(error.message); },
-    }, startMs).then((connection) => {
-      if (cancelled) connection.close();
-      else session = connection;
-    }).catch((error) => { if (!cancelled) onStatus(error.message); });
-*/
   }
 
   async function download(url, onStatus) {
@@ -125,7 +104,7 @@
         let lastPercent = -1;
         let unacknowledged = 0;
         const chunks = [];
-        connect(url, 'download', {
+        connect(url, {
           onError: reject,
           onChannel(channel) {
             channel.addEventListener('open', () => channel.send('download'));

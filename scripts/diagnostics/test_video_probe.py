@@ -1,9 +1,20 @@
 import unittest
 
-from video_probe import interval, summarize
+from video_probe import interval, summarize, select_turn_servers
 
 
 class VideoProbeTests(unittest.TestCase):
+    def test_transport_filter_preserves_credentials_and_excludes_other_paths(self):
+        servers = [{"urls": ["stun:example:3478", "turn:example:3478?transport=udp", "turn:example:3478?transport=tcp", "turns:example:5349"], "username": "test", "credential": "secret"}]
+        udp = select_turn_servers(servers, "udp")
+        tcp = select_turn_servers(servers, "tcp")
+        self.assertEqual(len(udp[0]["urls"]), 1)
+        self.assertEqual(len(tcp[0]["urls"]), 2)
+        self.assertEqual(udp[0]["credential"], "secret")
+        self.assertEqual(len(servers[0]["urls"]), 4)
+        with self.assertRaises(RuntimeError):
+            select_turn_servers([{"urls": "stun:example:3478"}], "udp")
+
     def samples(self):
         return [{"timestampMs": stamp, "framesDecoded": frames, "renderedFrames": frames,
                  "packetsReceived": packets, "packetsLost": lost, "bytesReceived": size,

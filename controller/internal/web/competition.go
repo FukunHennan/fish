@@ -114,9 +114,12 @@ type competitionStore struct {
 	path                 string
 	Match                *competitionMatch          `json:"match"`
 	Records              []competitionRecord        `json:"records"`
+	LastFinished         *competitionRecord         `json:"lastFinishedMatch,omitempty"`
 	FinishedNoticeClaims map[string]map[string]bool `json:"finishedNoticeClaims,omitempty"`
 	started              time.Time
 	running              bool
+	pendingFinish        *competitionRecord
+	clockTimer           *time.Timer
 }
 
 // 已结束比赛允许裁判更正名称和比分，对应的历史记录也要保持一致。
@@ -147,6 +150,16 @@ func newCompetitionStore(path string) *competitionStore {
 	if data, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(data, store)
 	}
+	if store.Match != nil {
+		if store.Match.State == matchStateRunning {
+			store.Match.State = matchStatePaused
+		}
+		if store.Match.RecordingState == "recording" {
+			store.Match.RecordingState = "interrupted"
+			store.Match.RecordingError = "服务重启，录像已中断；恢复比赛时重新启动录像"
+		}
+	}
+	store.normalizeRecordIDsLocked()
 	return store
 }
 
@@ -168,7 +181,11 @@ func (c *competitionStore) saveLocked() error {
 	if err := os.MkdirAll(filepath.Dir(c.path), 0o700); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(c, "", "  ")
+	snapshot := c.snapshotLocked()
+	if snapshot.Match != nil {
+		snapshot.Match.ElapsedMs = c.elapsedLocked()
+	}
+	data, err := json.MarshalIndent(snapshot, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -203,10 +220,12 @@ func formatCompetitionClock(milliseconds int64) string {
 	return fmt.Sprintf("%02d:%02d", seconds/60, seconds%60)
 }
 
-func (s *server) finishCompetitionLocked(ctx context.Context, store *competitionStore, operator string) {
+func (s *server) finishCompetitionLocked(ctx context.Context, store *competitionStore, operator string) error {
+	original := store
+	store = store.snapshotLocked()
 	match := store.Match
 	if match == nil || match.State == matchStateFinished {
-		return
+		return nil
 	}
 	if store.running {
 		match.ElapsedMs = store.elapsedLocked()
@@ -216,7 +235,7 @@ func (s *server) finishCompetitionLocked(ctx context.Context, store *competition
 		store.running = false
 	}
 	var recording competitionRecordingResult
-	if match.RecordingState == "recording" && match.RecordingID != "" {
+	if store.pendingFinish == nil && match.RecordingState == "recording" && match.RecordingID != "" {
 		result, err := s.stopCompetitionRecording(ctx, match.RecordingID, false)
 		if err != nil {
 			match.RecordingState = "error"
@@ -230,7 +249,7 @@ func (s *server) finishCompetitionLocked(ctx context.Context, store *competition
 	match.State = matchStateFinished
 	match.Operator = operator
 	match.UpdatedAt = time.Now().Format(time.RFC3339)
-	store.Records = append([]competitionRecord{{
+	record := competitionRecord{
 		ID: match.ID, MatchNo: match.MatchNo, Group: match.Group, Venue: match.Venue,
 		BlueName: match.Blue.Name, RedName: match.Red.Name,
 		BlueScore: match.Blue.Score, RedScore: match.Red.Score,
@@ -242,7 +261,12 @@ func (s *server) finishCompetitionLocked(ctx context.Context, store *competition
 		VideoDroppedFrames: recording.DroppedFrames, VideoAverageFPS: recording.AverageFPS,
 		VideoWidth: recording.Width, VideoHeight: recording.Height,
 		VideoError: match.RecordingError,
-	}}, store.Records...)
+	}
+	if store.pendingFinish != nil {
+		record = *store.pendingFinish
+	}
+	store.LastFinished = &record
+	store.Records = append([]competitionRecord{record}, store.Records...)
 	if len(store.Records) > 200 {
 		store.Records = store.Records[:200]
 	}
@@ -257,7 +281,6 @@ func (s *server) finishCompetitionLocked(ctx context.Context, store *competition
 			}
 		}
 	}
-	_ = store.saveLocked()
 	match.MatchNo = incrementMatchNumber(match.MatchNo)
 	match.ID = fmt.Sprintf("match-%d", time.Now().UnixNano())
 	match.State = matchStateReady
@@ -265,7 +288,20 @@ func (s *server) finishCompetitionLocked(ctx context.Context, store *competition
 	match.Events = nil
 	match.StartedAt, match.RecordingID, match.RecordingState, match.RecordingStartedAt, match.RecordingError = "", "", "", "", ""
 	match.UpdatedAt = time.Now().Format(time.RFC3339)
-	_ = store.saveLocked()
+	if err := store.saveLocked(); err != nil {
+		original.Match.ElapsedMs = record.ElapsedMs
+		original.Match.State = matchStatePaused
+		original.running = false
+		original.pendingFinish = &record
+		return err
+	}
+	original.restoreLocked(store)
+	original.pendingFinish = nil
+	if original.clockTimer != nil {
+		original.clockTimer.Stop()
+		original.clockTimer = nil
+	}
+	return nil
 }
 
 func syncCompetitionTeamNameForUser(match *competitionMatch, user authUser) bool {
@@ -350,6 +386,7 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	previous := store.snapshotLocked()
 	teamNameChanged := syncCompetitionTeamNameForUser(store.Match, user)
 	if s.auth != nil && s.authActive() && store.Match != nil {
 		for _, email := range []string{"1", "2"} {
@@ -359,7 +396,10 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if teamNameChanged {
-		_ = store.saveLocked()
+		if !s.saveCompetitionLocked(w, store, previous) {
+			return
+		}
+		previous = store.snapshotLocked()
 	}
 
 	action := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/competition/"), "/")
@@ -373,9 +413,14 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 		switch action {
 		case "match":
 			if store.Match != nil && store.running && store.Match.DurationMs > 0 && store.elapsedLocked() >= store.Match.DurationMs {
-				s.finishCompetitionLocked(r.Context(), store, "system")
+				if err := s.finishCompetitionLocked(r.Context(), store, "system"); err != nil {
+					http.Error(w, "比赛结束保存失败，请重试", http.StatusInternalServerError)
+					return
+				}
 			} else if s.clearUnavailableReadinessLocked(store) {
-				store.saveLocked()
+				if !s.saveCompetitionLocked(w, store, previous) {
+					return
+				}
 			}
 			writeJSONValue(w, s.matchSnapshotLocked(store))
 			return
@@ -472,12 +517,6 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "比赛记录不存在", http.StatusNotFound)
 			return
 		}
-		if playbackURL != "" {
-			if err := s.deleteCompetitionRecordingFile(r.Context(), playbackURL); err != nil {
-				http.Error(w, "录像文件删除失败："+err.Error(), http.StatusBadGateway)
-				return
-			}
-		}
 		filtered := make([]competitionRecord, 0, len(store.Records))
 		for _, record := range store.Records {
 			if record.ID == recordID {
@@ -487,33 +526,48 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		store.Records = filtered
 		delete(store.FinishedNoticeClaims, recordID)
-		if err := store.saveLocked(); err != nil {
-			http.Error(w, "比赛记录删除失败", http.StatusInternalServerError)
+		if store.LastFinished != nil && store.LastFinished.ID == recordID {
+			store.LastFinished = nil
+		}
+		if !s.saveCompetitionLocked(w, store, previous) {
 			return
 		}
-		writeJSONValue(w, map[string]any{"records": store.Records})
+		sharedVideo := false
+		for _, record := range store.Records {
+			sharedVideo = sharedVideo || record.VideoURL == playbackURL
+		}
+		result := map[string]any{"records": store.Records}
+		if playbackURL != "" && !sharedVideo {
+			if err := s.deleteCompetitionRecordingFile(r.Context(), playbackURL); err != nil {
+				result["videoCleanupError"] = "记录已删除，但录像文件清理失败，请联系管理员"
+				s.event("competition_video_cleanup_failed", "record_id", recordID, "error", err.Error())
+			}
+		}
+		writeJSONValue(w, result)
 		return
 	case "finish-notice":
-		match := store.Match
 		side := competitionSideForUser(user)
-		if !isPlayerAccount(user) || side == "" || match == nil || match.State != matchStateFinished ||
-			match.ID == "" || match.ID != input.MatchID || match.teamForSide(side) == nil {
+		finished := store.LastFinished
+		if finished == nil && store.Match != nil && store.Match.State == matchStateFinished {
+			finished = &competitionRecord{ID: store.Match.ID}
+		}
+		if !isPlayerAccount(user) || side == "" || finished == nil || finished.ID == "" || finished.ID != input.MatchID {
 			writeJSONValue(w, map[string]any{"show": false})
 			return
 		}
 		if store.FinishedNoticeClaims == nil {
 			store.FinishedNoticeClaims = make(map[string]map[string]bool)
 		}
-		if store.FinishedNoticeClaims[match.ID] == nil {
-			store.FinishedNoticeClaims[match.ID] = make(map[string]bool)
+		if store.FinishedNoticeClaims[finished.ID] == nil {
+			store.FinishedNoticeClaims[finished.ID] = make(map[string]bool)
 		}
-		if store.FinishedNoticeClaims[match.ID][user.ID] {
+		if store.FinishedNoticeClaims[finished.ID][user.ID] {
 			writeJSONValue(w, map[string]any{"show": false})
 			return
 		}
-		store.FinishedNoticeClaims[match.ID][user.ID] = true
+		store.FinishedNoticeClaims[finished.ID][user.ID] = true
 		if err := store.saveLocked(); err != nil {
-			delete(store.FinishedNoticeClaims[match.ID], user.ID)
+			delete(store.FinishedNoticeClaims[finished.ID], user.ID)
 			http.Error(w, "比赛结束提示状态保存失败", http.StatusInternalServerError)
 			return
 		}
@@ -560,7 +614,9 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 		match.Operator = user.Email
 		match.UpdatedAt = time.Now().Format(time.RFC3339)
 		store.syncFinishedRecordLocked()
-		store.saveLocked()
+		if !s.saveCompetitionLocked(w, store, previous) {
+			return
+		}
 		writeJSONValue(w, s.matchSnapshotLocked(store))
 
 	case "field":
@@ -581,7 +637,9 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 		match.FieldHeightCm = math.Round(*input.FieldHeightCm*10) / 10
 		match.Operator = user.Email
 		match.UpdatedAt = time.Now().Format(time.RFC3339)
-		store.saveLocked()
+		if !s.saveCompetitionLocked(w, store, previous) {
+			return
+		}
 		writeJSONValue(w, s.matchSnapshotLocked(store))
 
 	case "field-lock":
@@ -597,7 +655,9 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 		match.FieldLocked = *input.FieldLocked
 		match.Operator = user.Email
 		match.UpdatedAt = time.Now().Format(time.RFC3339)
-		store.saveLocked()
+		if !s.saveCompetitionLocked(w, store, previous) {
+			return
+		}
 		writeJSONValue(w, s.matchSnapshotLocked(store))
 
 	case "signin":
@@ -652,7 +712,9 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		match.Operator = user.Email
 		match.UpdatedAt = time.Now().Format(time.RFC3339)
-		store.saveLocked()
+		if !s.saveCompetitionLocked(w, store, previous) {
+			return
+		}
 		writeJSONValue(w, s.matchSnapshotLocked(store))
 
 	case "assign":
@@ -708,7 +770,9 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		match.Operator = user.Email
 		match.UpdatedAt = time.Now().Format(time.RFC3339)
-		store.saveLocked()
+		if !s.saveCompetitionLocked(w, store, previous) {
+			return
+		}
 		writeJSONValue(w, s.matchSnapshotLocked(store))
 
 	case "unassign":
@@ -736,7 +800,9 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		match.Operator = user.Email
 		match.UpdatedAt = time.Now().Format(time.RFC3339)
-		store.saveLocked()
+		if !s.saveCompetitionLocked(w, store, previous) {
+			return
+		}
 		writeJSONValue(w, s.matchSnapshotLocked(store))
 
 	case "ready":
@@ -784,7 +850,9 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		match.UpdatedAt = time.Now().Format(time.RFC3339)
-		store.saveLocked()
+		if !s.saveCompetitionLocked(w, store, previous) {
+			return
+		}
 		writeJSONValue(w, s.matchSnapshotLocked(store))
 
 	case "vision-bind", "vision-unbind":
@@ -837,13 +905,27 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		match.Operator = user.Email
 		match.UpdatedAt = time.Now().Format(time.RFC3339)
-		store.saveLocked()
+		if !s.saveCompetitionLocked(w, store, previous) {
+			return
+		}
 		writeJSONValue(w, s.matchSnapshotLocked(store))
 
 	case "score":
 		match := store.Match
 		if match == nil {
 			http.Error(w, "尚未创建比赛", http.StatusConflict)
+			return
+		}
+		if match.State != matchStateRunning || !store.running {
+			http.Error(w, "只有比赛进行中才能计分", http.StatusConflict)
+			return
+		}
+		if match.DurationMs > 0 && store.elapsedLocked() >= match.DurationMs {
+			if err := s.finishCompetitionLocked(r.Context(), store, "system"); err != nil {
+				http.Error(w, "比赛结束保存失败，请重试", http.StatusInternalServerError)
+				return
+			}
+			http.Error(w, "比赛时间已结束，不能计分", http.StatusConflict)
 			return
 		}
 		team := match.teamForSide(input.Side)
@@ -880,10 +962,16 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 		match.Operator = user.Email
 		match.UpdatedAt = time.Now().Format(time.RFC3339)
 		store.syncFinishedRecordLocked()
-		store.saveLocked()
+		if !s.saveCompetitionLocked(w, store, previous) {
+			return
+		}
 		writeJSONValue(w, s.matchSnapshotLocked(store))
 
 	case "clock":
+		if store.pendingFinish != nil {
+			http.Error(w, "上一场比赛记录待保存，请先重试结束比赛", http.StatusConflict)
+			return
+		}
 		match := store.Match
 		if match == nil {
 			http.Error(w, "尚未创建比赛", http.StatusConflict)
@@ -891,6 +979,10 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		switch strings.ToLower(input.Action) {
 		case "start":
+			if match.DurationMs > 0 && store.elapsedLocked() >= match.DurationMs {
+				http.Error(w, "比赛时间已结束，请结束并保存当前比赛", http.StatusConflict)
+				return
+			}
 			if !store.running {
 				if match.RecordingState != "recording" {
 					recording, err := s.startCompetitionRecording(r.Context(), match)
@@ -898,7 +990,9 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 						match.RecordingState = "error"
 						match.RecordingError = err.Error()
 						match.UpdatedAt = time.Now().Format(time.RFC3339)
-						store.saveLocked()
+						if !s.saveCompetitionLocked(w, store, previous) {
+							return
+						}
 						http.Error(w, "比赛未开始：录像启动失败："+err.Error(), http.StatusBadGateway)
 						return
 					}
@@ -925,7 +1019,9 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 				if _, err := s.stopCompetitionRecording(r.Context(), match.RecordingID, true); err != nil {
 					match.RecordingState = "error"
 					match.RecordingError = err.Error()
-					store.saveLocked()
+					if !s.saveCompetitionLocked(w, store, previous) {
+						return
+					}
 					http.Error(w, "录像停止失败："+err.Error(), http.StatusBadGateway)
 					return
 				}
@@ -944,7 +1040,13 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		match.Operator = user.Email
 		match.UpdatedAt = time.Now().Format(time.RFC3339)
-		store.saveLocked()
+		if !s.saveCompetitionLocked(w, store, previous) {
+			if strings.EqualFold(input.Action, "start") && previous.Match.RecordingState != "recording" && match.RecordingID != "" {
+				_, _ = s.stopCompetitionRecording(r.Context(), match.RecordingID, true)
+			}
+			return
+		}
+		s.scheduleCompetitionTickLocked(store)
 		writeJSONValue(w, s.matchSnapshotLocked(store))
 
 	case "next":
@@ -964,19 +1066,42 @@ func (s *server) competitionAPI(w http.ResponseWriter, r *http.Request) {
 		match.StartedAt, match.RecordingID, match.RecordingState, match.RecordingStartedAt, match.RecordingError = "", "", "", "", ""
 		match.Operator, match.UpdatedAt = user.Email, time.Now().Format(time.RFC3339)
 		store.running = false
-		store.saveLocked()
+		if !s.saveCompetitionLocked(w, store, previous) {
+			return
+		}
 		writeJSONValue(w, s.matchSnapshotLocked(store))
 	case "finish":
+		if strings.TrimSpace(input.MatchID) == "" {
+			http.Error(w, "缺少目标比赛 ID", http.StatusBadRequest)
+			return
+		}
+		for _, record := range store.Records {
+			if record.ID == input.MatchID {
+				writeJSONValue(w, s.matchSnapshotLocked(store))
+				return
+			}
+		}
 		match := store.Match
 		if match == nil {
 			http.Error(w, "尚未创建比赛", http.StatusConflict)
+			return
+		}
+		if match.ID != input.MatchID {
+			http.Error(w, "比赛已切换，请刷新后重试", http.StatusConflict)
+			return
+		}
+		if match.State != matchStateRunning && match.State != matchStatePaused && match.State != matchStateFinished {
+			http.Error(w, "尚未开始的比赛不能结束", http.StatusConflict)
 			return
 		}
 		if match.State == matchStateFinished {
 			writeJSONValue(w, s.matchSnapshotLocked(store))
 			return
 		}
-		s.finishCompetitionLocked(r.Context(), store, user.Email)
+		if err := s.finishCompetitionLocked(r.Context(), store, user.Email); err != nil {
+			http.Error(w, "比赛结束保存失败，比分已保留，请重试", http.StatusInternalServerError)
+			return
+		}
 		writeJSONValue(w, s.matchSnapshotLocked(store))
 
 	default:
@@ -999,7 +1124,10 @@ func (s *server) matchSnapshotLocked(store *competitionStore) map[string]any {
 	if remaining < 0 {
 		remaining = 0
 	}
-	return map[string]any{"match": snapshot, "elapsedMs": elapsed, "remainingMs": remaining, "running": store.running}
+	return map[string]any{
+		"match": snapshot, "elapsedMs": elapsed, "remainingMs": remaining,
+		"running": store.running, "lastFinishedMatch": store.LastFinished,
+	}
 }
 
 func (t *competitionTeam) allSignedIn() bool {

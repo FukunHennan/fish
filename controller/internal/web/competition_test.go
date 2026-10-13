@@ -202,6 +202,10 @@ func TestCompetitionFlow(t *testing.T) {
 	if matchOf(pausedRename)["matchNo"] != "第 08 场（暂停中）" {
 		t.Fatalf("暂停时修改赛事名称失败: %+v", pausedRename)
 	}
+	resumed := call(http.MethodPost, "/api/competition/match/clock", `{"action":"start"}`)
+	if resumed["running"] != true || matchOf(resumed)["state"] != matchStateRunning {
+		t.Fatalf("恢复计时失败: %+v", resumed)
+	}
 
 	// 4. 记分
 	call(http.MethodPost, "/api/competition/match/score", `{"side":"blue","delta":3}`)
@@ -214,7 +218,7 @@ func TestCompetitionFlow(t *testing.T) {
 	}
 
 	// 5. 结束并写入记录
-	call(http.MethodPost, "/api/competition/match/finish", "")
+	call(http.MethodPost, "/api/competition/match/finish", `{"matchId":"`+match["id"].(string)+`"}`)
 	records := call(http.MethodGet, "/api/competition/records", "")
 	list, ok := records["records"].([]any)
 	if !ok || len(list) != 1 {
@@ -310,6 +314,27 @@ func TestCompetitionAutomaticallyFinishesWhenDurationExpires(t *testing.T) {
 	}
 	if len(store.Records) != 1 || store.Records[0].BlueScore != 7 || store.Records[0].ElapsedMs != 1000 {
 		t.Fatalf("超时比赛记录不完整: %+v", store.Records)
+	}
+}
+
+func TestCompetitionScoreRequiresRunningMatch(t *testing.T) {
+	t.Setenv("FISH_AUTH_DISABLED", "true")
+	store := newCompetitionStore(filepath.Join(t.TempDir(), "competition.json"))
+	store.Match = newMatchBlueRed("第 10 场", "学生组", "A 赛场")
+	store.Match.State = matchStateReady
+	server := &server{competition: store}
+
+	recorder := httptest.NewRecorder()
+	server.competitionAPI(recorder, httptest.NewRequest(
+		http.MethodPost,
+		"/api/competition/match/score",
+		strings.NewReader(`{"side":"blue","delta":10}`),
+	))
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("非比赛中计分应返回 409，实际 %d %s", recorder.Code, recorder.Body.String())
+	}
+	if len(store.Match.Events) != 0 || store.Match.Blue.Score != 0 {
+		t.Fatalf("非比赛中不应写入比分或事件: %+v", store.Match)
 	}
 }
 

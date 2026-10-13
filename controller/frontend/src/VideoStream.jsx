@@ -3,7 +3,7 @@ import { visionWebRTCConfigUrl, visionWebRTCOfferUrl } from "./visionSession.js"
 
 const transportCache = new Map();
 const KEEP_ALIVE_MS = 3000;
-const CONNECT_TIMEOUT_MS = 12000;
+const CONNECT_TIMEOUT_MS = 30000;
 
 function waitForIceGatheringComplete(peerConnection, signal) {
   if (peerConnection.iceGatheringState === "complete") return Promise.resolve();
@@ -21,7 +21,7 @@ function waitForIceGatheringComplete(peerConnection, signal) {
       if (peerConnection.iceGatheringState === "complete") finish(resolve);
     };
     const abort = () => finish(reject, new DOMException("请求已取消", "AbortError"));
-    const timer = window.setTimeout(() => finish(resolve), 3000);
+    const timer = window.setTimeout(() => finish(reject, new Error("ICE 候选收集超时")), 10000);
     peerConnection.addEventListener("icegatheringstatechange", check);
     signal?.addEventListener("abort", abort, { once: true });
     check();
@@ -138,9 +138,13 @@ const VideoStream = forwardRef(function VideoStream({
             if (!configResponse.ok) throw new Error("WebRTC 配置不可用");
             const config = await configResponse.json();
             if (config.available === false) throw new Error("WebRTC 服务未启用");
+            if (config.iceTransportPolicy === "relay" && !config.turnConfigured) {
+              throw new Error(config.turnError || "Cloudflare TURN 暂不可用，无法建立 relay 视频连接");
+            }
 
             const peer = new window.RTCPeerConnection({
               iceServers: Array.isArray(config.iceServers) ? config.iceServers : [],
+              iceTransportPolicy: "relay",
             });
             entry.peer = peer;
             entry.connectTimer = window.setTimeout(() => {
@@ -151,8 +155,8 @@ const VideoStream = forwardRef(function VideoStream({
             }, CONNECT_TIMEOUT_MS);
             const transceiver = peer.addTransceiver("video", { direction: "recvonly" });
             try {
-              if ("playoutDelayHint" in transceiver.receiver) transceiver.receiver.playoutDelayHint = 0.05;
-              if ("jitterBufferTarget" in transceiver.receiver) transceiver.receiver.jitterBufferTarget = 50;
+              if ("playoutDelayHint" in transceiver.receiver) transceiver.receiver.playoutDelayHint = 0.03;
+              if ("jitterBufferTarget" in transceiver.receiver) transceiver.receiver.jitterBufferTarget = 30;
             } catch {
               // Receiver latency hints are optional and browser-dependent.
             }

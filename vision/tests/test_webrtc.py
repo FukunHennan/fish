@@ -1,6 +1,7 @@
 import unittest
 import time
 from fractions import Fraction
+from unittest.mock import patch
 
 import numpy as np
 
@@ -9,9 +10,11 @@ from webrtc import (
     WebRTCServer,
     _LatestFrameBuffer,
     _LatestVideoTrack,
+    _without_host_candidates,
     browser_ice_servers,
 )
 import crop_region
+import webrtc
 
 
 class WebRTCFrameTests(unittest.TestCase):
@@ -48,10 +51,47 @@ class WebRTCFrameTests(unittest.TestCase):
 
     def test_server_is_constructible_without_public_ice_configuration(self):
         server = WebRTCServer()
-        self.assertTrue(browser_ice_servers())
-        self.assertEqual(browser_ice_servers()[0]["urls"], "stun:stun.l.google.com:19302")
+        config = server.browser_ice_config()
+        self.assertIn("iceServers", config)
+        self.assertIn(config["iceTransportPolicy"], ("all", "relay"))
         self.assertEqual(server.peer_count, 0)
         server.close()
+
+    def test_browser_can_use_public_candidates_with_server_turn_relay_required(self):
+        turn = {
+            "urls": ["turn:turn.example.test:3478?transport=udp"],
+            "username": "user",
+            "credential": "credential",
+        }
+        with (
+            patch.object(webrtc, "WEBRTC_ICE_TRANSPORT_POLICY", "relay"),
+            patch.object(webrtc, "WEBRTC_BROWSER_ICE_TRANSPORT_POLICY", "all"),
+            patch.object(webrtc, "WEBRTC_STUN_URL", "stun:stun.example.test:3478"),
+            patch.object(webrtc, "_turn_servers", return_value=[turn]),
+        ):
+            config = WebRTCServer().browser_ice_config()
+            server_ice_servers = webrtc._ice_server_dicts()
+
+        self.assertEqual(config["iceTransportPolicy"], "all")
+        self.assertTrue(config["turnRequired"])
+        self.assertTrue(config["turnConfigured"])
+        self.assertEqual(config["iceServers"][0]["urls"], "stun:stun.example.test:3478")
+        self.assertTrue(any(url.startswith("turn:") for url in config["iceServers"][1]["urls"]))
+        self.assertEqual(server_ice_servers, [turn])
+
+    def test_server_turn_relay_ignores_private_browser_host_candidates(self):
+        sdp = "\r\n".join([
+            "v=0",
+            "a=candidate:1 1 udp 100 192.168.1.20 5000 typ host",
+            "a=candidate:2 1 udp 90 203.0.113.20 40000 typ srflx",
+            "a=candidate:3 1 udp 80 192.0.2.30 50000 typ relay",
+            "a=end-of-candidates",
+        ])
+        filtered = _without_host_candidates(sdp)
+        self.assertNotIn("192.168.1.20", filtered)
+        self.assertIn("203.0.113.20", filtered)
+        self.assertIn("192.0.2.30", filtered)
+        self.assertIn("a=end-of-candidates", filtered)
 
     def test_server_forwards_every_real_camera_frame_without_a_rate_cap(self):
         server = WebRTCServer()
@@ -75,6 +115,70 @@ class WebRTCFrameTests(unittest.TestCase):
 
 @unittest.skipIf(_LatestVideoTrack is None, "aiortc is not installed")
 class WebRTCTrackTests(unittest.IsolatedAsyncioTestCase):
+    async def test_view_changes_reuse_track_without_reconnecting(self):
+        from types import SimpleNamespace
+
+        source = _LatestFrameBuffer()
+        source.set_crop_region({"x": 0.25, "y": 0.25, "width": 0.5, "height": 0.5})
+        track = _LatestVideoTrack(source, "smooth", "full")
+        server = WebRTCServer()
+        server._peer_views["owned-peer"] = (SimpleNamespace(connectionState="connected"), track)
+        started = time.time()
+        source.update(np.zeros((480, 640, 3), dtype=np.uint8), started)
+        first = await track.recv()
+        self.assertTrue(server.set_peer_view("owned-peer", "cropped"))
+        source.update(np.zeros((480, 640, 3), dtype=np.uint8), started + 0.1)
+        second = await track.recv()
+        self.assertEqual((first.width, first.height), (640, 480))
+        self.assertEqual((second.width, second.height), (320, 240))
+        self.assertGreater(second.pts, first.pts)
+        self.assertFalse(server.set_peer_view("unknown", "full"))
+        track.stop()
+        server.close()
+    async def test_turn_lookup_does_not_block_media_event_loop(self):
+        import asyncio
+
+        def slow_lookup():
+            time.sleep(0.15)
+            return []
+
+        server = WebRTCServer()
+        with patch.object(webrtc, "_ice_servers", side_effect=slow_lookup), patch.object(webrtc, "RTCPeerConnection", side_effect=webrtc.WebRTCUnavailable("test stop")):
+            pending = asyncio.create_task(server._handle_offer("v=0", "offer"))
+            await asyncio.sleep(0.01)
+            self.assertFalse(pending.done())
+            with self.assertRaises(webrtc.WebRTCUnavailable):
+                await pending
+        server.close()
+
+    async def test_30_fps_capture_preserves_24_fps_send_cadence(self):
+        from aiortc.mediastreams import MediaStreamError
+
+        class TimedSource:
+            closed = False
+            sequence = 0
+
+            def wait_for_frame(self, previous_sequence, timeout, view):
+                if self.sequence >= 61:
+                    self.closed = True
+                    return None
+                sequence = self.sequence
+                self.sequence += 1
+                return sequence, np.zeros((2, 3, 3), dtype=np.uint8), 1000 + sequence / 30
+
+        with patch.object(webrtc, "WEBRTC_MAX_FPS", 24), patch.object(webrtc.time, "time", return_value=1000):
+            track = _LatestVideoTrack(TimedSource())
+            frames = []
+            try:
+                while True:
+                    frames.append(await track.recv())
+            except MediaStreamError:
+                pass
+            finally:
+                track.stop()
+        self.assertEqual(len(frames), 49)
+        self.assertEqual(frames[-1].pts, 2 * VIDEO_CLOCK_RATE)
+
     async def test_viewers_have_independent_resolution_and_source_is_unchanged(self):
         source = _LatestFrameBuffer()
         source.set_crop_region(crop_region.FULL)

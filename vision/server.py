@@ -115,14 +115,7 @@ def main():
     camera_catalog = CameraCatalog(enumerate_cameras)
     cameras = camera_catalog.list()
     if cameras:
-        selected = next(
-            (
-                camera
-                for camera in cameras
-                if camera.index == DEFAULT_CAMERA_INDEX
-            ),
-            cameras[0],
-        )
+        selected = next((camera for camera in cameras if camera.index == DEFAULT_CAMERA_INDEX), cameras[0])
         snapshot = service.create_session(
             f"camera-{selected.index}",
             selected.index,

@@ -54,6 +54,7 @@ async function sampleVideoProbe() {
   const sample = {
     timestampMs: performance.now(), connection: state.peer.connectionState, ice: state.peer.iceConnectionState,
     renderedFrames: state.renderedFrames, firstFrameMs: state.firstFrameMs,
+    videoWidth: state.player.videoWidth, videoHeight: state.player.videoHeight,
     maxFrameGapMs: Math.max(state.maxFrameGapMs, state.lastFrameAt === null ? 0 : performance.now() - state.lastFrameAt),
     selectedPath: null,
   };

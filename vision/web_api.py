@@ -185,8 +185,19 @@ def create_app(
         return jsonify({
             "available": bool(webrtc_server.available),
             "activePeers": webrtc_server.peer_count,
-            "iceServers": webrtc_server.browser_ice_servers(),
+            **webrtc_server.browser_ice_config(),
         })
+
+    @app.post("/webrtc/view")
+    def webrtc_view():
+        body = request.get_json(silent=True) or {}
+        peer_id = body.get("peerId")
+        view = body.get("view")
+        if not isinstance(peer_id, str) or not peer_id or view not in ("full", "cropped"):
+            return jsonify({"message": "视频连接或视图参数无效"}), 400
+        if webrtc_server is None or not webrtc_server.set_peer_view(peer_id, view):
+            return jsonify({"message": "视频连接已结束，请重新连接"}), 409
+        return jsonify({"view": view})
 
     @app.get("/frame.jpg")
     def current_frame_jpeg():

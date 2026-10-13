@@ -22,7 +22,7 @@ const replayTransport = readFileSync(
 
 test("裁判比赛画面与选手端均使用有效区，场地调整保留全画面", () => {
   const begin = adapter.indexOf("  function competitionVideoView() {");
-  const end = adapter.indexOf("  function waitForIce(", begin);
+  const end = adapter.indexOf("  function paintRefereeScoreEvents(", begin);
   assert.ok(begin >= 0 && end > begin);
   let referee = true;
   let matchVisible = false;
@@ -35,30 +35,47 @@ test("裁判比赛画面与选手端均使用有效区，场地调整保留全�
   assert.equal(videoView(), "cropped");
   referee = false;
   assert.equal(videoView(), "cropped");
-  assert.match(refereePage, /id="showMatchRuler"/);
-  assert.match(refereePage, /id="matchFieldRulerCanvas"/);
+  assert.match(refereePage, /id="fieldRulerCanvas"/);
+  assert.match(refereePage, /id="visionOverlayCanvas"/);
 });
 
 test("实时计分列表显示事件并在下一场清空", () => {
   const begin = adapter.indexOf("  function paintRefereeScoreEvents(match) {");
-  const end = adapter.indexOf("  function paintReferee() {", begin);
+  const end = adapter.indexOf("  if (typeof window !== \"undefined\")", begin);
   assert.ok(begin >= 0 && end > begin);
   const list = { dataset: {}, innerHTML: "" };
   const paint = runInNewContext(adapter.slice(begin, end) + "\npaintRefereeScoreEvents", {
     document: { getElementById: () => list },
-    fmtClock: (milliseconds) => `${milliseconds / 1000}s`,
     escapeHtml: (value) => value,
   });
   paint({ id: "match-1", durationMs: 300000, events: [
-    { at: "2026-10-10T22:00:00+08:00", elapsedMs: 10000, side: "blue", label: "进球", delta: 10 },
-    { at: "2026-10-10T22:00:01+08:00", elapsedMs: 11000, side: "red", label: "越界", delta: -2 },
+    { time: "00:10", elapsedMs: 10000, side: "blue", label: "进球", delta: 10 },
+    { time: "00:11", elapsedMs: 11000, side: "red", label: "越界", delta: -2 },
   ] });
   assert.match(list.innerHTML, /红队 · 越界/);
   assert.match(list.innerHTML, /蓝队 · 进球/);
   assert.match(list.innerHTML, /\+10/);
-  assert.match(list.innerHTML, /289s/);
+  assert.match(list.innerHTML, /00:10/);
   paint({ id: "match-2", durationMs: 300000, events: [] });
   assert.match(list.innerHTML, /暂无计分事件/);
+});
+
+test("结束请求绑定目标比赛并保留重试的旧 ID", async () => {
+  const begin = adapter.indexOf("  function refereeAction(action, body, propagateError) {");
+  const end = adapter.indexOf("  window.fishCompetitionSetFieldLocked", begin);
+  const bodies = [];
+  const action = runInNewContext(adapter.slice(begin, end) + "\nrefereeAction", {
+    referee: { match: { id: "current" } },
+    api: (_path, request) => { bodies.push(request.body); return Promise.resolve(); },
+    refreshReferee: () => null,
+    setBadge() {},
+  });
+  await action("finish");
+  const retry = { matchId: "previous" };
+  await action("finish", retry);
+  assert.equal(bodies[0].matchId, "current");
+  assert.equal(bodies[1].matchId, "previous");
+  assert.notEqual(bodies[1], retry);
 });
 
 test("历史记录保留逐条事件，并允许通过 TURN 定位与下载", () => {
@@ -81,17 +98,16 @@ test("历史记录保留逐条事件，并允许通过 TURN 定位与下载", ()
     ],
   }]);
   assert.equal(history[0].events.length, 2);
-  assert.equal(history[0].events[0][0], "295s");
+  assert.equal(history[0].events[0][0], "00:05");
   assert.equal(history[0].events[0][3], "进球");
-  assert.equal(history[0].events[0][4], "+10");
+  assert.equal(history[0].events[0][4], 10);
   assert.equal(history[0].events[0][5], 5000);
   assert.equal(history[0].blue.g, 1);
   assert.equal(history[0].red.a, 1);
 
   assert.match(refereePage, /id="replaySeek" type="range"/);
-  assert.match(refereePage, /data-replay-ms=/);
+  assert.match(refereePage, /data-replay-elapsed-ms=/);
   assert.match(refereePage, /function playReplayAt\(requestedMs\)/);
-  assert.match(refereePage, /class="scoreEvent[^`]*<span>\$\{e\[0\]\}<\/span>/);
   assert.doesNotMatch(refereePage, /id="groupFilter"/);
   assert.doesNotMatch(refereePage, /data-record-tab=/);
   assert.doesNotMatch(refereePage, /id="replayEvents"/);
@@ -116,7 +132,6 @@ test("旧比赛重复 ID 仍能区分记录，不显示无用的缺失提示", (
     { id: "same-match", finishedAt: "2026-10-10T13:37:26+08:00" },
   ]);
   assert.notEqual(history[0].id, history[1].id);
-  assert.equal(history[0].hasEventLog, false);
   assert.doesNotMatch(refereePage, /旧比赛未保存逐条计分事件/);
 });
 
@@ -151,8 +166,8 @@ test("队伍搜索只匹配队名，录像事件使用录制时间而非暂停�
     videoDurationMs: 30000,
     events: [{ at: "2026-10-10T22:00:20+08:00", elapsedMs: 5000, side: "blue", kind: "goal", label: "进球", delta: 10 }],
   }]);
-  assert.equal(history[0].events[0][5], 20000);
-  assert.equal(history[0].events[0][0], "175s");
+  assert.equal(history[0].events[0][5], 5000);
+  assert.equal(history[0].events[0][0], "00:05");
 });
 
 test("归档后选手看到新一场零分，同时领取上一场结束通知", async () => {

@@ -6417,7 +6417,7 @@ p {
 
     const videoAvailable = !!(selected && selected.videoUrl && selected.videoStatus === 'saved');
     const videoStage = videoAvailable
-      ? '<video id="studentReplayVideo" controls preload="auto" src="' + escapeAttr(selected.videoUrl) + '"></video>'
+      ? '<video id="studentReplayVideo" preload="metadata" src="' + escapeAttr(selected.videoUrl) + '"></video>'
       : '<div class="studentReplayEmpty"><div><b>' + (selected ? '本场暂无可播放录像' : '请选择比赛') + '</b><span>' + escapeAttr(selected && selected.videoError ? selected.videoError : '这里只播放裁判端封存的真实选手画面。') + '</span></div></div>';
     const title = selected ? escapeAttr(selected.matchNo) : (studentRecordsLoaded ? '暂无已保存比赛' : '正在读取比赛记录');
     const matchup = selected ? escapeAttr(selected.blueName) + ' <b>' + selected.blueScore + ' : ' + selected.redScore + '</b> ' + escapeAttr(selected.redName) : '等待真实赛事归档';
@@ -6430,7 +6430,7 @@ p {
       '<aside class="studentHistory glassCard"><header><div><h2>比赛记录</h2><p>与裁判端使用同一归档</p></div><button type="button" disabled>' + studentCompetitionRecords.length + ' 场</button></header><div class="studentRecordList">' + historyBody + '</div></aside>' +
       '<main class="studentReplayArea">' +
         '<section class="studentReplayHeader glassCard"><div><span>真实比赛回放</span><h2>' + matchup + '</h2><p>' + title + (selected ? ' · ' + escapeAttr(selected.venue) : '') + '</p></div><div class="studentResultBadge"><i>▶</i><span>录像状态</span><b>' + (videoAvailable ? '可以播放' : '暂无录像') + '</b></div></section>' +
-        '<section class="studentReplayPlayer glassCard"><header><div><h2>选手比赛画面</h2><p>包含裁剪与旋转后的最终效果</p></div><span class="replayFile">' + escapeAttr(fileName) + '</span></header><div class="studentReplayField">' + videoStage + '</div><div class="studentReplayStatus"><b id="studentReplayStatus">' + statusText + '</b><span>' + (selected ? escapeAttr(studentRecordDate(selected.finishedAt)) : '等待比赛') + '</span></div></section>' +
+        '<section class="studentReplayPlayer glassCard"><header><div><h2>选手比赛画面</h2><p>包含裁剪与旋转后的最终效果</p></div><span class="replayFile">' + escapeAttr(fileName) + '</span></header><div class="studentReplayField">' + videoStage + '</div><div class="studentReplayStatus"><b id="studentReplayStatus">' + statusText + '</b><span>' + (selected ? escapeAttr(studentRecordDate(selected.finishedAt)) : '等待比赛') + '</span><button type="button" class="btn" id="studentReplayPlay" ' + (videoAvailable ? '' : 'disabled') + '>播放</button><button type="button" class="btn" id="studentReplayDownload" ' + (videoAvailable ? '' : 'disabled') + '>下载录像</button></div></section>' +
         '<section class="studentReplayStats"><article class="glassCard"><span>录像时长</span><b>' + (selected ? studentRecordDuration(selected.videoDurationMs) : '--:--') + '</b><small>服务器真实记录</small></article><article class="glassCard"><span>画面规格</span><b>' + resolution + '</b><small>选手有效画面</small></article><article class="glassCard"><span>平均帧率</span><b>' + fps + '</b><small>录像实际统计</small></article><article class="glassCard"><span>录像帧数</span><b>' + (selected ? selected.videoFrameCount : 0) + '</b><small>丢帧 ' + (selected ? selected.videoDroppedFrames : 0) + '</small></article></section>' +
       '</main>' +
       '<aside class="studentReviewPanel glassCard"><header><div><h2>赛事信息</h2><p>裁判端同步数据</p></div></header><div class="studentReviewDetails">' +
@@ -7145,6 +7145,15 @@ p {
     });
     const replayVideo = root.querySelector('#studentReplayVideo');
     if (replayVideo) {
+      const replayPlay = root.querySelector('#studentReplayPlay');
+      if (replayPlay) {
+        replayPlay.addEventListener('click', () => {
+          if (replayVideo.paused) replayVideo.play().catch(() => {});
+          else replayVideo.pause();
+        });
+        replayVideo.addEventListener('play', () => { replayPlay.textContent = '暂停'; });
+        replayVideo.addEventListener('pause', () => { replayPlay.textContent = '播放'; });
+      }
       replayVideo.addEventListener('loadedmetadata', () => {
         const status = root.querySelector('#studentReplayStatus');
         if (status) status.textContent = '录像已载入 · 可以播放';
@@ -7152,6 +7161,25 @@ p {
       replayVideo.addEventListener('error', () => {
         const status = root.querySelector('#studentReplayStatus');
         if (status) status.textContent = '服务器录像加载失败';
+      });
+    }
+    const replayDownload = root.querySelector('#studentReplayDownload');
+    if (replayDownload) {
+      replayDownload.addEventListener('click', async () => {
+        const selected = studentCompetitionRecords.find((record) => record.key === selectedStudentRecordKey) || studentCompetitionRecords[0];
+        const status = root.querySelector('#studentReplayStatus');
+        if (!selected || !selected.videoUrl || !window.FishReplayTransport) return;
+        replayDownload.disabled = true;
+        try {
+          await window.FishReplayTransport.download(selected.videoUrl, (message) => {
+            if (status) status.textContent = message;
+          });
+          if (status) status.textContent = '录像下载完成';
+        } catch (error) {
+          if (status) status.textContent = error?.message || '录像下载失败';
+        } finally {
+          replayDownload.disabled = false;
+        }
       });
     }
 
@@ -7263,6 +7291,7 @@ p {
 })();
 </script>
 
-<script src="competition-adapter.js?v=20260919-public-serialized-control"></script>
+<script src="replay-transport.js?v=20261013-replay"></script>
+<script src="competition-adapter.js?v=20261013-single-turn-relay"></script>
 </body>
 </html>

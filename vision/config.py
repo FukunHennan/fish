@@ -51,9 +51,9 @@ if len(CAPTURE_FOURCC) != 4:
     CAPTURE_FOURCC = "YUY2"
 TARGET_FPS = 0
 try:
-    DEFAULT_CAMERA_INDEX = int(os.environ.get("FISH_CAMERA_INDEX", "1"))
+    DEFAULT_CAMERA_INDEX = int(os.environ.get("FISH_CAMERA_INDEX", "0"))
 except ValueError:
-    DEFAULT_CAMERA_INDEX = 1
+    DEFAULT_CAMERA_INDEX = 0
 CAMERA_LATENCY_S = 0.30
 CAMERA_LATENCY_MAX_PREDICTION_M = 0.12
 CAMERA_STALE_TIMEOUT_S = 0.35
@@ -103,6 +103,13 @@ MJPEG_STREAM_HEIGHT = 480
 MJPEG_JPEG_QUALITY = 50
 MJPEG_MAX_FPS = 0
 WEBRTC_OFFER_TIMEOUT_S = 10.0
+# Public viewers should not receive every high-rate camera frame.  Keeping
+# the source capture rate unchanged lets recognition stay responsive while
+# the browser transport remains within a predictable bandwidth budget.
+WEBRTC_MAX_FPS = float(os.environ.get("FISH_WEBRTC_MAX_FPS", "24"))
+WEBRTC_MAX_FRAME_AGE_S = float(
+    os.environ.get("FISH_WEBRTC_MAX_FRAME_AGE_S", "0.30")
+)
 
 # STUN enables the common public-NAT case. A TURN server is still required
 # when either side is behind a symmetric NAT or restrictive firewall.
@@ -115,6 +122,16 @@ WEBRTC_STUN_URL = os.environ.get(
 WEBRTC_TURN_URL = os.environ.get("FISH_WEBRTC_TURN_URL", "").strip()
 WEBRTC_TURN_USERNAME = os.environ.get("FISH_WEBRTC_TURN_USERNAME", "").strip()
 WEBRTC_TURN_CREDENTIAL = os.environ.get("FISH_WEBRTC_TURN_CREDENTIAL", "").strip()
+WEBRTC_ICE_TRANSPORT_POLICY = os.environ.get(
+    "FISH_WEBRTC_ICE_TRANSPORT_POLICY", "relay"
+).strip().lower()
+if WEBRTC_ICE_TRANSPORT_POLICY not in ("all", "relay"):
+    WEBRTC_ICE_TRANSPORT_POLICY = "all"
+WEBRTC_BROWSER_ICE_TRANSPORT_POLICY = os.environ.get(
+    "FISH_WEBRTC_BROWSER_ICE_TRANSPORT_POLICY", "relay"
+).strip().lower()
+if WEBRTC_BROWSER_ICE_TRANSPORT_POLICY not in ("all", "relay"):
+    WEBRTC_BROWSER_ICE_TRANSPORT_POLICY = "all"
 
 # The browser is a control client, not part of the tracking control loop.
 VISION_SESSION_HEARTBEAT_S = 1.0

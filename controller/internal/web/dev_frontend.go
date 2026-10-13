@@ -127,6 +127,9 @@ func developmentFrontendRevision(root string) (string, error) {
 	hash := sha256.New()
 	paths := []string{filepath.Join(root, "index.html"), filepath.Join(root, "competition.html"), filepath.Join(root, "src"), filepath.Join(root, "public", "competition")}
 	for _, path := range paths {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			continue
+		}
 		err := filepath.WalkDir(path, func(current string, entry fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr

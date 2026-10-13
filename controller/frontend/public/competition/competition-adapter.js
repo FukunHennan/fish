@@ -1458,6 +1458,8 @@
     peer: null, stream: null, sessionId: null, timer: null, connecting: false,
     connectionStartedAt: 0, connectedAt: 0, lastFrameAt: 0,
     connectionGeneration: 0,
+    statsTimer: null, reconnects: 0,
+    diagnostics: { transport: "—", candidateType: "—", relayProtocol: null, fps: null, receiveFps: null, bitrateKbps: null, packetLossPct: null, packetsLostInterval: null, framesDroppedInterval: null, jitterMs: null, rttMs: null },
     frameWatchTimer: null, frameCallbackId: null, frameElement: null,
     fallback: false, fallbackTimer: null, fallbackRequest: null,
     fallbackSocket: null, fallbackSocketTimer: null, socketDecoding: false,
@@ -1514,203 +1516,181 @@
     });
   }
 
-  function scheduleFallbackFrame(delay) {
-    if (video.fallbackTimer) clearTimeout(video.fallbackTimer);
-    video.fallbackTimer = setTimeout(function () {
-      video.fallbackTimer = null;
-      requestFallbackFrame();
-    }, delay);
+  function competitionVideoView() {
+    if (!isRefereePage()) return "cropped";
+    var match = document.getElementById("match");
+    return match && match.classList && match.classList.contains("hidden") ? "full" : "cropped";
   }
 
-  function requestFallbackFrame() {
-    if (!video.fallback || !video.sessionId || video.fallbackSocket || video.fallbackRequest) return;
-    var stage = videoSurface();
-    if (document.hidden || !stage) {
-      scheduleFallbackFrame(500);
-      return;
+  function paintRefereeScoreEvents(match) {
+    var list = document.getElementById("eventList");
+    if (!list) return;
+    var events = Array.isArray(match && match.events) ? match.events : [];
+    list.innerHTML = events.length ? events.map(function (event) {
+      var side = event.side === "red" || event.side === "红队" ? "红队" : "蓝队";
+      return '<div class="event ' + (side === "红队" ? "red" : "") + '"><small>' +
+        escapeHtml(event.time || "") + '</small><span>' + escapeHtml(side + " · " + (event.label || "计分")) +
+        '</span><b>' + (Number(event.delta) > 0 ? "+" : "") + String(Number(event.delta) || 0) +
+        '</b></div>';
+    }).join("") : '<div class="eventEmpty">暂无计分事件</div>';
+  }
+  if (typeof window !== "undefined") window.paintRefereeScoreEvents = paintRefereeScoreEvents;
+
+  function renderVideoDiagnostics() {
+    var targets = document.querySelectorAll("[data-video-diagnostics]");
+    if (!targets.length) return;
+    var d = video.diagnostics || {};
+    var values = [];
+    if (d.candidateType && d.candidateType !== "—") values.push(d.candidateType);
+    if (d.relayProtocol) values.push("TURN/" + d.relayProtocol);
+    if (finiteNumber(d.receiveFps) !== null && finiteNumber(d.fps) !== null) {
+      values.push("收/解码 " + formatNumber(d.receiveFps) + "/" + formatNumber(d.fps) + " FPS");
     }
-    if (!stage.querySelector("img[data-fish-fallback-frame]")) {
-      mountVideoSurface();
-      stage = videoSurface();
+    if (finiteNumber(d.bitrateKbps) !== null) values.push(formatNumber(d.bitrateKbps) + " kbps");
+    if (finiteNumber(d.packetLossPct) !== null) {
+      values.push("丢包 " + formatNumber(d.packetLossPct) + "% (+" + formatNumber(d.packetsLostInterval) + ")");
     }
-    var generation = video.connectionGeneration;
-    var sessionId = video.sessionId;
-    var controller = new AbortController();
-    var request = { controller: controller };
-    video.fallbackRequest = request;
-    var timeout = setTimeout(function () { controller.abort(); }, 6000);
-    function current() {
-      return video.fallback && video.connectionGeneration === generation && video.sessionId === sessionId;
+    if (finiteNumber(d.framesDroppedInterval) !== null) values.push("解码丢帧 +" + formatNumber(d.framesDroppedInterval));
+    if (finiteNumber(d.jitterMs) !== null) values.push("抖动 " + formatNumber(d.jitterMs) + " ms");
+    if (finiteNumber(d.bufferMs) !== null) values.push("缓冲 " + formatNumber(d.bufferMs) + " ms");
+    if (finiteNumber(d.rttMs) !== null) values.push("RTT " + formatNumber(d.rttMs) + " ms");
+    values.push("重连 " + String(video.reconnects || 0));
+    if (video.lastReconnectReason) values.push("原因 " + video.lastReconnectReason);
+    var summary = values.length > 1 ? values.join(" · ") : (d.transport || "等待视频连接");
+    targets.forEach(function (target) {
+      target.textContent = summary;
+      target.title = "实时 WebRTC 诊断：" + summary;
+    });
+  }
+
+  function stopVideoStats() {
+    if (video.statsTimer) {
+      clearTimeout(video.statsTimer);
+      video.statsTimer = null;
     }
-    var path = "/api/vision/frame.jpg?sessionId=" + encodeURIComponent(sessionId) +
-      "&view=" + (isRefereePage() ? "full" : "cropped") + "&quality=compact&t=" + Date.now();
-    fetch(path, { credentials: "same-origin", cache: "no-store", signal: controller.signal })
-      .then(function (response) {
-        if (!response.ok) throw new Error("HTTP " + response.status);
-        return response.blob();
-      })
-      .then(function (blob) {
-        return new Promise(function (resolve, reject) {
-          var url = URL.createObjectURL(blob);
-          var preview = new Image();
-          var settled = false;
-          var decodeTimeout = setTimeout(function () { finish(new Error("JPEG 解码超时")); }, 3000);
-          function finish(error) {
-            if (settled) return;
-            settled = true;
-            clearTimeout(decodeTimeout);
-            preview.onload = null;
-            preview.onerror = null;
-            if (error) {
-              URL.revokeObjectURL(url);
-              reject(error);
-            } else {
-              resolve({ url: url, width: preview.naturalWidth, height: preview.naturalHeight });
-            }
-          }
-          preview.onload = function () { finish(); };
-          preview.onerror = function () { finish(new Error("JPEG 解码失败")); };
-          preview.src = url;
+  }
+
+  function calculateVideoIntervalStats(current, previous) {
+    if (!previous || !current || current.at <= previous.at) return null;
+    var seconds = (current.at - previous.at) / 1000;
+    function delta(name) {
+      var currentValue = current[name];
+      var previousValue = previous[name];
+      if (!Number.isFinite(currentValue) || !Number.isFinite(previousValue)) return null;
+      var difference = currentValue - previousValue;
+      return difference >= 0 ? difference : null;
+    }
+    var receivedPackets = delta("packetsReceived");
+    var lostPackets = delta("packetsLost");
+    if (lostPackets !== null) lostPackets = Math.max(0, lostPackets);
+    var packetLossPct = receivedPackets !== null && lostPackets !== null && receivedPackets + lostPackets > 0
+      ? lostPackets / (receivedPackets + lostPackets) * 100
+      : null;
+    var bytes = delta("bytesReceived");
+    var receivedFrames = delta("framesReceived");
+    var decodedFrames = delta("framesDecoded");
+    var droppedFrames = delta("framesDropped");
+    var bufferDelay = delta("jitterBufferDelay");
+    var emittedFrames = delta("jitterBufferEmittedCount");
+    return {
+      bitrateKbps: bytes === null ? null : bytes * 8 / seconds / 1000,
+      receiveFps: receivedFrames === null ? null : receivedFrames / seconds,
+      fps: decodedFrames === null ? null : decodedFrames / seconds,
+      packetLossPct: packetLossPct,
+      packetsLostInterval: lostPackets,
+      framesDroppedInterval: droppedFrames,
+      bufferMs: bufferDelay !== null && emittedFrames > 0 ? bufferDelay * 1000 / emittedFrames : null,
+      intervalSeconds: seconds,
+    };
+  }
+
+  function startVideoStats(peer, generation) {
+    stopVideoStats();
+    if (!peer || typeof peer.getStats !== "function") return;
+    var previous = null;
+    async function sample() {
+      if (video.peer !== peer || video.connectionGeneration !== generation) return;
+      try {
+        var reports = await peer.getStats();
+        var inbound = null;
+        var selectedPair = null;
+        var localCandidate = null;
+        var remoteCandidate = null;
+        reports.forEach(function (report) {
+          if (report.type === "inbound-rtp" && report.kind === "video" && (!inbound || Number(report.bytesReceived) > Number(inbound.bytesReceived))) inbound = report;
+          if (report.type === "candidate-pair" && (report.selected || report.nominated) && report.state === "succeeded") selectedPair = report;
         });
-      })
-      .then(function (frame) {
-        if (!current()) {
-          URL.revokeObjectURL(frame.url);
-          return;
+        if (selectedPair && selectedPair.localCandidateId) localCandidate = reports.get(selectedPair.localCandidateId);
+        if (selectedPair && selectedPair.remoteCandidateId) remoteCandidate = reports.get(selectedPair.remoteCandidateId);
+        var now = Date.now();
+        var current = {
+          at: now,
+          bytesReceived: inbound && Number(inbound.bytesReceived) || 0,
+          packetsReceived: inbound && Number.isFinite(Number(inbound.packetsReceived)) ? Number(inbound.packetsReceived) : null,
+          packetsLost: inbound && Number.isFinite(Number(inbound.packetsLost)) ? Number(inbound.packetsLost) : null,
+          framesReceived: inbound && Number.isFinite(Number(inbound.framesReceived)) ? Number(inbound.framesReceived) : null,
+          framesDecoded: inbound && Number(inbound.framesDecoded) || 0,
+          framesDropped: inbound && Number.isFinite(Number(inbound.framesDropped)) ? Number(inbound.framesDropped) : null,
+          jitterBufferDelay: inbound && Number.isFinite(inbound.jitterBufferDelay) ? inbound.jitterBufferDelay : null,
+          jitterBufferEmittedCount: inbound && Number.isFinite(inbound.jitterBufferEmittedCount) ? inbound.jitterBufferEmittedCount : null,
+        };
+        var d = video.diagnostics;
+        d.transport = peer.connectionState || "connecting";
+        var localCandidateType = localCandidate && localCandidate.candidateType;
+        var remoteCandidateType = remoteCandidate && remoteCandidate.candidateType;
+        d.candidateType = localCandidateType && remoteCandidateType
+          ? localCandidateType + "/" + remoteCandidateType
+          : localCandidateType || (selectedPair && selectedPair.protocol) || "—";
+        d.relayProtocol = (localCandidate && localCandidate.relayProtocol)
+          || (remoteCandidate && remoteCandidate.relayProtocol) || null;
+        if (inbound) {
+          d.jitterMs = Number.isFinite(Number(inbound.jitter)) ? Number(inbound.jitter) * 1000 : null;
         }
-        // The page may have replaced the stage while the request was in flight.
-        // Resolve the current element only after the complete frame is decoded.
-        var stage = videoSurface();
-        if (stage && !stage.querySelector("img[data-fish-fallback-frame]")) {
-          mountVideoSurface();
-          stage = videoSurface();
+        if (selectedPair && Number.isFinite(Number(selectedPair.currentRoundTripTime))) d.rttMs = Number(selectedPair.currentRoundTripTime) * 1000;
+        var interval = calculateVideoIntervalStats(current, previous);
+        if (interval) {
+          d.bitrateKbps = interval.bitrateKbps;
+          d.receiveFps = interval.receiveFps;
+          d.fps = interval.fps;
+          d.packetLossPct = interval.packetLossPct;
+          d.packetsLostInterval = interval.packetsLostInterval;
+          d.framesDroppedInterval = interval.framesDroppedInterval;
+          d.bufferMs = interval.bufferMs;
         }
-        var image = stage && stage.querySelector("img[data-fish-fallback-frame]");
-        if (!image) {
-          URL.revokeObjectURL(frame.url);
-          return;
-        }
-        image.src = frame.url;
-        video.fallbackElement = image;
-        if (video.fallbackObjectUrl) URL.revokeObjectURL(video.fallbackObjectUrl);
-        video.fallbackObjectUrl = frame.url;
-        video.fallbackErrors = 0;
-        video.lastFrameAt = Date.now();
-        video.statusText = "视觉画面已接入（公网兼容模式·HTTPS 轮询）";
-        setVisionStatus(video.statusText, "ok");
-        if (lastDeviceBadge) setBadge(lastDeviceBadge, lastDeviceTone);
-        renderCropEditor();
-        renderPlayerDetectionOverlay();
-      })
-      .catch(function () {
-        if (!current()) return;
-        video.fallbackErrors += 1;
-        if (!video.lastFrameAt) setVisionStatus("正在等待摄像头首帧（公网兼容模式）", "warn");
-        else if (Date.now() - video.lastFrameAt > 5000) setVisionStatus("公网兼容画面中断，正在重试", "warn");
-      })
-      .finally(function () {
-        clearTimeout(timeout);
-        if (video.fallbackRequest === request) video.fallbackRequest = null;
-        if (current()) scheduleFallbackFrame(video.fallbackErrors ? Math.min(3000, 400 * video.fallbackErrors) : 80);
-      });
+        previous = current;
+        renderVideoDiagnostics();
+      } catch (_) {
+        renderVideoDiagnostics();
+      }
+      if (video.peer === peer && video.connectionGeneration === generation) video.statsTimer = setTimeout(sample, 2000);
+    }
+    sample();
   }
 
   function startFrameFallback(reason) {
-    if (!video.sessionId || video.fallback) return;
-    closeVideoPeer();
-    video.fallback = true;
-    video.fallbackErrors = 0;
-    video.statusText = "正在通过公网兼容画面连接：" + reason;
-    setVisionStatus(video.statusText, "warn");
-    mountVideoSurface();
-    if (!startFrameSocket()) requestFallbackFrame();
-  }
-
-  function startFrameSocket() {
-    if (typeof window.WebSocket !== "function" || !video.sessionId) return false;
-    var generation = video.connectionGeneration;
-    var sessionId = video.sessionId;
-    var scheme = location.protocol === "https:" ? "wss:" : "ws:";
-    var path = "/api/vision/frame.ws?sessionId=" + encodeURIComponent(sessionId) +
-      "&view=" + (isRefereePage() ? "full" : "cropped");
-    var socket;
-    try { socket = new window.WebSocket(scheme + "//" + location.host + path); }
-    catch (_) { return false; }
-    video.fallbackSocket = socket;
-    video.socketDecoding = false;
-    var lastReceivedAt = Date.now();
-    function current() {
-      return video.fallback && video.connectionGeneration === generation &&
-        video.sessionId === sessionId && video.fallbackSocket === socket;
-    }
-    function checkFrames() {
-      if (!current()) return;
-      if (Date.now() - lastReceivedAt > 5000) {
-        socket.close();
-        return;
-      }
-      video.fallbackSocketTimer = setTimeout(checkFrames, 1000);
-    }
-    video.fallbackSocketTimer = setTimeout(checkFrames, 1000);
-    socket.onmessage = function (event) {
-      if (!current() || video.socketDecoding || !(event.data instanceof Blob)) return;
-      lastReceivedAt = Date.now();
-      video.socketDecoding = true;
-      var frameURL = URL.createObjectURL(event.data);
-      var preview = new Image();
-      var finished = false;
-      var timer = setTimeout(function () { finish(false); }, 3000);
-      function finish(ok) {
-        if (finished) return;
-        finished = true;
-        clearTimeout(timer);
-        preview.onload = null;
-        preview.onerror = null;
-        video.socketDecoding = false;
-        if (!ok || !current()) {
-          URL.revokeObjectURL(frameURL);
-          return;
-        }
-        var stage = videoSurface();
-        if (stage && !stage.querySelector("img[data-fish-fallback-frame]")) {
-          mountVideoSurface();
-          stage = videoSurface();
-        }
-        var image = stage && stage.querySelector("img[data-fish-fallback-frame]");
-        if (!image) {
-          URL.revokeObjectURL(frameURL);
-          return;
-        }
-        image.src = frameURL;
-        video.fallbackElement = image;
-        if (video.fallbackObjectUrl) URL.revokeObjectURL(video.fallbackObjectUrl);
-        video.fallbackObjectUrl = frameURL;
-        video.lastFrameAt = Date.now();
-        video.statusText = "视觉画面已接入（公网兼容模式·实时通道）";
-        setVisionStatus(video.statusText, "ok");
-        if (lastDeviceBadge) setBadge(lastDeviceBadge, lastDeviceTone);
-        renderCropEditor();
-        renderPlayerDetectionOverlay();
-      }
-      preview.onload = function () { finish(true); };
-      preview.onerror = function () { finish(false); };
-      preview.src = frameURL;
-    };
-    socket.onerror = function () { if (current()) socket.close(); };
-    socket.onclose = function () {
-      if (!current()) return;
-      video.fallbackSocket = null;
-      if (video.fallbackSocketTimer) clearTimeout(video.fallbackSocketTimer);
-      video.fallbackSocketTimer = null;
-      video.statusText = "实时兼容通道中断，改用 HTTPS 轮询";
-      setVisionStatus(video.statusText, "warn");
-      requestFallbackFrame();
-    };
-    return true;
+    if (!video.sessionId) return;
+    scheduleVideoReconnect("TURN 视频连接失败：" + reason, 3000);
   }
 
   function scheduleVideoReconnect(reason, delay) {
     if (video.timer) return;
+    video.reconnects += 1;
+    video.lastReconnectReason = reason || video.statusText || "等待视频会话";
+    var reconnectEvent = {
+      at: new Date().toISOString(),
+      reason: video.lastReconnectReason,
+      connection: video.peer ? video.peer.connectionState : "none",
+      ice: video.peer ? video.peer.iceConnectionState : "none",
+      diagnostics: Object.assign({}, video.diagnostics),
+    };
+    try {
+      var reconnectHistory = JSON.parse(localStorage.getItem("fish.video.reconnects") || "[]");
+      if (!Array.isArray(reconnectHistory)) reconnectHistory = [];
+      reconnectHistory.push(reconnectEvent);
+      localStorage.setItem("fish.video.reconnects", JSON.stringify(reconnectHistory.slice(-50)));
+    } catch (_) {}
+    console.info("TURN video reconnect", reconnectEvent);
+    renderVideoDiagnostics();
     video.timer = setTimeout(function () {
       video.timer = null;
       // Invalidate every callback belonging to the old offer before starting
@@ -1746,21 +1726,26 @@
       .then(function (config) {
         if (!current()) throw staleConnection();
         if (config && config.available === false) throw new Error("WebRTC 服务未启用");
+        if (config && (config.turnRequired || config.iceTransportPolicy === "relay") && !config.turnConfigured) {
+          throw new Error(config.turnError || "Cloudflare TURN 暂不可用，无法建立 relay 视频连接");
+        }
         var peer = new window.RTCPeerConnection({
           iceServers: (config && Array.isArray(config.iceServers)) ? config.iceServers : [],
+          iceTransportPolicy: "relay",
         });
         if (!current()) {
           try { peer.close(); } catch (_) {}
           throw staleConnection();
         }
         video.peer = peer;
+        video.requestedView = competitionVideoView();
         video.connectionStartedAt = Date.now();
         video.connectedAt = 0;
         video.lastFrameAt = 0;
         var transceiver = peer.addTransceiver("video", { direction: "recvonly" });
         try {
-          if ("playoutDelayHint" in transceiver.receiver) transceiver.receiver.playoutDelayHint = 0;
-          if ("jitterBufferTarget" in transceiver.receiver) transceiver.receiver.jitterBufferTarget = 0;
+          if ("playoutDelayHint" in transceiver.receiver) transceiver.receiver.playoutDelayHint = 0.03;
+          if ("jitterBufferTarget" in transceiver.receiver) transceiver.receiver.jitterBufferTarget = 30;
         } catch (e) { /* 接收端不支持延迟提示时继续使用默认缓冲 */ }
         peer.ontrack = function (event) {
           if (!current() || video.peer !== peer) return;
@@ -1792,8 +1777,8 @@
               method: "POST",
               body: {
                 sessionId: video.sessionId,
-                quality: isRefereePage() ? "full" : "smooth",
-                view: isRefereePage() ? "full" : "cropped",
+                quality: "smooth",
+                view: video.requestedView,
                 type: peer.localDescription.type,
                 sdp: peer.localDescription.sdp,
               },
@@ -1802,7 +1787,15 @@
           .then(function (answer) {
             if (!current() || video.peer !== peer) throw staleConnection();
             if (!answer || !answer.sdp) throw new Error("视频信令失败");
+            video.peerId = answer.peerId || null;
             return peer.setRemoteDescription(answer);
+          })
+          .then(function () {
+            if (current() && video.peer === peer) {
+              video.diagnostics.transport = "connected";
+              startVideoStats(peer, generation);
+              renderVideoDiagnostics();
+            }
           });
       })
       .catch(function (error) {
@@ -1840,17 +1833,27 @@
       }
       video.frameElement = element;
       video.frameCallbackId = null;
+      function currentMedia() {
+        return video.frameElement === element && element.isConnected !== false &&
+          video.peer && video.stream && element.srcObject === video.stream;
+      }
       ["loadeddata", "playing", "timeupdate"].forEach(function (name) {
-        element.addEventListener(name, markVideoFrame);
-      });
-      ["error", "stalled", "emptied"].forEach(function (name) {
         element.addEventListener(name, function () {
-          if (video.peer) startFrameFallback("视频媒体流中断");
+          if (currentMedia()) markVideoFrame();
         });
+      });
+      element.addEventListener("error", function () {
+        if (currentMedia() && element.error) {
+          startFrameFallback("视频解码错误（" + element.error.code + "）");
+        }
       });
       if (typeof element.requestVideoFrameCallback === "function") {
         var onFrame = function () {
           if (video.frameElement !== element) return;
+          if (!currentMedia()) {
+            video.frameCallbackId = element.requestVideoFrameCallback(onFrame);
+            return;
+          }
           markVideoFrame();
           video.frameCallbackId = element.requestVideoFrameCallback(onFrame);
         };
@@ -1860,6 +1863,7 @@
     if (!video.frameWatchTimer) {
       video.frameWatchTimer = window.setInterval(function () {
         if (document.hidden || !video.peer || video.timer) return;
+        if (video.frameElement && typeof video.frameElement.getClientRects === "function" && !video.frameElement.getClientRects().length) return;
         var now = Date.now();
         var baseline = video.lastFrameAt || video.connectedAt || video.connectionStartedAt;
         var timeout = video.peer.connectionState === "connected" ? 5000 : 12000;
@@ -1884,6 +1888,10 @@
     removeVideoBackdrop();
     ensureVideoControls(stage);
     var element = stage.querySelector("video[data-fish-video]");
+    if (!element && video.frameElement) {
+      element = video.frameElement;
+      stage.insertBefore(element, stage.firstChild);
+    }
     if (!element) {
       element = document.createElement("video");
       element.setAttribute("data-fish-video", "1");
@@ -1956,6 +1964,7 @@
   }
 
   function finiteNumber(value) {
+    if (value == null || (typeof value === "string" && value.trim() === "")) return null;
     var number = Number(value);
     return Number.isFinite(number) ? number : null;
   }
@@ -3227,6 +3236,7 @@
 
   function closeVideoPeer() {
     video.connectionGeneration += 1;
+    stopVideoStats();
     if (video.timer) {
       clearTimeout(video.timer);
       video.timer = null;
@@ -3268,11 +3278,26 @@
       video.stream.getTracks().forEach(function (track) { try { track.stop(); } catch (_) {} });
     }
     video.peer = null;
+    video.peerId = null;
+    video.viewUpdating = false;
     video.stream = null;
     video.connecting = false;
     video.connectionStartedAt = 0;
     video.connectedAt = 0;
     video.lastFrameAt = 0;
+    video.diagnostics.transport = "disconnected";
+    video.diagnostics.candidateType = "—";
+    video.diagnostics.relayProtocol = null;
+    video.diagnostics.fps = null;
+    video.diagnostics.receiveFps = null;
+    video.diagnostics.bitrateKbps = null;
+    video.diagnostics.packetLossPct = null;
+    video.diagnostics.packetsLostInterval = null;
+    video.diagnostics.framesDroppedInterval = null;
+    video.diagnostics.bufferMs = null;
+    video.diagnostics.jitterMs = null;
+    video.diagnostics.rttMs = null;
+    renderVideoDiagnostics();
     var stage = videoSurface();
     var element = stage && stage.querySelector("video[data-fish-video]");
     if (element) {
@@ -3461,8 +3486,29 @@
     });
   }
 
+  function updateVideoView() {
+    var view = competitionVideoView();
+    var stage = videoSurface();
+    if (stage && typeof stage.getClientRects === "function" && !stage.getClientRects().length) return;
+    if (!video.peer || video.connecting || video.viewUpdating || video.requestedView === view || !video.peerId) return;
+    var peer = video.peer;
+    var generation = video.connectionGeneration;
+    video.viewUpdating = true;
+    api("/api/vision/webrtc/view", { method: "POST", body: { peerId: video.peerId, view: view } })
+      .then(function () {
+        if (video.peer === peer && video.connectionGeneration === generation) video.requestedView = view;
+      })
+      .catch(function (error) {
+        if (video.peer === peer && video.connectionGeneration === generation) setVisionStatus("画面视图切换失败：" + error.message, "warn");
+      })
+      .finally(function () {
+        if (video.peer === peer && video.connectionGeneration === generation) video.viewUpdating = false;
+      });
+  }
+
   function ensureVideoSurface() {
     if (!state.user) return;       // 未登录不请求视觉接口
+    updateVideoView();
     setVisionStatus(video.statusText || "视觉未启用", "info");
     mountVideoSurface();
     startVisionEvents();
@@ -3526,6 +3572,10 @@
   window.fishCompetitionRefereeAction = function (action, body) { return refereeAction(action, body); };
 
   function refereeAction(action, body, propagateError) {
+    if (action === "finish") {
+      body = Object.assign({}, body || {});
+      if (!body.matchId) body.matchId = referee.match && referee.match.id;
+    }
     return api("/api/competition/match/" + action, { method: "POST", body: body || {} })
       .then(function () { return refreshReferee(); })
       .catch(function (error) {
@@ -3807,8 +3857,8 @@
     return api("/api/competition/records", {
       method: "DELETE",
       body: { matchId: id },
-    }).then(function () {
-      setBadge("比赛记录已删除", "ok");
+    }).then(function (payload) {
+      setBadge(payload.videoCleanupError || "比赛记录已删除", payload.videoCleanupError ? "warn" : "ok");
       return refreshReferee();
     });
   };
@@ -3912,7 +3962,6 @@
   }
 
   window.fishCompetitionDismissFinishedNotice = function (matchId) {
-    if (!state.match || state.match.state !== "finished" || state.match.id !== matchId) return;
     dismissedFinishedMatchId = matchId;
     setPlayerMatchHud(state.match, 0);
   };
@@ -3938,8 +3987,9 @@
     setAll("[data-live-current-team]", currentName);
     setAll("[data-live-match-state]", stateText(match.state));
     setAll("[data-live-summary-state]", stateText(match.state));
-    if (match.state === "finished") {
-      var matchId = String(match.id || [match.matchNo, match.startedAt].join("|"));
+    var finishedMatch = payload.lastFinishedMatch || (match.state === "finished" ? match : null);
+    if (finishedMatch) {
+      var matchId = String(finishedMatch.id || [finishedMatch.matchNo, finishedMatch.startedAt].join("|"));
       if (finishedMatchEventId !== matchId) {
         finishedMatchEventId = matchId;
         var account = state.user && state.user.email || "";
@@ -3947,7 +3997,7 @@
           method: "POST", body: { matchId: matchId },
         }).then(function (notice) {
           if (!notice || !state.user || state.user.email !== account ||
-              !state.match || state.match.id !== matchId) return;
+              !state.match) return;
           if (!notice.show) {
             window.fishCompetitionDismissFinishedNotice(matchId);
             return;
@@ -3955,12 +4005,12 @@
           document.dispatchEvent(new CustomEvent("fish-match-finished", { detail: {
             matchId: matchId,
             account: account,
-            matchNo: match.matchNo || "本场比赛",
-            blueName: blueName,
-            redName: redName,
-            blueScore: Number(match.blue && match.blue.score) || 0,
-            redScore: Number(match.red && match.red.score) || 0,
-            elapsedMs: payload.elapsedMs || match.elapsedMs || 0,
+            matchNo: finishedMatch.matchNo || "本场比赛",
+            blueName: finishedMatch.blueName || (finishedMatch.blue && finishedMatch.blue.name) || blueName,
+            redName: finishedMatch.redName || (finishedMatch.red && finishedMatch.red.name) || redName,
+            blueScore: Number(finishedMatch.blueScore != null ? finishedMatch.blueScore : finishedMatch.blue && finishedMatch.blue.score) || 0,
+            redScore: Number(finishedMatch.redScore != null ? finishedMatch.redScore : finishedMatch.red && finishedMatch.red.score) || 0,
+            elapsedMs: finishedMatch.elapsedMs || 0,
           } }));
         }).catch(function () {
           if (finishedMatchEventId === matchId) finishedMatchEventId = null;

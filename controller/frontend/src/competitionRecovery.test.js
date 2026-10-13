@@ -41,10 +41,134 @@ test("设备失联会停止本地续发并在设备恢复后重新绑定", () =>
 
 test("WebRTC 连接假在线但无新帧时主动重连", () => {
   assert.match(adapter, /requestVideoFrameCallback/);
-  assert.match(adapter, /\["error", "stalled", "emptied"\]/);
+  assert.match(adapter, /element\.addEventListener\("error"/);
   assert.match(adapter, /画面超过 5 秒未更新/);
   assert.match(adapter, /视频首帧超时/);
   assert.match(adapter, /event\.track\.onended/);
+});
+
+test("绑定新媒体流的 emptied/stalled 事件不触发 TURN 重连", () => {
+  const begin = adapter.indexOf("  function watchVideoFrames(element) {");
+  const end = adapter.indexOf("  function removeVideoBackdrop() {", begin);
+  const listeners = {};
+  const stream = {};
+  const element = { srcObject: stream, isConnected: true, error: null, addEventListener: (name, callback) => { listeners[name] = callback; } };
+  const video = { peer: {}, stream, frameElement: null, frameCallbackId: null, frameWatchTimer: 1 };
+  const interruptions = [];
+  let frames = 0;
+  const watch = runInNewContext(adapter.slice(begin, end) + "\nwatchVideoFrames", {
+    video,
+    markVideoFrame: () => { frames += 1; },
+    startFrameFallback: reason => interruptions.push(reason),
+  });
+  watch(element);
+  listeners.emptied?.();
+  listeners.stalled?.();
+  listeners.error();
+  assert.equal(interruptions.length, 0);
+  listeners.playing();
+  assert.equal(frames, 1);
+  element.error = { code: 3 };
+  element.srcObject = null;
+  listeners.error();
+  listeners.timeupdate();
+  assert.equal(interruptions.length, 0);
+  assert.equal(frames, 1);
+  element.srcObject = stream;
+  listeners.error();
+  assert.equal(interruptions.length, 1);
+  assert.match(interruptions[0], /解码错误/);
+  video.frameElement = {};
+  listeners.error();
+  assert.equal(interruptions.length, 1);
+});
+
+test("尚未取得的视频指标显示为空，真实零值保持为零", () => {
+  const begin = adapter.indexOf("  function finiteNumber(value) {");
+  const end = adapter.indexOf("  function formatNumber(value) {", begin);
+  const finite = runInNewContext(adapter.slice(begin, end) + "\nfiniteNumber");
+  for (const value of [null, undefined, "", " ", NaN]) assert.equal(finite(value), null);
+  assert.equal(finite(0), 0);
+  assert.equal(finite("0"), 0);
+});
+
+test("裁判切换视图更新现有连接且不重复提交", async () => {
+  const begin = adapter.indexOf("  function updateVideoView() {");
+  const end = adapter.indexOf("  function ensureVideoSurface() {", begin);
+  const peer = {};
+  const video = { peer, peerId: "owned", requestedView: "full", connectionGeneration: 1 };
+  const requests = [];
+  const update = runInNewContext(adapter.slice(begin, end) + "\nupdateVideoView", {
+    video, competitionVideoView: () => "cropped", videoSurface: () => ({}),
+    api: (_url, request) => { requests.push(request.body); return Promise.resolve(); },
+    setVisionStatus() {},
+  });
+  update();
+  update();
+  assert.equal(requests.length, 1);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(video.peer, peer);
+  assert.equal(video.requestedView, "cropped");
+  assert.equal(requests[0].peerId, "owned");
+  update();
+  assert.equal(requests.length, 1);
+});
+
+test("切换场地复用正在播放的视频元素与媒体流", () => {
+  const begin = adapter.indexOf("  function mountVideoSurface() {");
+  const end = adapter.indexOf("  function cameraText(camera, index) {", begin);
+  const stream = {};
+  const element = { srcObject: stream };
+  let moved = null;
+  let watched = null;
+  const stage = { querySelector: () => null, firstChild: null, insertBefore: node => { moved = node; } };
+  const mount = runInNewContext(adapter.slice(begin, end) + "\nmountVideoSurface", {
+    video: { frameElement: element, stream },
+    videoSurface: () => stage, removeVideoBackdrop() {}, ensureVideoControls() {},
+    isRefereePage: () => true, watchVideoFrames: node => { watched = node; },
+    renderCropEditor() {}, renderPlayerDetectionOverlay() {},
+    document: { createElement: () => { throw new Error("must reuse video"); } },
+  });
+  mount();
+  assert.equal(moved, element);
+  assert.equal(watched, element);
+  assert.equal(element.srcObject, stream);
+});
+
+test("WebRTC 诊断按采样区间计算丢包率、接收帧率和解码丢帧", () => {
+  const begin = adapter.indexOf("  function calculateVideoIntervalStats(");
+  const end = adapter.indexOf("  function startVideoStats(", begin);
+  assert.ok(begin >= 0 && end > begin);
+  const calculate = runInNewContext(adapter.slice(begin, end) + "\ncalculateVideoIntervalStats");
+  const previous = {
+    at: 1000, bytesReceived: 1000, packetsReceived: 100, packetsLost: 10,
+    framesReceived: 30, framesDecoded: 28, framesDropped: 2,
+    jitterBufferDelay: 2, jitterBufferEmittedCount: 20,
+  };
+  const current = {
+    at: 3000, bytesReceived: 251000, packetsReceived: 280, packetsLost: 20,
+    framesReceived: 70, framesDecoded: 58, framesDropped: 7,
+    jitterBufferDelay: 5, jitterBufferEmittedCount: 50,
+  };
+  const stats = calculate(current, previous);
+  assert.equal(stats.bitrateKbps, 1000);
+  assert.equal(stats.receiveFps, 20);
+  assert.equal(stats.fps, 15);
+  assert.equal(stats.packetLossPct, 10 / 190 * 100);
+  assert.equal(stats.packetsLostInterval, 10);
+  assert.equal(stats.framesDroppedInterval, 5);
+  assert.equal(stats.bufferMs, 100);
+  assert.equal(calculate({ ...current, jitterBufferEmittedCount: 20 }, previous).bufferMs, null);
+  assert.equal(stats.intervalSeconds, 2);
+  assert.equal(calculate(current, null), null);
+  assert.equal(calculate({ ...current, packetsLost: 5 }, previous).packetLossPct, null);
+});
+
+test("公网 WebRTC 诊断展示浏览器与服务端候选及 TURN 传输协议", () => {
+  assert.ok(adapter.includes("selectedPair.remoteCandidateId"));
+  assert.ok(adapter.includes('localCandidateType + "/" + remoteCandidateType'));
+  assert.ok(adapter.includes("relayProtocol = (localCandidate && localCandidate.relayProtocol)"));
+  assert.ok(adapter.includes('config.turnRequired || config.iceTransportPolicy === "relay"'));
 });
 
 test("选手实时画面只解码一条视频流并清理旧背景副本", () => {
@@ -60,7 +184,7 @@ test("选手实时画面只解码一条视频流并清理旧背景副本", () =>
 
 test("非 trickle 信令等待 ICE 候选完成才提交 Offer", async () => {
   const begin = adapter.indexOf("  function waitForIce(peer) {");
-  const end = adapter.indexOf("  function requestFallbackFrame() {", begin);
+  const end = adapter.indexOf("  function competitionVideoView() {", begin);
   assert.ok(begin >= 0 && end > begin);
   const timers = [];
   const waitForIce = runInNewContext(adapter.slice(begin, end) + "\nwaitForIce", {
@@ -88,121 +212,19 @@ test("非 trickle 信令等待 ICE 候选完成才提交 Offer", async () => {
   await assert.rejects(timedOut, /ICE 候选收集超时/);
 });
 
-test("HTTPS 兼容画面在重绘和请求超时后继续轮询", async () => {
-  const begin = adapter.indexOf("  function scheduleFallbackFrame(delay) {");
-  const end = adapter.indexOf("  function startFrameFallback(reason) {", begin);
-  assert.ok(begin >= 0 && end > begin);
-  const timers = [];
-  const requests = [];
-  const revoked = [];
-  function makeStage() { return { image: { src: "" }, querySelector() { return this.image; } }; }
-  let stage = makeStage();
-  let nextBlob = 0;
-  const video = {
-    fallback: true, sessionId: "session-1", connectionGeneration: 1,
-    fallbackRequest: null, fallbackTimer: null, fallbackErrors: 0,
-    fallbackElement: null, fallbackObjectUrl: null, lastFrameAt: 0,
-  };
-  class FakeAbortController {
-    constructor() {
-      this.listeners = [];
-      this.signal = { addEventListener: (_name, callback) => this.listeners.push(callback) };
-    }
-    abort() { this.listeners.forEach((callback) => callback()); }
-  }
-  class FakeImage {
-    set src(value) {
-      this.value = value;
-      this.naturalWidth = 640;
-      this.naturalHeight = 480;
-      queueMicrotask(() => this.onload?.());
-    }
-  }
-  const requestFallbackFrame = runInNewContext(adapter.slice(begin, end) + "\nrequestFallbackFrame", {
-    video, document: { hidden: false }, videoSurface: () => stage,
-    mountVideoSurface: () => { video.fallbackElement = stage.image; },
-    fetch: (_url, options) => new Promise((resolve, reject) => {
-      requests.push({ resolve, reject });
-      options.signal.addEventListener("abort", () => reject(new Error("aborted")));
-    }),
-    AbortController: FakeAbortController, Image: FakeImage,
-    URL: { createObjectURL: () => `blob:${++nextBlob}`, revokeObjectURL: (url) => revoked.push(url) },
-    setTimeout: (callback, delay) => {
-      const timer = { callback, delay, cleared: false };
-      timers.push(timer);
-      return timer;
-    },
-    clearTimeout: (timer) => { timer.cleared = true; },
-    isRefereePage: () => false, setVisionStatus() {}, setBadge() {},
-    lastDeviceBadge: null, renderCropEditor() {}, renderPlayerDetectionOverlay() {},
-  });
-
-  requestFallbackFrame();
-  requestFallbackFrame();
-  assert.equal(requests.length, 1, "only one image request may be active");
-  stage = makeStage(); // The application rerendered the video stage.
-  requests[0].resolve({ ok: true, blob: async () => ({}) });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(stage.image.src, "blob:1", "decoded frame must attach to the new stage");
-  const next = timers.find((timer) => timer.delay === 80 && !timer.cleared);
-  assert.ok(next, "a successful frame must schedule another request");
-  next.callback();
-  assert.equal(requests.length, 2);
-  const networkTimeout = timers.findLast((timer) => timer.delay === 6000 && !timer.cleared);
-  networkTimeout.callback();
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(video.fallbackRequest, null);
-  assert.equal(video.fallbackErrors, 1);
-  assert.ok(timers.some((timer) => timer.delay === 400 && !timer.cleared));
-  assert.deepEqual(revoked, []);
-});
-
-test("公网兼容画面优先使用持续连接，断开后改用 HTTPS 轮询", async () => {
+test("TURN 连接失败只重试 WebRTC，不启动备用媒体通道", () => {
   const begin = adapter.indexOf("  function startFrameFallback(reason) {");
   const end = adapter.indexOf("  function scheduleVideoReconnect(reason, delay) {", begin);
-  assert.ok(begin >= 0 && end > begin);
-  const sockets = [];
-  const image = { src: "" };
-  const stage = { querySelector: () => image };
-  const statuses = [];
-  let httpPolls = 0;
-  const video = {
-    sessionId: "session-1", connectionGeneration: 0, fallback: false,
-    fallbackSocket: null, fallbackSocketTimer: null, fallbackObjectUrl: null,
-    lastFrameAt: 0,
-  };
-  class FakeSocket {
-    constructor(url) { this.url = url; sockets.push(this); }
-    close() { this.onclose?.(); }
-  }
-  class FakeImage {
-    set src(_value) { queueMicrotask(() => this.onload?.()); }
-  }
-  const context = {
-    video, window: { WebSocket: FakeSocket }, location: { protocol: "https:", host: "fish.example" },
-    Blob, Image: FakeImage,
-    URL: { createObjectURL: () => "blob:frame", revokeObjectURL() {} },
-    closeVideoPeer() { video.connectionGeneration++; video.fallback = false; },
-    mountVideoSurface() {}, videoSurface: () => stage,
-    requestFallbackFrame() { httpPolls++; },
-    isRefereePage: () => false,
-    setVisionStatus(value) { statuses.push(value); },
-    setBadge() {}, lastDeviceBadge: null,
-    renderCropEditor() {}, renderPlayerDetectionOverlay() {},
-    setTimeout: () => 1, clearTimeout() {},
-  };
-  const startFrameFallback = runInNewContext(adapter.slice(begin, end) + "\nstartFrameFallback", context);
-  startFrameFallback("WebRTC unavailable");
-  assert.equal(sockets.length, 1);
-  assert.match(sockets[0].url, /^wss:\/\/fish\.example\/api\/vision\/frame\.ws\?/);
-  assert.equal(httpPolls, 0);
-  sockets[0].onmessage({ data: new Blob([new Uint8Array([0xff, 0xd8])]) });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(image.src, "blob:frame");
-  assert.ok(statuses.some((value) => value.includes("实时通道")));
-  sockets[0].close();
-  assert.equal(httpPolls, 1);
-  assert.equal(video.fallbackSocket, null);
+  const retries = [];
+  const retry = runInNewContext(adapter.slice(begin, end) + "\nstartFrameFallback", {
+    video: { sessionId: "session-1" },
+    scheduleVideoReconnect: (reason, delay) => retries.push({ reason, delay }),
+  });
+  retry("连接中断");
+  assert.equal(retries.length, 1);
+  assert.equal(retries[0].delay, 3000);
+  assert.match(retries[0].reason, /TURN/);
+  assert.doesNotMatch(adapter, /function requestFallbackFrame|function startFrameSocket/);
 });
 
 test("选手端结束比赛后保持控制并按账号领取一次通知", async () => {
@@ -277,7 +299,7 @@ test("选手端结束比赛后保持控制并按账号领取一次通知", async
   assert.equal(events.length, 1, "已领取提示的账号不能重复弹窗");
   assert.match(playerPage, /id="matchFinishedNotice"[\s\S]*?data-finish-records/);
   assert.match(playerPage, /addEventListener\('fish-match-finished'/);
-  assert.match(adapter, /quality: isRefereePage\(\) \? "full" : "smooth"/);
+  assert.match(adapter, /quality: "smooth"/);
 });
 
 test("比赛结束提示显示比分，关闭后不被轮询重复打开", () => {

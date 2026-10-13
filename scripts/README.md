@@ -11,3 +11,7 @@
 | `presentations/` | 历史演示稿生成脚本；其中部分仍使用旧机器的输出路径，运行前需检查 |
 
 入口脚本与辅助脚本的相对路径已按此结构更新。运行中的服务不需要因目录整理而重启；下次启动使用根目录入口。
+
+回放布局与播放验证：运行 `vision/.venv/Scripts/python.exe scripts/diagnostics/replay_probe.py --width 774 --height 586`。脚本读取本地历史记录，在独立浏览器中测试裁判回放界面和录像解码，并检查播放、下载和进度条是否被布局裁剪。认证适配器被隔离，媒体请求转到本机视频服务，因此这项测试不代表公网登录或下载链路验证，也不会启动或结束比赛。
+
+TURN 对比测试：从项目根目录使用 `vision/.venv/Scripts/python.exe scripts/diagnostics/video_probe.py --policy relay --turn-transport udp --buffer-ms 30 --seconds 30`，再将 `udp` 改为 `tcp` 单独测试。摄像头需已启动；报告保存在 `controller/diagnostics/runs`。结果只代表运行脚本的电脑所在网络，测试仍使用 TURN，不切换直连。网页最近 50 次重连原因保存在当前浏览器的 `localStorage` 键 `fish.video.reconnects` 中，诊断栏显示最近原因。

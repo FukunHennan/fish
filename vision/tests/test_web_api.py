@@ -15,6 +15,15 @@ from webrtc import WebRTCServer
 
 
 class VisionWebApiTests(unittest.TestCase):
+    def test_view_update_checks_connection_and_view_parameters(self):
+        updates = []
+        video = SimpleNamespace(set_peer_view=lambda peer_id, view: updates.append((peer_id, view)) or peer_id == "owned")
+        client = create_app(self.service, webrtc_server=video).test_client()
+        self.assertEqual(client.post("/webrtc/view", json={"peerId": "owned", "view": "cropped"}).status_code, 200)
+        self.assertEqual(client.post("/webrtc/view", json={"peerId": "unknown", "view": "full"}).status_code, 409)
+        self.assertEqual(client.post("/webrtc/view", json={"peerId": [], "view": "full"}).status_code, 400)
+        self.assertEqual(client.post("/webrtc/view", json={"peerId": "owned", "view": "invalid"}).status_code, 400)
+        self.assertEqual(len(updates), 2)
     def setUp(self):
         # Tests use virtual indexes, never the host machine camera inventory.
         policy = patch("web_api.camera_blocked", return_value=False)

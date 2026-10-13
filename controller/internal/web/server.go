@@ -1075,6 +1075,10 @@ func (s *server) leasesAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	switch r.Method {
 	case http.MethodPatch:
+		if !s.playerDevicePermission(user, input.DeviceID) {
+			writeAuthError(w, http.StatusForbidden, "该机器鱼未分配给当前战队")
+			return
+		}
 		if !s.leases.admit(input.DeviceID, user, input.ClientID, true, func() bool { return true }) {
 			s.event("lease_renew_conflict", "device_id", input.DeviceID, "client_id", input.ClientID, "owner_id", user.ID)
 			writeAuthError(w, http.StatusConflict, "控制权已失效，请重新获取控制权")
@@ -1084,6 +1088,10 @@ func (s *server) leasesAPI(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"renewed": true})
 	case http.MethodPost:
 		accountSide := competitionSideForUser(user)
+		if !s.playerDevicePermission(user, input.DeviceID) {
+			writeAuthError(w, http.StatusForbidden, "该机器鱼未分配给当前战队")
+			return
+		}
 		slotSide := ""
 		if slot := strings.ToUpper(strings.TrimSpace(input.Slot)); strings.HasPrefix(slot, "B") {
 			slotSide = "blue"
@@ -1577,6 +1585,10 @@ func (s *server) command(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	x.DeviceID = s.connectedDeviceID(x.DeviceID)
+	if !s.playerDevicePermission(user, x.DeviceID) {
+		http.Error(w, "该机器鱼未分配给当前战队", http.StatusForbidden)
+		return
+	}
 	if x.DeviceID == "" || x.Frequency < 0.3 || x.Frequency > 5 || x.Amplitude < 0 || x.Amplitude > 90 || (x.AmplitudePercent != nil && (*x.AmplitudePercent < 0 || *x.AmplitudePercent > 100)) || (x.Bias != nil && (*x.Bias < -90 || *x.Bias > 90)) {
 		http.Error(w, "参数无效", http.StatusBadRequest)
 		return
@@ -1685,6 +1697,10 @@ func (s *server) realtimeCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	x.DeviceID = s.connectedDeviceID(x.DeviceID)
+	if !s.playerDevicePermission(user, x.DeviceID) {
+		http.Error(w, "该机器鱼未分配给当前战队", http.StatusForbidden)
+		return
+	}
 	if x.DeviceID == "" || x.Frequency < 0.3 || x.Frequency > 5 ||
 		x.Amplitude < 0 || x.Amplitude > 90 ||
 		x.DeadmanMs < 0 || x.DeadmanMs > 2000 || (x.DeadmanMs > 0 && x.DeadmanMs < 150) ||

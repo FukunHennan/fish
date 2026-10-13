@@ -679,8 +679,16 @@ func TestDynamicChallengeRegistersDevice(t *testing.T) {
 	if err := conn.ReadJSON(&result); err != nil || result["success"] != true {
 		t.Fatalf("注册失败: %#v %v", result, err)
 	}
-	if devices := h.List(); len(devices) != 1 || !devices[0].Online {
-		t.Fatalf("设备未进入在线列表: %+v", devices)
+	deadline := time.Now().Add(time.Second)
+	for {
+		devices := h.List()
+		if len(devices) == 1 && devices[0].Online {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("设备未进入在线列表: %+v", devices)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
