@@ -8,6 +8,7 @@
 #include <Preferences.h>
 #include <Update.h>
 #include <WiFi.h>
+#include <esp_ota_ops.h>
 #include <esp_system.h>
 
 namespace {
@@ -118,7 +119,14 @@ void ControllerClient::sendRegistration(const String& nonce) {
     document["proof"] = proof;
     document["bootId"] = bootId_;
     document["name"] = config_.displayName;
-    document["firmwareVersion"] = FIRMWARE_VERSION;
+    static const char versionMarker[] = "FISH_FW_VERSION=" FIRMWARE_VERSION;
+    document["firmwareVersion"] = versionMarker + 16;
+    esp_app_desc_t appDescription;
+    if(esp_ota_get_partition_description(esp_ota_get_running_partition(),&appDescription)==ESP_OK){
+        char buildId[65];
+        for(size_t index=0;index<32;++index)snprintf(buildId+index*2,3,"%02x",appDescription.app_elf_sha256[index]);
+        document["firmwareBuildId"]=buildId;
+    }
     document["ip"] = WiFi.localIP().toString();
     document["servoCenter"] = config_.servoCenter;
     appendHardwareInventory(document);
@@ -390,12 +398,12 @@ void ControllerClient::handleCommand(JsonDocument& document) {
         bool hasBias = !payload["bias"].isNull();
         float bias = payload["bias"] | current.bias;
         uint32_t deadmanMs = payload["deadmanMs"] | 0U;
-        uint32_t transitionMs = payload["transitionMs"] | 600U;
+        uint32_t transitionMs = payload["transitionMs"] | 0U;
         if (deadmanMs > 0 && (deadmanMs < 150 || deadmanMs > 2000)) {
             sendResult(requestId, false, "INVALID_DEADMAN", "运动续帧时限无效");
             return;
         }
-        if (transitionMs < 100 || transitionMs > 1500) {
+        if ((transitionMs > 0 && transitionMs < 100) || transitionMs > 1500) {
             sendResult(requestId, false, "INVALID_TRANSITION", "运动过渡时间无效");
             return;
         }

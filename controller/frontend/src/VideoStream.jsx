@@ -144,7 +144,7 @@ const VideoStream = forwardRef(function VideoStream({
 
             const peer = new window.RTCPeerConnection({
               iceServers: Array.isArray(config.iceServers) ? config.iceServers : [],
-              iceTransportPolicy: "relay",
+              iceTransportPolicy: config.iceTransportPolicy === "relay" ? "relay" : "all",
             });
             entry.peer = peer;
             entry.connectTimer = window.setTimeout(() => {

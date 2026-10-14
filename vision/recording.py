@@ -18,6 +18,8 @@ _SAFE_ID = re.compile(r"[^A-Za-z0-9_-]+")
 _TIME_BASE = Fraction(1, 1000)
 _FIRST_FRAME_TIMEOUT_S = 3.0
 _MAX_FRAME_AGE_S = 2.0
+_RECORDING_MAX_FPS = max(1.0, float(os.environ.get("FISH_RECORDING_MAX_FPS", "20")))
+_RECORDING_FRAME_INTERVAL_S = 1.0 / _RECORDING_MAX_FPS
 
 
 class RecordingError(RuntimeError):
@@ -95,6 +97,7 @@ class MatchVideoRecorder:
         self._last_timestamp = self._started_timestamp
         self._previous_sequence = int(sequence) - 1
         self._last_pts = -1
+        self._last_encoded_timestamp = None
         self._frame_count = 0
         self._dropped_frames = 0
         self._error = None
@@ -109,11 +112,11 @@ class MatchVideoRecorder:
                 format="mp4",
                 options={"movflags": "+faststart"},
             )
-            # 60 is the encoder timing grid, not a frame generator or cap.
+            # Keep recording below the live video rate to protect WebRTC.
             # Frames retain real capture timestamps and are never duplicated.
             self._stream = self._container.add_stream(
                 "libx264",
-                rate=60,
+                rate=int(round(_RECORDING_MAX_FPS)),
                 options={"preset": "ultrafast", "crf": "23", "tune": "zerolatency"},
             )
             self._stream.width = self.width
@@ -160,6 +163,7 @@ class MatchVideoRecorder:
             self._container.mux(packet)
         self._last_pts = pts
         self._last_timestamp = float(timestamp)
+        self._last_encoded_timestamp = float(timestamp)
         self._frame_count += 1
 
     def _writer_loop(self):
@@ -176,6 +180,12 @@ class MatchVideoRecorder:
                 if self._previous_sequence >= 0 and sequence > self._previous_sequence + 1:
                     self._dropped_frames += sequence - self._previous_sequence - 1
                 self._previous_sequence = sequence
+                if (
+                    self._last_encoded_timestamp is not None
+                    and float(timestamp) - self._last_encoded_timestamp < _RECORDING_FRAME_INTERVAL_S
+                ):
+                    self._dropped_frames += 1
+                    continue
                 self._encode(frame, timestamp)
             for packet in self._stream.encode():
                 self._container.mux(packet)

@@ -79,7 +79,7 @@ func TestMotionEndpointsPreserveExplicitSteeringAndCalibrationPreset(t *testing.
 				if payload["amplitude"] != tc.amplitude || payload["bias"] != tc.bias {
 					t.Fatalf("unsafe payload: %v; want amplitude=%v bias=%v", payload, tc.amplitude, tc.bias)
 				}
-				if payload["transitionMs"] != float64(600) {
+				if payload["transitionMs"] != float64(0) {
 					t.Fatalf("motion payload missing calibrated transition: %v", payload)
 				}
 			case <-time.After(time.Second):

@@ -43,6 +43,21 @@ func frontendHandler() http.Handler {
 }
 
 func embeddedFrontendHandler() http.Handler {
+	if source := strings.TrimSpace(os.Getenv("FISH_FRONTEND_DIR")); source != "" {
+		root := filepath.Join(source, "..", "internal", "web", "dist")
+		if info, err := os.Stat(filepath.Join(root, "index.html")); err == nil && !info.IsDir() {
+			handler := developmentFrontendHandler(root)
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/__dev/admin-revision" {
+					request := r.Clone(r.Context())
+					request.URL.Path = "/__dev/revision"
+					handler.ServeHTTP(w, request)
+					return
+				}
+				handler.ServeHTTP(w, r)
+			})
+		}
+	}
 	staticFiles, err := fs.Sub(frontendFiles, "dist")
 	if err != nil {
 		panic(err)
@@ -85,10 +100,14 @@ func developmentFrontendHandler(root string) http.Handler {
 		}
 		if strings.EqualFold(filepath.Ext(path), ".html") {
 			body := string(data)
+			reloadScript := developmentReloadScript
+			if _, err := os.Stat(filepath.Join(root, "assets")); err == nil {
+				reloadScript = strings.ReplaceAll(reloadScript, "/__dev/revision", "/__dev/admin-revision")
+			}
 			if index := strings.LastIndex(strings.ToLower(body), "</body>"); index >= 0 {
-				body = body[:index] + developmentReloadScript + body[index:]
+				body = body[:index] + reloadScript + body[index:]
 			} else {
-				body += developmentReloadScript
+				body += reloadScript
 			}
 			data = []byte(body)
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -107,12 +126,14 @@ func developmentFrontendHandler(root string) http.Handler {
 func developmentFrontendPath(root, requestPath string) (string, bool) {
 	var relative string
 	switch {
-	case requestPath == "/index.html" || requestPath == "/console.html":
+	case requestPath == "/" || requestPath == "/index.html" || requestPath == "/console.html":
 		relative = "index.html"
 	case requestPath == "/competition.html":
 		relative = "competition.html"
 	case strings.HasPrefix(requestPath, "/competition/"):
 		relative = filepath.Join("public", filepath.FromSlash(strings.TrimPrefix(requestPath, "/")))
+	case strings.HasPrefix(requestPath, "/assets/"):
+		relative = filepath.FromSlash(strings.TrimPrefix(requestPath, "/"))
 	default:
 		return "", false
 	}

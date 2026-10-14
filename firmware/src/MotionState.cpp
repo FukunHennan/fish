@@ -3,6 +3,7 @@
 
 namespace {
 constexpr float kTransitionEpsilon = 0.001f;
+float clampAngle(float angle) { return fmaxf(0.0f, fminf(180.0f, angle)); }
 }
 
 void MotionTransition::reset(float amplitude, float bias) {
@@ -52,7 +53,7 @@ MotionState::MotionState(float frequency, float amplitude, float turnAmount)
 
 void MotionState::setTuning(float frequency, float amplitude) {
     value_.frequency = frequency;
-    value_.amplitude = amplitude;
+    (void)amplitude;
 }
 
 void MotionState::setNeutralCenter(float center) { neutralCenter_ = center; }
@@ -73,12 +74,14 @@ void MotionState::safeStop() {
 MotionSnapshot MotionState::snapshot() const { return value_; }
 
 float MotionState::angleAt(float phase) const {
+    float angle = neutralCenter_ + value_.bias;
     if (value_.mode == MotionMode::Stopped || value_.mode == MotionMode::Idle) {
-        return neutralCenter_ + value_.bias;
+        return clampAngle(angle);
     }
-    return neutralCenter_ + value_.bias + value_.amplitude * sinf(phase);
+    angle += value_.amplitude * sinf(phase);
+    return clampAngle(angle);
 }
 
 float MotionState::angleAt(float phase, float amplitude, float bias) const {
-    return neutralCenter_ + bias + amplitude * sinf(phase);
+    return clampAngle(neutralCenter_ + bias + amplitude * sinf(phase));
 }

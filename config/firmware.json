@@ -1,8 +1,8 @@
 {
   "deploymentKey": "0000000000000000000000000000000000000000000000000000000000000000",
   "factoryWifi": {
-    "ssid": "XiaoMi-Fish",
-    "password": "12345678"
+    "ssid": "",
+    "password": ""
   },
   "otaPassword": "fish123",
   "settings": {
@@ -25,7 +25,7 @@
     "BATTERY_SAMPLE_INTERVAL_MS": 10000,
     "SERVO_PIN": 2,
     "SWIM_SPEED": 2.5,
-    "SWIM_POWER": 28.0,
+    "SWIM_POWER": 45.0,
     "TURN_AMOUNT": 45.0
   }
 }

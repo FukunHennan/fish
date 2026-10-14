@@ -18,6 +18,7 @@ type Device struct {
 	Name                 string    `json:"name"`
 	IP                   string    `json:"ip"`
 	FirmwareVersion      string    `json:"firmwareVersion"`
+	FirmwareBuildID      string    `json:"firmwareBuildId,omitempty"`
 	ProtocolVersion      int       `json:"protocolVersion"`
 	BootID               string    `json:"bootId,omitempty"`
 	Online               bool      `json:"online"`
@@ -286,6 +287,9 @@ func (h *Hub) Update(id string, values map[string]any) {
 	}
 	if v, ok := values["firmwareVersion"].(string); ok {
 		e.device.FirmwareVersion = v
+	}
+	if v, ok := values["firmwareBuildId"].(string); ok {
+		e.device.FirmwareBuildID = v
 	}
 	if v, ok := values["uptimeMs"].(float64); ok && v >= 0 {
 		e.device.UptimeMs = uint64(v)

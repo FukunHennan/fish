@@ -40,18 +40,17 @@
     }
   } catch (_) {}
   var MOTION_ACTIONS = { forward: 1, left: 1, right: 1, stop: 1, idle: 1 };
+  var MOTION_TUNING_ACTIONS = { frequencyUp: 1, frequencyDown: 1 };
   var motionTuning = {
-    b1: { frequency: 2.5, amplitudePercent: 60 },
-    b2: { frequency: 2.5, amplitudePercent: 60 },
+    b1: { frequency: 2.5 },
+    b2: { frequency: 2.5 },
   };
   try {
     var savedMotionTuning = JSON.parse(window.localStorage.getItem("fish-player-motion-settings") || "{}");
     PLAYERS.forEach(function (player) {
       var saved = savedMotionTuning[player] || {};
       var frequency = Number(saved.frequency);
-      var amplitudePercent = Number(saved.amplitudePercent);
       if (Number.isFinite(frequency)) motionTuning[player].frequency = Math.max(0.3, Math.min(5, frequency));
-      if (Number.isFinite(amplitudePercent)) motionTuning[player].amplitudePercent = Math.max(0, Math.min(100, amplitudePercent));
     });
   } catch (_) {}
   var activeMotion = {};
@@ -63,6 +62,8 @@
     b2: { active: false, pending: null },
   };
   var controlSocket = null;
+  var openingControlSocket = null;
+  var controlConnectionTimer = null;
   var controlSocketPromise = null;
   var controlSocketRetryAt = 0;
   var controlSocketLastMessageAt = 0;
@@ -85,11 +86,19 @@
     controlSocketPromise = new Promise(function (resolve, reject) {
       var socket;
       try { socket = new WebSocket(controlSocketUrl()); } catch (error) { reject(error); return; }
+      openingControlSocket = socket;
+      var connectTimeout = window.setTimeout(function () {
+        if (!settled) { reject(new Error("控制连接建立超时")); socket.close(); }
+      }, 10000);
       var settled = false;
       socket.onopen = function () {
+        window.clearTimeout(connectTimeout);
+        if (openingControlSocket !== socket) { socket.close(); return; }
+        openingControlSocket = null;
         settled = true;
         controlSocket = socket;
         controlSocketLastMessageAt = Date.now();
+        setBadge("控制连接已就绪", "ok");
         resolve(socket);
       };
       socket.onmessage = function (event) {
@@ -103,10 +112,13 @@
         });
       };
       socket.onerror = function () {
+        window.clearTimeout(connectTimeout);
         controlSocketRetryAt = Date.now() + 1000;
-        if (!settled) reject(new Error("control socket unavailable"));
+        if (!settled) { reject(new Error("control socket unavailable")); socket.close(); }
       };
       socket.onclose = function () {
+        window.clearTimeout(connectTimeout);
+        if (openingControlSocket === socket) openingControlSocket = null;
         if (controlSocket === socket) controlSocket = null;
         controlSocketPromise = null;
         controlSocketRetryAt = Date.now() + 500;
@@ -122,6 +134,27 @@
       socket.send(JSON.stringify(body));
       return true;
     });
+  }
+
+  function maintainControlConnection() {
+    if (!state.authenticated || isRefereePage() || !ownsLoginTab()) return;
+    ensureControlSocket().catch(function () {
+      if (state.authenticated && controlConnectionTimer) setBadge("控制连接正在重连，请等待就绪", "warn");
+    });
+  }
+
+  function startControlConnection() {
+    if (isRefereePage() || controlConnectionTimer) return;
+    controlConnectionTimer = window.setInterval(maintainControlConnection, 2000);
+    maintainControlConnection();
+  }
+
+  function stopControlConnection() {
+    if (controlConnectionTimer) window.clearInterval(controlConnectionTimer);
+    controlConnectionTimer = null;
+    var sockets = [controlSocket, openingControlSocket];
+    controlSocket = openingControlSocket = null;
+    sockets.forEach(function (socket) { if (socket) socket.close(); });
   }
   var activePointers = {};
   var heldInputs = { b1: {}, b2: {} };
@@ -168,7 +201,7 @@
   function lostLogin(message) {
     if (!state.authenticated) return;
     if (deviceEventSource) { deviceEventSource.close(); deviceEventSource = null; }
-    if (controlSocket) { try { controlSocket.close(); } catch (_) {} controlSocket = null; }
+    stopControlConnection();
     resetTeamSessionState();
     showLoginError(message || "当前账号已在另一页面登录，请重新登录");
     setBadge(message || "当前账号已在另一页面登录", "warn");
@@ -199,7 +232,10 @@
       lostLogin("当前账号已在另一标签页登录");
       return Promise.reject(new Error("当前账号已在另一标签页登录"));
     }
+    var abortController = options.timeoutMs ? new AbortController() : null;
+    var timeout = abortController ? setTimeout(function () { abortController.abort(); }, options.timeoutMs) : null;
     return fetch(path, {
+      signal: abortController ? abortController.signal : undefined,
       credentials: "same-origin",
       headers: Object.assign({ "Content-Type": "application/json" }, options.headers || {}),
       method: options.method || "GET",
@@ -218,6 +254,11 @@
         }
         return data;
       });
+    }).catch(function (error) {
+      if (error.name === "AbortError") throw new Error("请求超时，结果尚未确认，请刷新状态后再操作");
+      throw error;
+    }).finally(function () {
+      if (timeout !== null) clearTimeout(timeout);
     });
   }
 
@@ -524,6 +565,8 @@
     if (badge || !document.body) return;
     badge = document.createElement("div");
     badge.id = "fishBackendBadge";
+    badge.setAttribute("role", "status");
+    badge.setAttribute("aria-live", "polite");
     badge.style.cssText = [
       "position:fixed", "left:14px", "bottom:14px", "z-index:2147483000",
       "padding:7px 12px", "border-radius:999px", "font-size:12px", "line-height:1.3",
@@ -843,6 +886,7 @@
   }
 
   function startPlayerLeaseMaintenance() {
+    startControlConnection();
     if (isRefereePage() || playerLeaseTimer) return;
     playerLeaseTimer = window.setInterval(maintainPlayerLeases, 15000);
   }
@@ -882,12 +926,7 @@
       // transport below prevents public-network request buildup.
       deadmanMs: stop ? 0 : 2000,
     };
-    if (stop) {
-      body.amplitude = 0;
-      body.bias = 0;
-    } else {
-      body.amplitudePercent = tuning.amplitudePercent;
-    }
+    if (stop) body.bias = 0;
     var transport = motionTransport[player] || (motionTransport[player] = { active: false, pending: null });
     transport.pending = { deviceId: deviceId, body: body };
     if (transport.active) return true;
@@ -1458,7 +1497,7 @@
     peer: null, stream: null, sessionId: null, timer: null, connecting: false,
     connectionStartedAt: 0, connectedAt: 0, lastFrameAt: 0,
     connectionGeneration: 0,
-    statsTimer: null, reconnects: 0,
+    statsTimer: null, reconnects: 0, reconnectStreak: 0, stableTimer: null,
     diagnostics: { transport: "—", candidateType: "—", relayProtocol: null, fps: null, receiveFps: null, bitrateKbps: null, packetLossPct: null, packetsLostInterval: null, framesDroppedInterval: null, jitterMs: null, rttMs: null },
     frameWatchTimer: null, frameCallbackId: null, frameElement: null,
     fallback: false, fallbackTimer: null, fallbackRequest: null,
@@ -1669,11 +1708,14 @@
 
   function startFrameFallback(reason) {
     if (!video.sessionId) return;
-    scheduleVideoReconnect("TURN 视频连接失败：" + reason, 3000);
+    scheduleVideoReconnect((video.icePolicy === "all" ? "局域网直连" : "TURN") + " 视频连接失败：" + reason, 3000);
   }
 
   function scheduleVideoReconnect(reason, delay) {
     if (video.timer) return;
+    video.reconnectStreak = Math.min((video.reconnectStreak || 0) + 1, 4);
+    var backoff = Math.min(30000, 3000 * Math.pow(2, video.reconnectStreak - 1));
+    var reconnectDelay = Math.max(Number(delay) || 3000, backoff);
     video.reconnects += 1;
     video.lastReconnectReason = reason || video.statusText || "等待视频会话";
     var reconnectEvent = {
@@ -1689,7 +1731,7 @@
       reconnectHistory.push(reconnectEvent);
       localStorage.setItem("fish.video.reconnects", JSON.stringify(reconnectHistory.slice(-50)));
     } catch (_) {}
-    console.info("TURN video reconnect", reconnectEvent);
+    console.info("WebRTC video reconnect", reconnectEvent);
     renderVideoDiagnostics();
     video.timer = setTimeout(function () {
       video.timer = null;
@@ -1698,7 +1740,7 @@
       // stale peer after the replacement connection has already started.
       closeVideoPeer();
       connectVideo();
-    }, delay || 3000);
+    }, reconnectDelay);
     if (reason) {
       video.statusText = "视觉重连中：" + reason;
       setVisionStatus(video.statusText, "warn");
@@ -1725,13 +1767,14 @@
       })
       .then(function (config) {
         if (!current()) throw staleConnection();
+        video.icePolicy = config.iceTransportPolicy === "relay" ? "relay" : "all";
         if (config && config.available === false) throw new Error("WebRTC 服务未启用");
         if (config && (config.turnRequired || config.iceTransportPolicy === "relay") && !config.turnConfigured) {
           throw new Error(config.turnError || "Cloudflare TURN 暂不可用，无法建立 relay 视频连接");
         }
         var peer = new window.RTCPeerConnection({
           iceServers: (config && Array.isArray(config.iceServers)) ? config.iceServers : [],
-          iceTransportPolicy: "relay",
+          iceTransportPolicy: config.iceTransportPolicy === "relay" ? "relay" : "all",
         });
         if (!current()) {
           try { peer.close(); } catch (_) {}
@@ -1764,7 +1807,11 @@
             }, 4000);
           } else if (peer.connectionState === "connected") {
             video.connectedAt = Date.now();
-            video.statusText = "视频连接已建立，正在等待首帧…";
+            if (video.stableTimer) clearTimeout(video.stableTimer);
+            video.stableTimer = setTimeout(function () {
+              if (video.peer === peer && peer.connectionState === "connected") video.reconnectStreak = 0;
+            }, 15000);
+            video.statusText = (video.icePolicy === "all" ? "局域网 WebRTC 直连" : "TURN 中继") + "已连接，正在等待首帧…";
             setVisionStatus(video.statusText, "info");
           }
         };
@@ -3237,6 +3284,10 @@
   function closeVideoPeer() {
     video.connectionGeneration += 1;
     stopVideoStats();
+    if (video.stableTimer) {
+      clearTimeout(video.stableTimer);
+      video.stableTimer = null;
+    }
     if (video.timer) {
       clearTimeout(video.timer);
       video.timer = null;
@@ -3524,6 +3575,16 @@
     if (typeof window.MutationObserver !== "function" || !document.body || renderRefreshTimer) return;
     if (!renderNavigationBound) {
       renderNavigationBound = true;
+      document.addEventListener("fish-player-render-start", function () {
+        if (video.frameElement && video.frameElement.parentNode) video.frameElement.remove();
+      });
+      document.addEventListener("fish-player-render-complete", function () {
+        mountVideoSurface();
+        if (state.ready && !isRefereePage()) {
+          paintDeviceInfo();
+          paintAccountInfo();
+        }
+      });
       window.addEventListener("hashchange", function () {
         window.setTimeout(function () {
           ensureVideoSurface();
@@ -3572,17 +3633,40 @@
   window.fishCompetitionRefereeAction = function (action, body) { return refereeAction(action, body); };
 
   function refereeAction(action, body, propagateError) {
+    if (referee.actionPending) {
+      var pendingError = new Error("上一项裁判操作正在处理，请稍候再试");
+      setBadge(pendingError.message, "warn");
+      return propagateError ? Promise.reject(pendingError) : Promise.resolve(null);
+    }
+    referee.actionPending = true;
+    var label = ({ score: "计分", clock: "比赛计时", finish: "结束比赛", assign: "分配设备", unassign: "解除分配", signin: "签到" })[action] || "裁判操作";
+    setBadge("正在处理" + label + "，请稍候…", "info");
+    setRefereeActionBusy(true);
     if (action === "finish") {
       body = Object.assign({}, body || {});
       if (!body.matchId) body.matchId = referee.match && referee.match.id;
     }
-    return api("/api/competition/match/" + action, { method: "POST", body: body || {} })
-      .then(function () { return refreshReferee(); })
+    return api("/api/competition/match/" + action, { method: "POST", body: body || {}, timeoutMs: 30000 })
+      .then(function () {
+        setBadge(label + "已保存", "ok");
+        return refreshReferee();
+      })
       .catch(function (error) {
         setBadge("裁判操作失败：" + error.message, "error");
         if (propagateError) throw error;
         return null;
+      })
+      .finally(function () {
+        referee.actionPending = false;
+        setRefereeActionBusy(false);
       });
+  }
+
+  function setRefereeActionBusy(busy) {
+    document.querySelectorAll("[data-score], #startBtn, #pauseBtn, #endBtn").forEach(function (button) {
+      button.setAttribute("aria-busy", String(busy));
+      button.disabled = busy || (button.hasAttribute("data-score") && (!referee.match || referee.match.state !== "running"));
+    });
   }
 
   window.fishCompetitionSetFieldLocked = function (locked) {
@@ -3612,6 +3696,7 @@
   }
 
   function resetTeamSessionState() {
+    stopControlConnection();
     releaseLoginTab();
     activeTeamSide = null;
     state.user = null;
@@ -3819,7 +3904,7 @@
   function refreshReferee() {
     if (!isRefereePage()) return Promise.resolve();
     var generation = ++referee.refreshGeneration;
-    api("/api/competition/records")
+    api("/api/competition/records", { timeoutMs: 15000 })
       .then(function (payload) {
         if (generation < referee.appliedRecordsGeneration) return;
         referee.appliedRecordsGeneration = generation;
@@ -3828,7 +3913,7 @@
         }
       })
       .catch(function () { /* 历史记录读取失败不影响当前比赛 */ });
-    return api("/api/competition/match")
+    return api("/api/competition/match", { timeoutMs: 15000 })
       .then(function (payload) {
         if (generation < referee.appliedMatchGeneration) return;
         referee.appliedMatchGeneration = generation;
@@ -3913,6 +3998,7 @@
     syncText("matchSyncHealth", "已同步");
     paintRefereeRoster(match);
     if (typeof window.renderLiveMatch === "function") window.renderLiveMatch(match, referee.elapsedMs, referee.running);
+    setRefereeActionBusy(!!referee.actionPending);
   }
 
   function paintRefereeClock() {
@@ -4826,10 +4912,21 @@
       if (
         !detail ||
         PLAYERS.indexOf(detail.player) < 0 ||
-        !MOTION_ACTIONS[detail.action]
+        (!MOTION_ACTIONS[detail.action] && !MOTION_TUNING_ACTIONS[detail.action])
       ) return;
 
       if (detail.phase === "start") {
+        if (MOTION_TUNING_ACTIONS[detail.action]) {
+          var tuning = motionTuning[detail.player] || motionTuning.b1;
+          var frequencyAction = detail.action.indexOf("frequency") === 0;
+          if (!frequencyAction) return;
+          var setting = "frequency";
+          var step = 0.1;
+          var direction = /Up$/.test(detail.action) ? 1 : -1;
+          tuning[setting] = Math.max(0.3, Math.min(5, tuning[setting] + direction * step));
+          sendMotion(detail.player, activeMotion[detail.player] ? activeMotion[detail.player].action : "stop");
+          return;
+        }
         var keyToken = "key:" + detail.key;
         pressInput(detail.player, detail.action, keyToken);
       } else if (detail.phase === "end") {
@@ -4841,11 +4938,9 @@
       var detail = event && event.detail;
       if (!detail || PLAYERS.indexOf(detail.player) < 0) return;
       var frequency = Number(detail.frequency);
-      var amplitudePercent = Number(detail.amplitudePercent);
-      if (!Number.isFinite(frequency) || !Number.isFinite(amplitudePercent)) return;
+      if (!Number.isFinite(frequency)) return;
       motionTuning[detail.player] = {
         frequency: Math.max(0.3, Math.min(5, frequency)),
-        amplitudePercent: Math.max(0, Math.min(100, amplitudePercent)),
       };
     }, true);
 
@@ -4862,10 +4957,7 @@
     });
 
     window.addEventListener("pagehide", function () {
-      if (controlSocket) {
-        try { controlSocket.close(); } catch (_) {}
-        controlSocket = null;
-      }
+      stopControlConnection();
       if (refereeDeviceTelemetryTimer) {
         window.clearInterval(refereeDeviceTelemetryTimer);
         refereeDeviceTelemetryTimer = null;

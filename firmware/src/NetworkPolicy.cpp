@@ -74,6 +74,7 @@ void NetworkPolicy::provisioningFinished(uint32_t nowMs) {
     provisioningRequested_ = false;
     provisioningHasDeadline_ = false;
     configured_ = true;
+    serverRecoveryOffered_ = true;
     lastRegisteredAt_ = nowMs;
     attempted_ = false;
 }

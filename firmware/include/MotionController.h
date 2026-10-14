@@ -25,10 +25,8 @@ private:
     MotionState state_;
     MotionTransition transition_;
     uint32_t lastUpdate_ = 0;
-    uint32_t releaseServoAt_ = 0;
     float phase_ = 0.0f;
     float outputAngle_ = 90.0f;
     int lastWrittenAngle_ = -1;
-    uint32_t transitionMs_ = 600;
-    static constexpr uint32_t kStopHoldMs = 350;
+    uint32_t transitionMs_ = 0;
 };

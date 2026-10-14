@@ -5,7 +5,8 @@ import "./styles.css";
 import "./maintenance.css";
 import "./rename.css";
 import "./console-theme.css";
-import VisionPanel from "./VisionPanel.jsx";
+import DeviceRail from "./components/DeviceRail.jsx";
+import { verifyOta } from "./otaVerification.js";
 import AuthScreen from "./components/AuthScreen.jsx";
 import ManualInspector from "./components/ManualInspector.jsx";
 import SettingsWorkspace from "./components/SettingsWorkspace.jsx";
@@ -429,12 +430,17 @@ function App() {
     }
     setSelectedDeviceId(device.deviceId);
     const lease = leaseSummary(device, auth.user);
+    const isAdmin = auth.user?.role === "Admin";
     setFeedback(
       lease.mine
         ? `${deviceLabel(device)} 是你的当前控制设备。`
         : lease.className === "other"
-          ? `${deviceLabel(device)} 当前由 ${lease.owner} 控制，只读查看。`
-          : `${deviceLabel(device)} 当前空闲，请在右侧明确接管。`,
+          ? isAdmin
+            ? `${deviceLabel(device)} 当前由 ${lease.owner} 控制，管理员可以强制接管。`
+            : `${deviceLabel(device)} 当前由 ${lease.owner} 控制，只读查看。`
+          : isAdmin
+            ? `${deviceLabel(device)} 当前空闲，管理员可以直接接管。`
+            : `${deviceLabel(device)} 当前空闲，请在右侧明确接管。`,
     );
   }
 
@@ -505,12 +511,8 @@ function App() {
   function updateManualMotion(device, key, value) {
     if (!device?.deviceId) return;
     const current = manualMotionForDevice(device);
-    const next = {
-      ...current,
-      [key]: key === "frequency"
-        ? clamp(value, 0.3, 5, DEFAULT_FREQUENCY)
-        : clamp(value, 0, 100, DEFAULT_AMPLITUDE_PERCENT),
-    };
+    if (key !== "frequency") return;
+    const next = { ...current, frequency: clamp(value, 0.3, 5, DEFAULT_FREQUENCY) };
     setManualMotionByDevice((profiles) => {
       const updated = { ...profiles, [device.deviceId]: next };
       localStorage.setItem(`${MANUAL_MOTION_STORAGE_KEY}:${auth.user?.id || "guest"}`, JSON.stringify(updated));
@@ -541,11 +543,10 @@ function App() {
         await acquireLease(device, "manual");
       }
     }
-    const params = override || { frequency: device.frequency ?? 2.5, amplitudePercent: DEFAULT_AMPLITUDE_PERCENT };
+    const params = override || { frequency: device.frequency ?? 2.5 };
     const payload = {
       deviceId: device.deviceId, mode, clientId: CONTROL_CLIENT_ID,
       frequency: clamp(params.frequency, 0.3, 5, 2.5),
-      amplitudePercent: clamp(params.amplitudePercent ?? params.amplitude, 0, 100, DEFAULT_AMPLITUDE_PERCENT),
     };
     if (params.bias !== undefined && params.bias !== null && mode !== "left" && mode !== "right") {
       payload.bias = clamp(params.bias, -90, 90, 0);
@@ -565,12 +566,25 @@ function App() {
 
   async function sendManualMotion(mode) {
     const device = manualControlRef.current.selectedDevice;
-    if (!device || manualCommandBusy || !leaseIsMine(device.lease, auth.user)) return;
+    if (!device || manualCommandBusy) return;
+    if (!leaseIsMine(device.lease, auth.user)) {
+      if (auth.user?.role !== "Admin" || !device.online) return;
+      const claimed = await claimDevice(device);
+      if (!claimed) return;
+    }
     setManualCommandBusy(true);
     setFeedback(`${deviceLabel(device)}：正在等待设备确认${MODE_LABELS[mode] || mode}…`);
     try {
       await sendCommand(device, mode, selectedManualMotion);
       setFeedback(`${deviceLabel(device)}：${MODE_LABELS[mode] || mode} 已由设备确认`);
+      try {
+        const response = await fetch("/api/devices", { cache: "no-store" });
+        if (!response.ok) throw new Error("状态读取失败");
+        const snapshot = await response.json();
+        if (Array.isArray(snapshot)) commitDeviceSnapshot(snapshot, true);
+      } catch {
+        setFeedback(`${deviceLabel(device)}：动作已确认，状态刷新失败，请勿重复发送`);
+      }
     } catch (error) {
       setFeedback(error.message);
     } finally {
@@ -590,14 +604,12 @@ function App() {
       clientId: CONTROL_CLIENT_ID,
       mode: "stop",
       frequency: 0.3,
-      amplitudePercent: 0,
       bias: 0,
     } : {
       deviceId: device.deviceId,
       clientId: CONTROL_CLIENT_ID,
       mode,
       frequency: clamp(motion.frequency, 0.3, 5, DEFAULT_FREQUENCY),
-      amplitudePercent: clamp(motion.amplitudePercent, 0, 100, DEFAULT_AMPLITUDE_PERCENT),
     };
     if (!isStop && motion.bias !== undefined && motion.bias !== null) {
       payload.bias = clamp(motion.bias, -90, 90, 0);
@@ -644,6 +656,10 @@ function App() {
           .map(device => ({ device, keys: current.keyProfiles[device.deviceId]?.keys || DEFAULT_KEYS }));
       },
       send: sendRealtimeCommand,
+      adjust: (device, key, delta) => {
+        const current = manualMotionForDevice(device);
+        updateManualMotion(device, key, current[key] + delta);
+      },
       onError: reportKeyboardError,
     });
     multiKeyboardRef.current = driver;
@@ -723,10 +739,47 @@ function App() {
       rightCenterRatio: saved.rightCenterRatio ?? 0.5,
       rightFrequency: saved.rightFrequency ?? 2.3,
       rightAmplitudePercent: saved.rightAmplitudePercent ?? DEFAULT_AMPLITUDE_PERCENT / 100,
-      transitionMs: saved.transitionMs ?? 600,
+      transitionMs: saved.transitionMs ?? 0,
     };
     setCalibrationProfiles((current) => ({ ...current, [device.deviceId]: profile }));
     return profile;
+  }
+
+  const previewNeutralRequests = useRef(new Map());
+
+  function previewDeviceNeutral(device, center) {
+    if (!device.online) return;
+    const requests = previewNeutralRequests.current;
+    const deviceId = device.deviceId;
+    const entry = requests.get(deviceId) || { timer: null, pending: false, center: null };
+    entry.center = Number(center);
+    if (entry.timer) clearTimeout(entry.timer);
+    if (entry.pending) {
+      requests.set(deviceId, entry);
+      return;
+    }
+    entry.timer = setTimeout(async () => {
+      entry.timer = null;
+      entry.pending = true;
+      const requestedCenter = entry.center;
+      try {
+        await sendCommand(device, "center", {
+          frequency: device.frequency ?? 2.5,
+          amplitude: 0,
+          bias: requestedCenter - 90,
+        });
+      } catch (error) {
+        setOtaFeedback(`中位应用失败：${error.message}`);
+      } finally {
+        entry.pending = false;
+        if (entry.center !== requestedCenter && device.online) {
+          previewDeviceNeutral(device, entry.center);
+        } else if (!entry.timer) {
+          requests.delete(deviceId);
+        }
+      }
+    }, 80);
+    requests.set(deviceId, entry);
   }
 
   async function saveDeviceNeutral(device, center) {
@@ -808,10 +861,23 @@ function App() {
       const response = await fetch("/api/ota", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deviceId: device.deviceId, name: deviceLabel(device) }) });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || result.sent === false || result.acknowledged !== true || result.success !== true) throw new Error(result.message || "开发板未确认 OTA 完成");
-      return result;
+      setOtaFeedback(`${deviceLabel(device)}：升级已开始，等待重启和目标固件核验…`);
+      return verifyOta({
+        deviceId: device.deviceId,
+        previousBootId: device.bootId,
+        expectedBuildId: result.firmwareBuildId,
+        expectedVersion: result.firmwareVersion,
+        readDevices: async () => {
+          const response = await fetch("/api/devices", { cache: "no-store" });
+          if (!response.ok) throw new Error("设备状态读取失败");
+          const snapshot = await response.json();
+          commitDeviceSnapshot(snapshot, true);
+          return snapshot;
+        },
+      });
     }));
     const failed = results.filter((result) => result.status === "rejected").length;
-    setOtaFeedback(failed ? `OTA 确认 ${results.length - failed}/${results.length} 台，${failed} 台失败` : `开发板已确认 OTA 写入完成 · ${results.length} 台`);
+    setOtaFeedback(failed ? `OTA 核验通过 ${results.length - failed}/${results.length} 台；${results.filter((item) => item.status === "rejected").map((item) => item.reason.message).join("；")}` : `重启后目标固件核验通过 · ${results.length} 台`);
     setSending(false);
   }
 
@@ -841,9 +907,8 @@ function App() {
           <div><span className="eyebrow">FISH CONTROL</span><h1>多鱼控制台</h1></div>
         </div>
         <nav className="page-tabs" aria-label="页面切换">
-          <button className={page === "manual" ? "active" : ""} onClick={() => setPage("manual")}>手动控制</button>
-          <button className={page === "vision" ? "active" : ""} onClick={() => setPage("vision")}>视觉控制</button>
-          <button className={page === "settings" ? "active" : ""} onClick={() => setPage("settings")}>系统设置</button>
+          <button className={page === "manual" ? "active" : ""} onClick={() => setPage("manual")}>设备检查</button>
+          <button className={page === "settings" ? "active" : ""} onClick={() => setPage("settings")}>高级设置</button>
         </nav>
         <div className="system-status top-actions">
           <span className="status online"><i />服务器在线</span>
@@ -856,23 +921,14 @@ function App() {
       {error && <div className="error-banner" role="alert">{error}，正在自动重试。</div>}
 
       {page !== "settings" ? (
-        <div className={`workspace ${page}-workspace`}>
-          <section className={`stage-column ${page === "vision" ? "vision-stage-column" : ""}`}>
-            <VisionPanel
-              isAdmin={isAdmin}
-              user={auth.user}
-              devices={devices}
-              targetDeviceId={visionDeviceId}
-              targetTrackId={visionTrackId}
-              onTargetDeviceChange={setVisionDeviceId}
-              onTargetTrackChange={setVisionTrackId}
-              onVisionStateChange={handleVisionStateChange}
-              onClaimDevice={(device) => claimDevice(device, "vision")}
-              mode={page === "manual" ? "manual" : "vision"}
-              showTargetDeviceSelector={true}
-              showControls={page === "vision"}
-            />
-          </section>
+        <div className="workspace manual-workspace admin-device-workspace">
+          <DeviceRail
+            devices={devices}
+            selectedId={selectedDeviceId}
+            onSelect={(device) => setSelectedDeviceId(device.deviceId)}
+            page="manual"
+            user={auth.user}
+          />
           {page === "manual" && <ManualInspector
             device={selectedDevice}
             user={auth.user}
@@ -915,6 +971,7 @@ function App() {
           toggleOtaDevice={toggleOtaDevice}
           deviceNeutralCenter={deviceNeutralCenter}
           updateLocalNeutral={updateLocalNeutral}
+          previewDeviceNeutral={previewDeviceNeutral}
           saveDeviceNeutral={saveDeviceNeutral}
           rgbColor={rgbColor}
           setRgbColor={setRgbColor}
@@ -941,7 +998,7 @@ function App() {
         </section>
       </div>}
 
-      <footer className="app-footer"><span>{page === "vision" ? "视觉：识别、跟踪、自动控制" : page === "manual" ? "手动：在线鱼列表和单鱼接管" : "设置：账号、固件、设备和舵机中位"}</span><span>{page === "vision" ? `视觉目标 ${onlineDevices.length} 台` : page === "manual" ? (selectedDevice ? deviceLabel(selectedDevice) : "未选择设备") : `OTA 目标 ${otaSelectedDevices.length} 台`}</span></footer>
+      <footer className="app-footer"><span>{page === "manual" ? "检查：在线设备和手动测试" : "维护：账号、固件、设备和舵机中位"}</span><span>{page === "manual" ? (selectedDevice ? deviceLabel(selectedDevice) : "未选择设备") : `OTA 目标 ${otaSelectedDevices.length} 台`}</span></footer>
     </main>
   );
 }

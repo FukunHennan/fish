@@ -5701,8 +5701,8 @@ p {
     if (event.key === 'Escape') dismissFinishedNotice();
   });
   const DEFAULT_KEY_BINDINGS = {
-    b1: { forward: 'w', left: 'a', right: 'd' },
-    b2: { forward: 'ArrowUp', left: 'ArrowLeft', right: 'ArrowRight' },
+    b1: { forward: 'w', left: 'a', right: 'd', frequencyUp: 'q', frequencyDown: 'e' },
+    b2: { forward: 'ArrowUp', left: 'ArrowLeft', right: 'ArrowRight', frequencyUp: 't', frequencyDown: 'y' },
   };
   const PLAYER_LABELS = { b1: '账号 A · B1', b2: '账号 B · B2' };
   let keyBindings = loadKeyBindings();
@@ -5719,6 +5719,7 @@ p {
   };
   const readyDevice = { b1: '', b2: '' };
   const playerMotionSettings = loadPlayerMotionSettings();
+  const motionSaveTimers = { b1: null, b2: null };
   const loadedMotionDevice = { b1: '', b2: '' };
   let studentCompetitionRecords = [];
   let studentRecordsLoaded = false;
@@ -5743,7 +5744,7 @@ p {
   function loadKeyBindings() {
     try {
       const saved = JSON.parse(localStorage.getItem('fish-control-dual-key-bindings') || '{}');
-      const clean = (player) => Object.fromEntries(['forward','left','right'].map((action) => [
+      const clean = (player) => Object.fromEntries(Object.keys(DEFAULT_KEY_BINDINGS[player]).map((action) => [
         action,
         saved[player] && saved[player][action] ? saved[player][action] : DEFAULT_KEY_BINDINGS[player][action],
       ]));
@@ -5761,15 +5762,13 @@ p {
   }
 
   function loadPlayerMotionSettings() {
-    const defaults = { b1: { frequency: 2.5, amplitudePercent: 60 }, b2: { frequency: 2.5, amplitudePercent: 60 } };
+    const defaults = { b1: { frequency: 2.5 }, b2: { frequency: 2.5 } };
     try {
       const saved = JSON.parse(localStorage.getItem('fish-player-motion-settings') || '{}');
       ['b1','b2'].forEach((player) => {
         const value = saved[player] || {};
         const frequency = Number(value.frequency);
-        const amplitudePercent = Number(value.amplitudePercent);
         if (Number.isFinite(frequency)) defaults[player].frequency = Math.max(.3, Math.min(5, frequency));
-        if (Number.isFinite(amplitudePercent)) defaults[player].amplitudePercent = Math.max(0, Math.min(100, amplitudePercent));
       });
     } catch (_) {}
     return defaults;
@@ -5790,18 +5789,16 @@ p {
       if (!profile || !profile.playerControl || deviceAvailability[player].deviceId !== deviceId) return;
       playerMotionSettings[player] = {
         frequency: profile.playerControl.frequency,
-        amplitudePercent: profile.playerControl.amplitudePercent,
       };
       savePlayerMotionSettings();
       dispatchMotionTuning(player);
       if (pageFromHash() !== 'control') render();
-      else ['frequency', 'amplitudePercent'].forEach((setting) => {
+      else ['frequency'].forEach((setting) => {
         const input = root.querySelector('[data-motion-player="' + player + '"][data-motion-setting="' + setting + '"]');
         if (!input) return;
         input.value = playerMotionSettings[player][setting];
         const output = input.parentElement && input.parentElement.querySelector('[data-motion-output="' + setting + '"]');
-        if (output) output.textContent = setting === 'frequency'
-          ? Number(input.value).toFixed(1) + ' Hz' : Math.round(Number(input.value)) + '%';
+        if (output) output.textContent = Number(input.value).toFixed(1) + ' Hz';
       });
     } catch (error) {
       loadedMotionDevice[player] = '';
@@ -5817,6 +5814,31 @@ p {
       body: JSON.stringify({ deviceId, playerControl: playerMotionSettings[player] }),
     });
     if (!response.ok) throw new Error((await response.text()).trim() || '运动参数保存失败');
+  }
+
+  function schedulePlayerMotionSave(player) {
+    clearTimeout(motionSaveTimers[player]);
+    motionSaveTimers[player] = setTimeout(() => {
+      persistPlayerMotionSettings(player).catch((error) => console.warn('运动参数保存失败', error));
+    }, 300);
+  }
+
+  function adjustPlayerMotion(player, action) {
+    const settings = playerMotionSettings[player];
+    if (!settings) return;
+    if (action !== 'frequencyUp' && action !== 'frequencyDown') return;
+    const setting = 'frequency';
+    const next = Math.max(0.3, Math.min(5, Math.round((settings[setting] + (action === 'frequencyUp' ? 0.1 : -0.1)) * 10) / 10));
+    if (next === settings[setting]) return;
+    settings[setting] = next;
+    root.querySelectorAll('[data-motion-player="' + player + '"][data-motion-setting="' + setting + '"]').forEach((input) => {
+      input.value = next;
+      const output = input.parentElement && input.parentElement.querySelector('[data-motion-output="' + setting + '"]');
+      if (output) output.textContent = next.toFixed(1) + ' Hz';
+    });
+    savePlayerMotionSettings();
+    dispatchMotionTuning(player);
+    schedulePlayerMotionSave(player);
   }
 
   function dispatchMotionTuning(player) {
@@ -5853,6 +5875,8 @@ p {
       ['forward', '↑', '前进', '向前推进'],
       ['left', '↶', '左转', '向左调整航向'],
       ['right', '↷', '右转', '向右调整航向'],
+      ['frequencyUp', '+', '频率增加', '每次增加 0.1 Hz'],
+      ['frequencyDown', '−', '频率减小', '每次减少 0.1 Hz'],
     ].map(([action, icon, title, desc]) => '<div class="bindingRow"><span class="bindingIcon">' + icon + '</span><span class="bindingText"><b>' + title + '</b><small>' + desc + '</small></span><button type="button" class="bindingKey" data-bind-player="' + player + '" data-bind-action="' + action + '">' + keyLabel(keyBindings[player][action]) + '</button></div>').join('');
   }
 
@@ -6059,7 +6083,6 @@ p {
     const settings = playerMotionSettings[player];
     return '<section class="playerMotionTuning" aria-label="运动参数">' +
       '<label><span>频率</span><input type="range" min="0.3" max="5" step="0.1" value="' + settings.frequency + '" data-motion-player="' + player + '" data-motion-setting="frequency"><output data-motion-output="frequency">' + Number(settings.frequency).toFixed(1) + ' Hz</output></label>' +
-      '<label><span>幅度</span><input type="range" min="0" max="100" step="1" value="' + settings.amplitudePercent + '" data-motion-player="' + player + '" data-motion-setting="amplitudePercent"><output data-motion-output="amplitudePercent">' + Math.round(settings.amplitudePercent) + '%</output></label>' +
       '</section>';
   }
 
@@ -6334,7 +6357,7 @@ p {
           '<button type="button" class="run" data-sim-run '+(!targetOnline?'disabled':'')+'>'+runLabel+'</button>' +
         '</div>' +
         '<div class="simpleSimStatus">' +
-          '<span><small>幅度 / 频率</small><b id="simpleSpeedValue">'+playerMotionSettings[autonomousState.autoFish.toLowerCase()].amplitudePercent+'% · '+playerMotionSettings[autonomousState.autoFish.toLowerCase()].frequency.toFixed(1)+'Hz</b></span>' +
+          '<span><small>频率</small><b id="simpleSpeedValue">'+playerMotionSettings[autonomousState.autoFish.toLowerCase()].frequency.toFixed(1)+'Hz</b></span>' +
           '<span><small>运行时间</small><b id="simTime">0.0s</b></span>' +
         '</div>' +
         '<section class="simpleLog"><header><b>运行提示</b></header><div id="simLog"><p><span>READY</span>等待运行程序</p></div></section>' +
@@ -6443,12 +6466,14 @@ p {
   }
 
   function render() {
+    document.dispatchEvent(new CustomEvent('fish-player-render-start'));
     const page = pageFromHash();
     const pageConfig = pages.find((item) => item.id === page) || pages[0];
     const content = page === 'lobby' ? lobbyPage() : page === 'control' ? controlPage() : page === 'missions' ? missionsPage() : recordsPage();
     root.innerHTML = '<main class="competitionApp page-' + page + '" style="--page-ratio:' + pageConfig.ratio + ';--ratio-value:' + pageConfig.ratioValue + '"><div class="designShell">' + header(page) + content + '</div></main>';
     renderedPage = page;
     bindInteractions();
+    document.dispatchEvent(new CustomEvent('fish-player-render-complete'));
   }
 
   function refreshKeyUi() {
@@ -7033,11 +7058,11 @@ p {
       input.addEventListener('input', () => {
         const player = input.getAttribute('data-motion-player');
         const setting = input.getAttribute('data-motion-setting');
-        if (!playerMotionSettings[player] || !['frequency','amplitudePercent'].includes(setting)) return;
+        if (!playerMotionSettings[player] || setting !== 'frequency') return;
         const value = Number(input.value);
         playerMotionSettings[player][setting] = value;
         const output = input.parentElement && input.parentElement.querySelector('[data-motion-output="' + setting + '"]');
-        if (output) output.textContent = setting === 'frequency' ? value.toFixed(1) + ' Hz' : Math.round(value) + '%';
+        if (output) output.textContent = value.toFixed(1) + ' Hz';
         savePlayerMotionSettings();
         dispatchMotionTuning(player);
       });
@@ -7063,7 +7088,7 @@ p {
         pendingBinding = null;
         const hint = modal.querySelector('.keyConfigHint');
         if (hint) {
-          hint.textContent = '已恢复默认：B1 = W / A / D；B2 = ↑ / ← / →';
+          hint.textContent = '已恢复默认按键，包括频率调节';
           hint.classList.remove('warn');
         }
         refreshKeyUi();
@@ -7170,15 +7195,19 @@ p {
         const status = root.querySelector('#studentReplayStatus');
         if (!selected || !selected.videoUrl || !window.FishReplayTransport) return;
         replayDownload.disabled = true;
+        replayDownload.textContent = '下载中…';
+        replayDownload.setAttribute('aria-busy', 'true');
         try {
           await window.FishReplayTransport.download(selected.videoUrl, (message) => {
             if (status) status.textContent = message;
           });
-          if (status) status.textContent = '录像下载完成';
+          if (status) status.textContent = '录像已接收，已交给浏览器保存';
         } catch (error) {
           if (status) status.textContent = error?.message || '录像下载失败';
         } finally {
           replayDownload.disabled = false;
+          replayDownload.textContent = '下载';
+          replayDownload.setAttribute('aria-busy', 'false');
         }
       });
     }
@@ -7291,7 +7320,7 @@ p {
 })();
 </script>
 
-<script src="replay-transport.js?v=20261013-replay"></script>
-<script src="competition-adapter.js?v=20261013-single-turn-relay"></script>
+<script src="replay-transport.js?v=20261013-http-download"></script>
+<script src="competition-adapter.js?v=20261013-control-preconnect"></script>
 </body>
 </html>

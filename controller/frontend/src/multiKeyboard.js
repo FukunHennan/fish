@@ -1,4 +1,4 @@
-export const DEFAULT_KEYS = { forward: "KeyW", left: "KeyA", right: "KeyD", stop: "KeyS" };
+export const DEFAULT_KEYS = { forward: "KeyW", left: "KeyA", right: "KeyD", stop: "KeyS", frequencyUp: "KeyQ", frequencyDown: "KeyE" };
 export function mappedMode(pressed, keys) {
   if (pressed.has("Space") || pressed.has(keys.stop)) return "stop";
   const turns = ["left", "right"].filter(mode => pressed.has(keys[mode]));
@@ -7,7 +7,7 @@ export function mappedMode(pressed, keys) {
 }
 // Each device has its own ordered promise chain. Releasing one key cannot
 // supersede another device's command. No implicit acquisition on keydown.
-export function createMultiKeyboard({ targets, send, onError = () => {} }) {
+export function createMultiKeyboard({ targets, send, adjust = () => {}, onError = () => {} }) {
   const pressed = new Map(), states = new Map();
   let order = 0;
   function dispatch(device, mode) {
@@ -35,7 +35,10 @@ export function createMultiKeyboard({ targets, send, onError = () => {} }) {
       if (down) {
         if (!pressed.has(code)) {
           pressed.set(code, ++order);
-          for (const target of targets()) if (Object.values(target.keys).includes(code)) {
+          for (const target of targets()) if (target.keys.frequencyUp === code || target.keys.frequencyDown === code) {
+            adjust(target.device, "frequency", target.keys.frequencyUp === code ? 0.1 : -0.1);
+          }
+          for (const target of targets()) if (["forward", "left", "right", "stop"].some(mode => target.keys[mode] === code)) {
             const state = states.get(target.device.deviceId); if (state) state.suspended = false;
           }
         }

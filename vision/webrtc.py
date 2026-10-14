@@ -22,6 +22,7 @@ from config import (
     WEBRTC_TURN_URL,
     WEBRTC_TURN_USERNAME,
     WEBRTC_ICE_TRANSPORT_POLICY,
+    WEBRTC_ACCESS_MODE,
     WEBRTC_BROWSER_ICE_TRANSPORT_POLICY,
 )
 
@@ -145,7 +146,7 @@ def _resize_for_video(frame, quality="smooth"):
     height, width = frame.shape[:2]
     if width <= 0 or height <= 0:
         return frame
-    max_width, max_height = VIDEO_PROFILES[quality]
+    max_width, max_height = VIDEO_PROFILES["hd" if WEBRTC_ACCESS_MODE == "lan" and quality == "smooth" else quality]
     scale = min(1.0, max_width / width, max_height / height)
     target = (
         max(1, int(round(width * scale))),
@@ -169,6 +170,8 @@ def _static_turn_servers():
 
 
 def _turn_servers():
+    if WEBRTC_ACCESS_MODE == "lan":
+        return []
     dynamic = TURN_PROVIDER.get_ice_servers()
     return dynamic or _static_turn_servers()
 
@@ -186,6 +189,8 @@ def _turn_only(server):
 
 
 def _ice_server_dicts():
+    if WEBRTC_ACCESS_MODE == "lan":
+        return []
     turn_servers = _turn_servers()
     if WEBRTC_ICE_TRANSPORT_POLICY == "relay":
         return [filtered for server in turn_servers if (filtered := _turn_only(server))]
@@ -208,6 +213,8 @@ def _ice_servers():
 
 
 def browser_ice_servers():
+    if WEBRTC_ACCESS_MODE == "lan":
+        return []
     turn_servers = _turn_servers()
     if WEBRTC_BROWSER_ICE_TRANSPORT_POLICY == "relay":
         return [filtered for server in turn_servers if (filtered := _turn_only(server))]
@@ -237,6 +244,16 @@ def _without_host_candidates(sdp):
         if not (line.startswith("a=candidate:") and " typ host" in line)
     ]
     return "\r\n".join(lines) + "\r\n"
+
+
+def _host_only_sdp(sdp):
+    lines = sdp.splitlines()
+    if not any(line.startswith("a=candidate:") and " typ host" in line for line in lines):
+        raise WebRTCUnavailable("局域网直连失败：没有 host 候选，不使用 TURN 备用路径")
+    return "\r\n".join(
+        line for line in lines
+        if not line.startswith("a=candidate:") or " typ host" in line
+    ) + "\r\n"
 
 
 if _IMPORT_ERROR is None:
@@ -349,6 +366,7 @@ class WebRTCServer:
 
     def browser_ice_config(self):
         return {
+            "accessMode": WEBRTC_ACCESS_MODE,
             "iceServers": browser_ice_servers(),
             "iceTransportPolicy": WEBRTC_BROWSER_ICE_TRANSPORT_POLICY,
             "turnRequired": WEBRTC_ICE_TRANSPORT_POLICY == "relay",
@@ -492,6 +510,8 @@ class WebRTCServer:
 
         try:
             remote_sdp = sdp
+            if WEBRTC_ACCESS_MODE == "lan":
+                remote_sdp = _host_only_sdp(remote_sdp)
             if WEBRTC_ICE_TRANSPORT_POLICY == "relay":
                 remote_sdp = _without_host_candidates(remote_sdp)
             await pc.setRemoteDescription(
@@ -505,6 +525,8 @@ class WebRTCServer:
             answer = await pc.createAnswer()
             await pc.setLocalDescription(answer)
             answer_sdp = pc.localDescription.sdp
+            if WEBRTC_ACCESS_MODE == "lan":
+                answer_sdp = _host_only_sdp(answer_sdp)
             if WEBRTC_ICE_TRANSPORT_POLICY == "relay":
                 answer_sdp = _relay_only_sdp(answer_sdp)
             return {

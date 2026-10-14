@@ -19,6 +19,8 @@ void FishServo::detach() {
 #else
     ledcDetachPin(pin_);
 #endif
+    pinMode(pin_, OUTPUT);
+    digitalWrite(pin_, LOW);
     attached_ = false;
 }
 

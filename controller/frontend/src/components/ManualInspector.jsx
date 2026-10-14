@@ -24,13 +24,14 @@ export default function ManualInspector({
   onClaim = () => {},
   onRelease = () => {},
   onMotion = () => {},
-  motion = { frequency: 2.5, amplitudePercent: 40 },
+  motion = { frequency: 2.5 },
   onMotionChange = () => {},
   feedback = "",
   keyboardStatus = { phase: "idle", mode: "stop", deviceId: "", message: "" },
 }) {
   const lease = leaseSummary(device, user);
-  const canControl = lease.mine;
+  const isAdmin = user?.role === "Admin";
+  const canControl = lease.mine || (isAdmin && Boolean(device?.online));
   const battery = batteryLevel(device);
   const rssi = device?.rssi != null && device.rssi !== "" && Number.isFinite(Number(device.rssi)) && Number(device.rssi) < 0 ? Number(device.rssi) : null;
   const keyboardDevice = devices.find((item) => item.deviceId === keyboardStatus.deviceId);
@@ -39,6 +40,7 @@ export default function ManualInspector({
       <header className="inspector-header">
         <div>
           <h2>{device ? deviceLabel(device) : "未选择设备"}</h2>
+          {device && <small>固件 {device.firmwareVersion || "未上报"} · 构建 {device.firmwareBuildId ? device.firmwareBuildId.slice(0, 12) : "旧固件未上报"}</small>}
         </div>
         <span className={`inspector-state ${device?.online ? "online" : ""}`}>{device?.online ? "● 在线" : "○ 离线"}</span>
       </header>
@@ -73,16 +75,16 @@ export default function ManualInspector({
               <button type="button" disabled={!canControl || leaseBusy} className="stop" onClick={() => onMotion("stop")}>停止</button>
               <button type="button" disabled={!canControl || leaseBusy} className={device.mode === 4 ? "selected" : ""} onClick={() => onMotion("right")}>右转</button>
             </div>
+            {!canControl && <p className="feedback" role="status">{isAdmin ? "管理员可接管任意在线设备，接管后即可测试运动。" : "请先在下方接管设备，取得控制权后才能测试运动。"}</p>}
             <label className="range-row"><span>频率</span><input type="range" min="0.3" max="5" step="0.1" value={motion.frequency} disabled={!canControl || leaseBusy} onChange={(event) => onMotionChange("frequency", Number(event.target.value))} /><output>{motion.frequency.toFixed(1)} Hz</output></label>
-            <label className="range-row"><span>摆尾幅度</span><input type="range" min="0" max="100" step="1" value={motion.amplitudePercent} disabled={!canControl || leaseBusy} onChange={(event) => onMotionChange("amplitudePercent", Number(event.target.value))} /><output>{Math.round(motion.amplitudePercent)}%</output></label>
           </section>
 
           <section className={`inspector-section manual-lease-panel ${lease.className}`}>
             <div className="manual-lease-head"><strong>控制权</strong><b>{lease.label}</b></div>
             {lease.mine && <button className="lease-button release" type="button" disabled={leaseBusy} onClick={() => onRelease(false)}>停止并释放控制权</button>}
-            {!device.lease && <button className="lease-button claim" type="button" disabled={leaseBusy} onClick={onClaim}>接管当前设备</button>}
+            {!device.lease && <button className="lease-button claim" type="button" disabled={leaseBusy} onClick={onClaim}>{isAdmin ? "管理员接管设备" : "接管当前设备"}</button>}
             {device.lease && !lease.mine && device.lease.ownerId === user?.id && <button type="button" onClick={onClaim}>在本窗口恢复控制</button>}
-            {device.lease && !lease.mine && user?.role === "Admin" && <button type="button" onClick={() => onRelease(true)}>强制释放</button>}
+            {device.lease && !lease.mine && isAdmin && <button className="lease-button claim" type="button" disabled={leaseBusy} onClick={onClaim}>管理员强制接管</button>}
             {device.lease && !lease.mine && <p className="lease-note">{lease.owner} 正在控制</p>}
           </section>
 
@@ -91,6 +93,14 @@ export default function ManualInspector({
               <label><input type="checkbox" checked={keyProfile.enabled} onChange={e => onKeysChange({ ...keyProfile, enabled: e.target.checked })} /> 多鱼键盘控制</label>
               <small>启用后，切换所选鱼仍可用此组按键控制。空格停止本窗口键盘控制的鱼。</small>
               {[["forward", "前进"], ["left", "左转"], ["right", "右转"], ["stop", "停止"]].map(([mode, label]) => (
+                <label className="range-row" key={mode}><span>{label}</span><input aria-label={`${label}按键`} readOnly value={(keyProfile.keys[mode] || "").replace("Key", "")} onKeyDown={e => {
+                  e.preventDefault(); e.stopPropagation();
+                  if (!/^(Key[A-Z]|Digit[0-9]|Arrow(Up|Down|Left|Right))$/.test(e.code)) return;
+                  if (Object.entries(keyProfile.keys).some(([m, code]) => m !== mode && code === e.code)) return;
+                  onKeysChange({ ...keyProfile, keys: { ...keyProfile.keys, [mode]: e.code } });
+                }} /></label>
+              ))}
+              {[['frequencyUp', '频率增加'], ['frequencyDown', '频率减小']].map(([mode, label]) => (
                 <label className="range-row" key={mode}><span>{label}</span><input aria-label={`${label}按键`} readOnly value={(keyProfile.keys[mode] || "").replace("Key", "")} onKeyDown={e => {
                   e.preventDefault(); e.stopPropagation();
                   if (!/^(Key[A-Z]|Digit[0-9]|Arrow(Up|Down|Left|Right))$/.test(e.code)) return;

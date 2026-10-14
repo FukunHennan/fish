@@ -64,6 +64,14 @@ void test_saved_configuration_can_retry_after_provisioning() {
     TEST_ASSERT_EQUAL_INT((int)NetworkAction::None, (int)p.next(3600000));
 }
 
+void test_submitted_configuration_does_not_reopen_portal() {
+    NetworkPolicy policy;
+    policy.begin(true, 0, 180000, 60000);
+    policy.provisioningFinished(1000);
+    TEST_ASSERT_EQUAL_INT((int)NetworkAction::Connect, (int)policy.next(1001));
+    TEST_ASSERT_EQUAL_INT((int)NetworkAction::None, (int)policy.next(300000));
+}
+
 void test_delayed_discovery_reply_and_expiry() {
     DiscoveryNonceWindow<std::string> window;
     window.remember("first",100);window.remember("second",1100);
@@ -92,6 +100,7 @@ void runTests() {
     RUN_TEST(test_registration_and_later_disconnect_never_reenters_provisioning);
     RUN_TEST(test_registration_failure_offers_only_one_setup_window);
     RUN_TEST(test_saved_configuration_can_retry_after_provisioning);
+    RUN_TEST(test_submitted_configuration_does_not_reopen_portal);
     RUN_TEST(test_delayed_discovery_reply_and_expiry);
     RUN_TEST(test_discovery_nonce_wraparound_and_eviction);
     UNITY_END();

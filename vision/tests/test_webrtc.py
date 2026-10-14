@@ -18,6 +18,30 @@ import webrtc
 
 
 class WebRTCFrameTests(unittest.TestCase):
+    def test_lan_resolution_increases_without_changing_public_profile(self):
+        frame = np.zeros((960, 1280, 3), dtype=np.uint8)
+        with patch.object(webrtc, "WEBRTC_ACCESS_MODE", "lan"):
+            self.assertEqual(webrtc._resize_for_video(frame).shape[:2], (960, 1280))
+        with patch.object(webrtc, "WEBRTC_ACCESS_MODE", "public"):
+            self.assertEqual(webrtc._resize_for_video(frame).shape[:2], (480, 640))
+
+    def test_host_only_rejects_relay_and_keeps_direct_candidates(self):
+        host = "a=candidate:1 1 udp 100 192.168.1.2 5000 typ host"
+        relay = "a=candidate:2 1 udp 80 192.0.2.1 6000 typ relay"
+        result = webrtc._host_only_sdp("v=0\r\n" + host + "\r\n" + relay)
+        self.assertIn(host, result)
+        self.assertNotIn(relay, result)
+        with self.assertRaises(webrtc.WebRTCUnavailable):
+            webrtc._host_only_sdp("v=0\r\n" + relay)
+
+    def test_lan_video_never_requests_turn_credentials(self):
+        with patch.object(webrtc, "WEBRTC_ACCESS_MODE", "lan"), patch.object(
+            webrtc.TURN_PROVIDER, "get_ice_servers", side_effect=AssertionError("LAN must not contact TURN")
+        ):
+            self.assertEqual(webrtc._turn_servers(), [])
+            self.assertEqual(webrtc._ice_server_dicts(), [])
+            self.assertEqual(browser_ice_servers(), [])
+
     def test_frame_buffer_keeps_only_the_latest_frame(self):
         buffer = _LatestFrameBuffer()
         first = np.zeros((2, 3, 3), dtype=np.uint8)

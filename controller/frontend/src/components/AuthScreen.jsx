@@ -1,18 +1,38 @@
 import { useState } from "react";
 
+const LOGIN_DRAFT_KEY = "fish-login-draft-v1";
+
+function readLoginDraft() {
+  try {
+    const draft = JSON.parse(sessionStorage.getItem(LOGIN_DRAFT_KEY) || "{}");
+    return draft && typeof draft === "object" ? draft : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeLoginDraft(draft) {
+  try { sessionStorage.setItem(LOGIN_DRAFT_KEY, JSON.stringify(draft)); } catch { /* storage may be disabled */ }
+}
+
 function normalizeLoginAccount(value) {
   return String(value || "").trim();
 }
 
 export default function AuthScreen({ onAuthenticated, bootstrap }) {
+  const draft = readLoginDraft();
   const [mode, setMode] = useState(bootstrap ? "bootstrap" : "login");
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
+  const [name, setName] = useState(draft.name || "");
+  const [email, setEmail] = useState(draft.email || "");
+  const [password, setPassword] = useState(draft.password || "");
+  const [confirmPassword, setConfirmPassword] = useState(draft.confirmPassword || "");
   const [remember, setRemember] = useState(true);
   const [feedback, setFeedback] = useState("请输入已分配的账号和密码。");
   const [busy, setBusy] = useState(false);
+
+  function saveDraft(next) {
+    writeLoginDraft({ name, email, password, confirmPassword, ...next });
+  }
 
   async function submitAuth(event) {
     event.preventDefault();
@@ -33,6 +53,7 @@ export default function AuthScreen({ onAuthenticated, bootstrap }) {
       if (!response.ok || result.authenticated === false) {
         throw new Error(result.message || (mode === "login" ? "登录失败" : "管理员账户创建失败"));
       }
+      try { sessionStorage.removeItem(LOGIN_DRAFT_KEY); } catch { /* ignore storage errors */ }
       onAuthenticated(result.user);
     } catch (authError) {
       setFeedback(authError.message);
@@ -76,13 +97,13 @@ export default function AuthScreen({ onAuthenticated, bootstrap }) {
             </div>
             <form className="auth-form" onSubmit={submitAuth}>
               {mode === "bootstrap" ? <div className="auth-two-col">
-                <label className="auth-field"><span>姓名</span><input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" placeholder="请输入姓名" /></label>
-                <label className="auth-field"><span>账号</span><input value={email} maxLength={20} onChange={(event) => setEmail(event.target.value)} autoComplete="username" placeholder="最多 20 个字符" /></label>
-              </div> : <label className="auth-field"><span>账号</span><input value={email} maxLength={20} onChange={(event) => setEmail(event.target.value)} autoComplete="username" placeholder="输入账号" /></label>}
+                <label className="auth-field"><span>姓名</span><input value={name} onChange={(event) => { setName(event.target.value); saveDraft({ name: event.target.value }); }} autoComplete="name" placeholder="请输入姓名" /></label>
+                <label className="auth-field"><span>账号</span><input value={email} maxLength={20} onChange={(event) => { setEmail(event.target.value); saveDraft({ email: event.target.value }); }} autoComplete="username" placeholder="最多 20 个字符" /></label>
+              </div> : <label className="auth-field"><span>账号</span><input value={email} maxLength={20} onChange={(event) => { setEmail(event.target.value); saveDraft({ email: event.target.value }); }} autoComplete="username" placeholder="输入账号" /></label>}
               {mode === "bootstrap" ? <div className="auth-two-col">
-                <label className="auth-field"><span>设置密码</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" /></label>
-                <label className="auth-field"><span>确认密码</span><input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" /></label>
-              </div> : <label className="auth-field"><span>密码</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></label>}
+                <label className="auth-field"><span>设置密码</span><input type="password" value={password} onChange={(event) => { setPassword(event.target.value); saveDraft({ password: event.target.value }); }} autoComplete="new-password" /></label>
+                <label className="auth-field"><span>确认密码</span><input type="password" value={confirmPassword} onChange={(event) => { setConfirmPassword(event.target.value); saveDraft({ confirmPassword: event.target.value }); }} autoComplete="new-password" /></label>
+              </div> : <label className="auth-field"><span>密码</span><input type="password" value={password} onChange={(event) => { setPassword(event.target.value); saveDraft({ password: event.target.value }); }} autoComplete="current-password" /></label>}
               {mode === "login" && <div className="auth-helper-row"><label className="auth-check"><input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} /> 保持登录</label><button type="button" onClick={() => setFeedback("当前版本还没有接入找回密码；管理员可以在服务器端重置账号。")}>忘记密码</button></div>}
               <button className={mode === "login" ? "auth-secondary" : "auth-primary"} disabled={busy}>{busy ? "请稍候…" : mode === "login" ? "进入控制台" : "创建管理员并进入"}</button>
               <p className="auth-feedback" aria-live="polite">{feedback}</p>

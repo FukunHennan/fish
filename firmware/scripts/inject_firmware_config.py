@@ -3,6 +3,8 @@ Import("env")
 import json
 import os
 import re
+from datetime import datetime, timezone
+import uuid
 
 project_dir = env.subst("$PROJECT_DIR")
 config_path = os.path.abspath(os.path.join(project_dir, "..", "config", "firmware.json"))
@@ -50,6 +52,7 @@ def c_string_define(value):
 
 
 defines = [
+    ("FIRMWARE_VERSION", c_string_define("2.0.3-" + datetime.now(timezone.utc).strftime("%y%m%d%H%M%S") + "-" + uuid.uuid4().hex[:6])),
     ("FISH_DEPLOYMENT_KEY_HEX", deployment_key.lower()),
     ("FISH_OTA_PASSWORD", c_string_define(ota_password)),
     ("FISH_FACTORY_WIFI_SSID", c_string_define(ssid)),

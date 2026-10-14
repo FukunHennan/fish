@@ -9,7 +9,9 @@
 
 
 /* Wi-Fi 和控制器配置通过 Fish-Setup-XXXXXX 热点写入 NVS。 */
-#define FIRMWARE_VERSION "2.0.2"
+#ifndef FIRMWARE_VERSION
+#define FIRMWARE_VERSION "2.0.3-dev"
+#endif
 
 #ifndef FISH_OTA_PASSWORD
 #define FISH_OTA_PASSWORD "fish123"
@@ -101,7 +103,7 @@
 #define SWIM_SPEED      2.5     // 摆尾快慢  建议 1.0 ~ 4.0  (越大越快)
 #endif
 #ifndef SWIM_POWER
-#define SWIM_POWER      28.0    // 摆尾幅度  建议 10  ~ 40   (越大摆得越猛)
+#define SWIM_POWER      45.0    // 固定摆尾幅度；最终舵机角度仍限制在 0–180°
 #endif
 #ifndef TURN_AMOUNT
 #define TURN_AMOUNT     45.0    // 默认左右转中心偏置：左 -45°，右 +45°

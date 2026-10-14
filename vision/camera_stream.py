@@ -308,11 +308,7 @@ class RestartSafeCameraStream:
         half-configured capture.
         """
         capture = self.cap
-        # Fix the sensor mode but let the driver negotiate the fastest real
-        # frame rate available for that mode.  Writing a desired FPS is not
-        # useful on this camera: the driver accepts arbitrary values without
-        # changing delivery cadence.
-        self.requested_fps = None
+        self.requested_fps = TARGET_FPS if TARGET_FPS > 0 else None
         _safe_set(
             capture,
             cv2.CAP_PROP_FOURCC,
@@ -321,6 +317,8 @@ class RestartSafeCameraStream:
         )
         _safe_set(capture, cv2.CAP_PROP_FRAME_WIDTH, TARGET_WIDTH, "WIDTH")
         _safe_set(capture, cv2.CAP_PROP_FRAME_HEIGHT, TARGET_HEIGHT, "HEIGHT")
+        if self.requested_fps is not None:
+            _safe_set(capture, cv2.CAP_PROP_FPS, self.requested_fps, "FPS")
 
         # DirectShow/MSMF may transiently report -1x-1 while a USB camera is
         # being re-enumerated.  Treat that as unknown and retain the requested

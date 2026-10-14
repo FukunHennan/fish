@@ -32,10 +32,39 @@ set "FISH_START_CONTROLLER_OUT=%CONTROLLER_OUT%"
 set "FISH_START_CONTROLLER_ERR=%CONTROLLER_ERR%"
 set "FISH_START_TUNNEL_OUT=%TUNNEL_OUT%"
 set "FISH_START_TUNNEL_ERR=%TUNNEL_ERR%"
-set "FISH_HOT_RELOAD=false"
+if not defined FISH_HOT_RELOAD set "FISH_HOT_RELOAD=true"
 set "STARTED_CONTROLLER=0"
 set "STARTED_TUNNEL=0"
 set "EXIT_CODE=1"
+
+set "ACCESS_MODE="
+if /I "%~1"=="lan" set "ACCESS_MODE=lan"
+if /I "%~1"=="public" set "ACCESS_MODE=public"
+if defined ACCESS_MODE goto :access_selected
+echo.
+echo [1] LAN only - do not start Cloudflare Tunnel
+echo [2] Public access - start Cloudflare Tunnel
+choice /C 12 /N /M "Select access mode [1/2]: "
+if errorlevel 2 (set "ACCESS_MODE=public") else (set "ACCESS_MODE=lan")
+:access_selected
+echo Access mode: !ACCESS_MODE!
+set "FISH_ACCESS_MODE=!ACCESS_MODE!"
+set "FISH_RECORDING_MAX_FPS=20"
+if /I "!ACCESS_MODE!"=="lan" (
+  set "FISH_CAPTURE_WIDTH=640"
+  set "FISH_CAPTURE_HEIGHT=480"
+  set "FISH_CAPTURE_FPS=30"
+  set "FISH_WEBRTC_MAX_FPS=30"
+  set "FISH_WEBRTC_STUN_URL="
+  set "FISH_WEBRTC_TURN_URL="
+  set "FISH_WEBRTC_TURN_USERNAME="
+  set "FISH_WEBRTC_TURN_CREDENTIAL="
+  set "FISH_WEBRTC_ICE_TRANSPORT_POLICY=all"
+  set "FISH_WEBRTC_BROWSER_ICE_TRANSPORT_POLICY=all"
+) else (
+  set "FISH_WEBRTC_ICE_TRANSPORT_POLICY=all"
+  set "FISH_WEBRTC_BROWSER_ICE_TRANSPORT_POLICY=all"
+)
 
 if not defined FISH_PYTHON if exist "%VISION%\.venv\Scripts\python.exe" set "FISH_PYTHON=%VISION%\.venv\Scripts\python.exe"
 if not defined FISH_AUTH_USERS set "FISH_AUTH_USERS=%AUTH_DATA%\users.json"
@@ -74,11 +103,18 @@ if not "!BUILD_RESULT!"=="0" goto :controller_build_failed
 
 echo [3/5] Preparing Cloudflare Tunnel...
 set "TUNNEL_MODE="
+if /I "!ACCESS_MODE!"=="lan" (
+  set "TUNNEL_MODE=disabled"
+  goto :tunnel_prepared
+)
 for /f "usebackq delims=" %%T in (`powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\scripts\runtime\prepare-tunnel.ps1" -Root "%ROOT%"`) do set "TUNNEL_MODE=%%T"
 if errorlevel 1 goto :tunnel_config_failed
 if not defined TUNNEL_MODE goto :tunnel_config_failed
 if /I not "!TUNNEL_MODE!"=="enabled" if /I not "!TUNNEL_MODE!"=="disabled" goto :tunnel_config_failed
 if /I "!TUNNEL_MODE!"=="enabled" if not exist "%CLOUDFLARED%" goto :cloudflared_missing
+if /I "!ACCESS_MODE!"=="public" if /I not "!TUNNEL_MODE!"=="enabled" goto :tunnel_config_failed
+
+:tunnel_prepared
 
 echo [4/5] Stopping old Pro1 processes...
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='SilentlyContinue';$controller=[IO.Path]::GetFullPath($env:FISH_START_EXE);$cloudflared=[IO.Path]::GetFullPath($env:FISH_START_CLOUDFLARED);$vision=[IO.Path]::GetFullPath((Join-Path $env:FISH_START_ROOT 'vision\server.py'));foreach($p in @(Get-CimInstance Win32_Process)){ $path=[string]$p.ExecutablePath; $cmd=[string]$p.CommandLine; $kill=$false; if($path -and ([IO.Path]::GetFullPath($path) -in @($controller,$cloudflared))){$kill=$true}; if($p.Name -in @('python.exe','pythonw.exe') -and $cmd.IndexOf($vision,[StringComparison]::OrdinalIgnoreCase) -ge 0){$kill=$true}; if($kill){taskkill.exe /PID $p.ProcessId /T /F 2>$null|Out-Null} };Start-Sleep -Seconds 1;Remove-Item -LiteralPath $env:FISH_START_CONTROLLER_PID_FILE,$env:FISH_START_TUNNEL_PID_FILE -Force -ErrorAction SilentlyContinue"
@@ -126,6 +162,8 @@ set "EXIT_CODE=0"
 echo.
 echo Pro1 started successfully.
 echo Local URL: http://127.0.0.1:8081/competition.html
+powershell.exe -NoProfile -Command "Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object {$_.IPAddress -ne '127.0.0.1' -and $_.IPAddress -notlike '169.254.*'} | ForEach-Object {Write-Output ('LAN URL: http://'+$_.IPAddress+':8081/competition.html')}"
+if /I "!ACCESS_MODE!"=="lan" echo LAN mode: direct WebRTC video, no STUN or TURN; Cloudflare Tunnel disabled.
 if "!STARTED_TUNNEL!"=="1" echo Public tunnel process started.
 echo Controller log: "%CONTROLLER_OUT%"
 echo Controller error log: "%CONTROLLER_ERR%"

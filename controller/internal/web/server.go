@@ -270,7 +270,7 @@ func newHandler(h *hub.Hub, key []byte, apiAddress, streamAddress, firmwarePath 
 			}
 			w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
 		}
-		if strings.HasPrefix(r.URL.Path, "/assets/") {
+		if strings.HasPrefix(r.URL.Path, "/assets/") || r.URL.Path == "/__dev/admin-revision" {
 			adminFrontend.ServeHTTP(w, r)
 			return
 		}
@@ -462,11 +462,14 @@ func firmwareInfo(path, name string) (map[string]any, error) {
 		return nil, err
 	}
 	hash := fmt.Sprintf("%x", sha256.Sum256(data))
+	version, buildID := firmwareIdentity(data)
 	return map[string]any{
-		"available": true,
-		"name":      name,
-		"size":      len(data),
-		"sha256":    hash,
+		"available":       true,
+		"name":            name,
+		"size":            len(data),
+		"sha256":          hash,
+		"firmwareVersion": version,
+		"firmwareBuildId": buildID,
 	}, nil
 }
 
@@ -633,6 +636,9 @@ func (s *server) ota(w http.ResponseWriter, r *http.Request) {
 	ack["sha256"] = info["sha256"]
 	ack["size"] = info["size"]
 	ack["name"] = info["name"]
+	ack["firmwareVersion"] = info["firmwareVersion"]
+	ack["firmwareBuildId"] = info["firmwareBuildId"]
+	ack["verified"] = false
 	_ = json.NewEncoder(w).Encode(ack)
 }
 
@@ -1209,7 +1215,7 @@ func validMotionCalibration(p motionCalibrationProfile) bool {
 			p.RightCenterRatio >= 0 && p.RightCenterRatio <= 1 &&
 			p.RightFrequency >= 0.3 && p.RightFrequency <= 5 &&
 			p.RightAmplitudePercent >= 0 && p.RightAmplitudePercent <= 1 &&
-			p.TransitionMs >= 100 && p.TransitionMs <= 1500
+			(p.TransitionMs == 0 || p.TransitionMs >= 100 && p.TransitionMs <= 1500)
 	}
 	return p.CenterDeg >= 45 && p.CenterDeg <= 135 &&
 		p.Frequency >= 0.3 && p.Frequency <= 5 && p.Amplitude >= 0 && p.Amplitude <= 50 &&
@@ -1422,7 +1428,7 @@ func defaultMotionProfile() motionCalibrationProfile {
 		RightCenterRatio:        0.5,
 		RightFrequency:          2.3,
 		RightAmplitudePercent:   0.4,
-		TransitionMs:            600,
+		TransitionMs:            0,
 	}
 }
 
@@ -1440,7 +1446,10 @@ func (s *server) motionProfileForDevice(deviceID string) motionCalibrationProfil
 
 func (s *server) motionTransitionMsForDevice(deviceID string) float64 {
 	profile := s.motionProfileForDevice(deviceID)
-	return clampMotionValue(profile.TransitionMs, 100, 1500, 600)
+	if profile.TransitionMs == 0 {
+		return 0
+	}
+	return clampMotionValue(profile.TransitionMs, 100, 1500, 0)
 }
 
 func (s *server) applyMotionGeometry(deviceID, mode string, frequency, amplitude, bias float64, hasBias bool, amplitudePercent *float64) (float64, float64, float64, bool) {
@@ -1877,6 +1886,7 @@ func (s *server) deviceSocket(w http.ResponseWriter, r *http.Request) {
 	d := hub.Device{
 		ID: id, Name: text(reg["name"]), IP: text(reg["ip"]),
 		FirmwareVersion: text(reg["firmwareVersion"]),
+		FirmwareBuildID: text(reg["firmwareBuildId"]),
 		ProtocolVersion: int(version), BootID: text(reg["bootId"]),
 		Capabilities: texts(reg["capabilities"]),
 	}

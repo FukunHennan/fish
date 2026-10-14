@@ -890,7 +890,7 @@ func TestRealtimeMatchCommandIsAllowedOutsideRunningCompetition(t *testing.T) {
 	if payload["deadmanMs"] != 350 {
 		t.Fatalf("实时运动命令没有携带设备端失联回中时限: %+v", payload)
 	}
-	if payload["transitionMs"] != float64(600) {
+	if payload["transitionMs"] != float64(0) {
 		t.Fatalf("实时运动命令没有携带舵机平滑过渡时间: %+v", payload)
 	}
 	if forwardMessage["ackRequired"] != false {

@@ -113,8 +113,18 @@ void test_repeated_keepalive_does_not_restart_motion_transition() {
     TEST_ASSERT_TRUE(transition.settled());
 }
 
+void test_zero_transition_applies_target_immediately() {
+    MotionTransition transition;
+    transition.reset(0.0f, 0.0f);
+    transition.setTarget(30.0f, -18.0f, 0);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 30.0f, transition.amplitude());
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, -18.0f, transition.bias());
+    TEST_ASSERT_TRUE(transition.settled());
+}
+
 void runTests() {
     UNITY_BEGIN();
+    RUN_TEST(test_zero_transition_applies_target_immediately);
     RUN_TEST(test_direction_preserves_tuning);
     RUN_TEST(test_custom_turn_bias_overrides_default_left_and_right_bias);
     RUN_TEST(test_stop_centers_tail_without_erasing_tuning);

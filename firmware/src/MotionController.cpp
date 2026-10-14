@@ -5,12 +5,13 @@ MotionController::MotionController(int pin, float frequency, float amplitude, fl
     : pin_(pin), state_(frequency, amplitude, turnAmount) {}
 
 void MotionController::begin() {
-    engageServo();
+    pinMode(pin_, OUTPUT);
+    digitalWrite(pin_, LOW);
     transition_.reset(0.0f, 0.0f);
     outputAngle_ = state_.angleAt(0.0f);
-    writeTarget(outputAngle_);
     lastUpdate_ = millis();
-    releaseServoAt_ = lastUpdate_ + kStopHoldMs;
+    engageServo();
+    writeTarget(outputAngle_);
 }
 void MotionController::setNeutralCenter(float center) { state_.setNeutralCenter(center); }
 void MotionController::setMode(MotionMode mode) {
@@ -33,7 +34,7 @@ void MotionController::setBias(float bias) {
     syncTransitionTarget();
 }
 void MotionController::setTransitionMs(uint32_t transitionMs) {
-    if (transitionMs < 100) transitionMs = 100;
+    if (transitionMs > 0 && transitionMs < 100) transitionMs = 100;
     if (transitionMs > 1500) transitionMs = 1500;
     transitionMs_ = transitionMs;
     syncTransitionTarget();
@@ -42,13 +43,13 @@ void MotionController::centerAtBias(float bias) {
     state_.setNeutralCenter(90.0f + bias);
     state_.setBias(0.0f);
     safeStop();
+    writeTarget(state_.angleAt(0.0f));
 }
 void MotionController::safeStop() {
     state_.safeStop();
     transition_.reset(0.0f, 0.0f);
     engageServo();
     writeTarget(state_.angleAt(0.0f));
-    releaseServoAt_ = millis() + kStopHoldMs;
 }
 MotionSnapshot MotionController::snapshot() const { return state_.snapshot(); }
 
@@ -80,12 +81,8 @@ void MotionController::update(uint32_t nowMs) {
     MotionSnapshot s = state_.snapshot();
     const bool stationary = s.mode == MotionMode::Stopped || s.mode == MotionMode::Idle;
     if (stationary && transition_.settled()) {
-        if (!servo_.attached()) return;
+        engageServo();
         writeTarget(state_.angleAt(0.0f));
-        if ((int32_t)(nowMs - releaseServoAt_) >= 0) {
-            servo_.detach();
-            lastWrittenAngle_ = -1;
-        }
         return;
     }
     engageServo();

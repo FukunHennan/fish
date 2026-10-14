@@ -69,6 +69,7 @@ test("结束请求绑定目标比赛并保留重试的旧 ID", async () => {
     api: (_path, request) => { bodies.push(request.body); return Promise.resolve(); },
     refreshReferee: () => null,
     setBadge() {},
+    document: { querySelectorAll: () => [] },
   });
   await action("finish");
   const retry = { matchId: "previous" };
@@ -78,7 +79,38 @@ test("结束请求绑定目标比赛并保留重试的旧 ID", async () => {
   assert.notEqual(bodies[1], retry);
 });
 
-test("历史记录保留逐条事件，并允许通过 TURN 定位与下载", () => {
+test("裁判请求阻止重复提交并在失败后恢复按钮", async () => {
+  const begin = adapter.indexOf("  function refereeAction(action, body, propagateError) {");
+  const end = adapter.indexOf("  window.fishCompetitionSetFieldLocked", begin);
+  let rejectRequest;
+  let count = 0;
+  const buttons = [{ disabled: false, setAttribute() {}, hasAttribute: () => true }];
+  const referee = { match: { state: "running" } };
+  const messages = [];
+  const action = runInNewContext(adapter.slice(begin, end) + "\nrefereeAction", {
+    referee,
+    document: { querySelectorAll: () => buttons },
+    api: () => { count += 1; return new Promise((_resolve, reject) => { rejectRequest = reject; }); },
+    refreshReferee() {},
+    setBadge: (message) => messages.push(message),
+  });
+  const first = action("score", { side: "blue", delta: 1 });
+  assert.equal(buttons[0].disabled, true);
+  await action("score", { side: "blue", delta: 1 });
+  assert.equal(count, 1);
+  rejectRequest(new Error("网络失败"));
+  await first;
+  assert.equal(referee.actionPending, false);
+  assert.equal(buttons[0].disabled, false);
+  assert.ok(messages.some((message) => message.includes("网络失败")));
+  referee.match.state = "ready";
+  const next = action("score", {});
+  rejectRequest(new Error("比赛未开始"));
+  await next;
+  assert.equal(buttons[0].disabled, true);
+});
+
+test("历史记录保留逐条事件，并使用录像 HTTP 接口播放与下载", () => {
   const begin = refereePage.indexOf("window.applyCompetitionRecords=function(records){");
   const end = refereePage.indexOf("search.oninput=", begin);
   assert.ok(begin >= 0 && end > begin);
@@ -115,7 +147,7 @@ test("历史记录保留逐条事件，并允许通过 TURN 定位与下载", ()
   assert.doesNotMatch(playerPage, /id="studentReplayVideo" controls/);
   assert.match(refereePage, /FishReplayTransport\.download/);
   assert.match(playerPage, /FishReplayTransport\.download/);
-  assert.match(replayTransport, /iceTransportPolicy: 'relay'/);
+  assert.doesNotMatch(replayTransport, /webrtc\/replay|RTCPeerConnection/);
 });
 
 test("旧比赛重复 ID 仍能区分记录，不显示无用的缺失提示", () => {

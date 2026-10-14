@@ -10,11 +10,11 @@ struct TestConfig {
     std::string password;
 };
 
-void test_empty_wifi_uses_factory_network() {
+void test_empty_wifi_requires_provisioning() {
     TestConfig config;
     applyFactoryWifiDefaults(config);
-    TEST_ASSERT_EQUAL_STRING(FACTORY_WIFI_SSID, config.ssid.c_str());
-    TEST_ASSERT_EQUAL_STRING(FACTORY_WIFI_PASSWORD, config.password.c_str());
+    TEST_ASSERT_EQUAL_STRING("", config.ssid.c_str());
+    TEST_ASSERT_EQUAL_STRING("", config.password.c_str());
 }
 
 void test_saved_wifi_overrides_factory_credentials() {
@@ -26,7 +26,7 @@ void test_saved_wifi_overrides_factory_credentials() {
 
 void runTests() {
     UNITY_BEGIN();
-    RUN_TEST(test_empty_wifi_uses_factory_network);
+    RUN_TEST(test_empty_wifi_requires_provisioning);
     RUN_TEST(test_saved_wifi_overrides_factory_credentials);
     UNITY_END();
 }

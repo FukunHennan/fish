@@ -42,6 +42,7 @@ void NetworkManager::begin(DeviceConfig& config){
     // ConfigStore applies the built-in network only when NVS is empty. This
     // keeps the saved-network flag available for the recovery policy below.
     policy_.begin(config.valid(),millis(),CONTROLLER_REGISTRATION_RECOVERY_MS,CONTROLLER_PROVISIONING_WINDOW_MS);
+    startProvisioning();
 }
 bool NetworkManager::connected() const{return WiFi.status()==WL_CONNECTED;}
 bool NetworkManager::provisioning() const{return portalStarted_;}
@@ -110,7 +111,10 @@ void NetworkManager::printWifiStatus(int status,const char* context){
 void NetworkManager::registerRoutes(){
     auto showPortal=[this](){
         String page=PAGE;
-        page.replace("服务器暂时不可用时，设备会继续保持 Wi-Fi 并自动重连，不会自动进入配网；如需重新配网，请长按 BOOT 约 3 秒清除配置。", "开机后首次 3 分钟找不到服务器会进入配网；本次开机只要成功连上过服务器，之后断线只会自动重连，不会再进配网。也可长按 BOOT 约 3 秒手动重新配网。");
+        page.replace("输入密码后保存", "输入密码后连接");
+        page.replace("成功后自动重启，保留 Wi-Fi 配置", "成功后自动重启，并重新进入 AP 配网");
+        page.replace("设备重启后自动寻找同一局域网中的控制电脑。服务器暂时不可用时，设备会继续保持 Wi-Fi 并自动重连，不会自动进入配网；如需重新配网，请长按 BOOT 约 3 秒清除配置。", "每次设备启动都会进入 AP 配网。保存后立即连接所选 Wi-Fi 并寻找控制电脑；本次运行中断线会自动重连。也可长按 BOOT 约 3 秒清除配置。");
+        page.replace("保存并重启", "保存并连接");
         page.replace("placeholder=\"设备名称\" value=\"机器鱼\"", "placeholder=\"留空则默认使用设备 MAC\"");
         page.replace("<form method=\"post\" action=\"/update\" enctype=\"multipart/form-data\"><input type=\"file\" name=\"firmware\" accept=\".bin\" required><button type=\"submit\">上传固件并重启</button></form>", "<p><a href=\"/ota\">打开 OTA 升级页面</a></p>");
         server_.sendHeader("Cache-Control","no-store");
@@ -138,11 +142,16 @@ void NetworkManager::registerRoutes(){
         if(!c.valid()){server_.send(400,"text/plain; charset=utf-8","配置无效，请检查所有字段");return;}
         Preferences cache;if(cache.begin("fish-endpoint",false)){cache.clear();cache.end();}
         if(!store_.save(c)){server_.send(500,"text/plain; charset=utf-8","保存失败");return;}
+        *config_=c;
+        hasSavedWifi_=true;
         policy_.provisioningFinished(millis());
-        portalStarted_=false;
+        server_.send(200,"text/plain; charset=utf-8","保存成功，设备正在连接 Wi-Fi");
+        delay(300);
         dnsServer_.stop();
         server_.stop();
-        server_.send(200,"text/plain; charset=utf-8","保存成功，设备正在重启");delay(300);ESP.restart();
+        WiFi.softAPdisconnect(true);
+        portalStarted_=false;
+        connect();
     });
     server_.on("/update",HTTP_POST,[this](){
         if(!uploadAuthorized_){server_.send(401,"text/plain; charset=utf-8","OTA 密码错误");return;}

@@ -42,14 +42,14 @@ os.environ["OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS"] = "0"
 # 960x540 when asked for 960x720, which is a 16:9 crop and breaks the fixed
 # 4:3 contract.  Its stable full-frame 4:3 YUY2 mode is 640x480; keep that as
 # the default and allow an explicit deployment override when another sensor
-# exposes a verified mode.  Frame rate remains uncapped and is measured from
-# real frame arrival intervals rather than the driver's claimed value.
+# exposes a verified mode. The optional FPS request is a driver hint; actual
+# frame rate is measured from frame arrival intervals.
 TARGET_WIDTH = int(os.environ.get("FISH_CAPTURE_WIDTH", "640"))
 TARGET_HEIGHT = int(os.environ.get("FISH_CAPTURE_HEIGHT", "480"))
 CAPTURE_FOURCC = os.environ.get("FISH_CAPTURE_FOURCC", "YUY2").strip().upper()
 if len(CAPTURE_FOURCC) != 4:
     CAPTURE_FOURCC = "YUY2"
-TARGET_FPS = 0
+TARGET_FPS = int(os.environ.get("FISH_CAPTURE_FPS", "0"))
 try:
     DEFAULT_CAMERA_INDEX = int(os.environ.get("FISH_CAMERA_INDEX", "0"))
 except ValueError:
@@ -122,6 +122,7 @@ WEBRTC_STUN_URL = os.environ.get(
 WEBRTC_TURN_URL = os.environ.get("FISH_WEBRTC_TURN_URL", "").strip()
 WEBRTC_TURN_USERNAME = os.environ.get("FISH_WEBRTC_TURN_USERNAME", "").strip()
 WEBRTC_TURN_CREDENTIAL = os.environ.get("FISH_WEBRTC_TURN_CREDENTIAL", "").strip()
+WEBRTC_ACCESS_MODE = os.environ.get("FISH_ACCESS_MODE", "public").strip().lower()
 WEBRTC_ICE_TRANSPORT_POLICY = os.environ.get(
     "FISH_WEBRTC_ICE_TRANSPORT_POLICY", "relay"
 ).strip().lower()
@@ -131,6 +132,9 @@ WEBRTC_BROWSER_ICE_TRANSPORT_POLICY = os.environ.get(
     "FISH_WEBRTC_BROWSER_ICE_TRANSPORT_POLICY", "relay"
 ).strip().lower()
 if WEBRTC_BROWSER_ICE_TRANSPORT_POLICY not in ("all", "relay"):
+    WEBRTC_BROWSER_ICE_TRANSPORT_POLICY = "all"
+if WEBRTC_ACCESS_MODE == "lan":
+    WEBRTC_ICE_TRANSPORT_POLICY = "all"
     WEBRTC_BROWSER_ICE_TRANSPORT_POLICY = "all"
 
 # The browser is a control client, not part of the tracking control loop.

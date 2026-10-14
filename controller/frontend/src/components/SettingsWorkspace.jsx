@@ -111,6 +111,7 @@ function DeviceCalibration({
   sending,
   deviceNeutralCenter,
   updateLocalNeutral,
+  previewDeviceNeutral,
   saveDeviceNeutral,
   openRename,
 }) {
@@ -137,11 +138,20 @@ function DeviceCalibration({
                 step="1"
                 value={deviceNeutralCenter(device)}
                 disabled={sending}
-                onChange={(event) => updateLocalNeutral(device, event.target.value)}
-                onPointerUp={(event) => saveDeviceNeutral(device, event.currentTarget.value)}
-                onKeyUp={(event) => saveDeviceNeutral(device, event.currentTarget.value)}
+                onChange={(event) => {
+                  updateLocalNeutral(device, event.target.value);
+                  previewDeviceNeutral(device, event.target.value);
+                }}
               />
             </label>
+            <button
+              type="button"
+              className="quiet"
+              disabled={sending}
+              onClick={() => saveDeviceNeutral(device, deviceNeutralCenter(device))}
+            >
+              保存中位
+            </button>
             {isAdmin && (
               <button type="button" className="quiet" onClick={() => openRename(device)}>
                 重命名
@@ -339,6 +349,7 @@ export default function SettingsWorkspace({
   toggleOtaDevice = () => {},
   deviceNeutralCenter = () => 90,
   updateLocalNeutral = () => {},
+  previewDeviceNeutral = () => {},
   saveDeviceNeutral = () => {},
   rgbColor = "#00ff66",
   setRgbColor = () => {},
@@ -386,6 +397,7 @@ export default function SettingsWorkspace({
         sending={sending}
         deviceNeutralCenter={deviceNeutralCenter}
         updateLocalNeutral={updateLocalNeutral}
+        previewDeviceNeutral={previewDeviceNeutral}
         saveDeviceNeutral={saveDeviceNeutral}
         openRename={openRename}
       />
