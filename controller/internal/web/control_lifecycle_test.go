@@ -165,6 +165,20 @@ func TestExpiredPlayerLeaseCanBeRecoveredBySameAccount(t *testing.T) {
 	}
 }
 
+func TestExpiredReservationIsPurgedAfterRecoveryWindow(t *testing.T) {
+	l := newLeaseStore(time.Minute)
+	l.leases["fish"] = controlLease{
+		DeviceID:      "fish",
+		OwnerID:       "owner",
+		MotionExpired: true,
+		ExpiresAt:     time.Now().Add(-2 * time.Minute),
+	}
+
+	if got := l.snapshot(); len(got) != 0 {
+		t.Fatalf("expired reservation was not purged: %+v", got)
+	}
+}
+
 func TestExpiredLeaseCannotResumeMotionWithoutReacquire(t *testing.T) {
 	l := newLeaseStore(time.Minute)
 	user := authUser{ID: "same-user", Role: "User", Status: "active"}

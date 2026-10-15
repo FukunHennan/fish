@@ -200,7 +200,7 @@ test("非 trickle 信令等待 ICE 候选完成才提交 Offer", async () => {
   const pending = waitForIce(peer).then(() => { completed = true; });
   await Promise.resolve();
   assert.equal(completed, false);
-  assert.equal(timers[0].delay, 10000);
+   assert.equal(timers[0].delay, 3000);
   peer.iceGatheringState = "complete";
   peer.changed();
   await pending;

@@ -1,7 +1,7 @@
 {
   "environment": {
     "FISH_AUTH_DISABLED": "false",
-    "FISH_AUTH_USERS": "../Pro1-runtime/users.json",
+    "FISH_AUTH_USERS": "Pro1-runtime/users.json",
     "FISH_DEVELOPMENT_MODE": "true",
     "FISH_HOT_RELOAD": "true",
     "FISH_TRUST_CF_ACCESS": "false",
@@ -26,6 +26,6 @@
   },
   "camera": {
     "rotationAngle": -90.0,
-    "exposure": -10.0
+    "exposure": -9.0
   }
 }

@@ -972,7 +972,7 @@ func (s *server) deviceSnapshot() []deviceView {
 		device.Online = deviceFreshlyOnline(device)
 		device.Name = s.deviceNames.Name(device.ID, device.Name)
 		view := deviceView{Device: device}
-		if lease, ok := leases[device.ID]; ok {
+		if lease, ok := leases[device.ID]; ok && !lease.MotionExpired && time.Now().Before(lease.ExpiresAt) {
 			view.Lease = &lease
 			view.ControlSource = lease.OwnerEmail
 		} else {
@@ -1458,7 +1458,7 @@ func (s *server) applyMotionGeometry(deviceID, mode string, frequency, amplitude
 		return frequency, amplitude, bias, hasBias
 	}
 	profile := s.motionProfileForDevice(deviceID)
-	straightCenter := motionStraightCenter(profile)
+	minimum, maximum, straightCenter := profileServoRange(profile)
 	center, maxSwing, ok := centerSwingForMode(profile, mode)
 	if !ok {
 		// Legacy profiles have no forward/idle geometry or calibrated limits.
@@ -1471,6 +1471,14 @@ func (s *server) applyMotionGeometry(deviceID, mode string, frequency, amplitude
 	} else if amplitudePercent != nil {
 		percent := clampMotionValue(*amplitudePercent, 0, 100, 40)
 		amplitude = maxSwing * percent / 100.0
+	} else if amplitude == 0 {
+		percent := profile.ForwardAmplitudePercent
+		if mode == "left" {
+			percent = profile.LeftAmplitudePercent
+		} else if mode == "right" {
+			percent = profile.RightAmplitudePercent
+		}
+		amplitude = maxSwing * clampMotionValue(percent, 0, 1, 0.4)
 	}
 	if !hasBias {
 		// The firmware stores the straight center as its neutral position.
@@ -1480,11 +1488,19 @@ func (s *server) applyMotionGeometry(deviceID, mode string, frequency, amplitude
 	if mode == "stop" {
 		bias = 0
 	}
-	// Explicit steering is authoritative. Do not shrink the requested centre
-	// shift or tail swing to fit the configured servo envelope; that protection
-	// made real turns collapse toward straight motion. Keep only the protocol's
-	// numeric bounds so malformed values cannot escape onto the device link.
-	bias = limitMotionValue(bias, -90, 90)
+	// An explicit swing must fit around the calibrated straight center. Clamp
+	// it before calculating the bias interval so the interval cannot invert
+	// when a caller requests more than the servo can physically provide.
+	amplitude = limitMotionValue(amplitude, 0, math.Min(90, (maximum-minimum)/2))
+	if (mode == "left" || mode == "right") && amplitude > maxSwing {
+		amplitude = maxSwing
+	}
+	// Keep the complete waveform inside the calibrated servo envelope. Clipping
+	// the centre before sending prevents the firmware from flattening one side
+	// of the sine wave at 0 or 180 degrees.
+	minimumBias := minimum + amplitude - straightCenter
+	maximumBias := maximum - amplitude - straightCenter
+	bias = math.Max(minimumBias, math.Min(maximumBias, bias))
 	amplitude = limitMotionValue(amplitude, 0, 90)
 	return frequency, amplitude, bias, true
 }

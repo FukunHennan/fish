@@ -34,3 +34,6 @@ output/vision/recordings/
 *.mkv
 *.mov
 *.webm
+
+# Runtime accounts, sessions, reservations, and local state
+/Pro1-runtime/

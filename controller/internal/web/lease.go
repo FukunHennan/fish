@@ -38,6 +38,15 @@ func newLeaseStore(ttl time.Duration) *leaseStore {
 func (l *leaseStore) cleanupLocked(now time.Time) []string {
 	var expired []string
 	for id, lease := range l.leases {
+		// A restored lease is intentionally kept briefly so the same account can
+		// recover after a restart, but it must not reserve a device forever.
+		if lease.MotionExpired {
+			if now.After(lease.ExpiresAt.Add(l.ttl)) {
+				delete(l.leases, id)
+				expired = append(expired, id)
+			}
+			continue
+		}
 		if now.After(lease.ExpiresAt) && !lease.MotionExpired {
 			l.stopLocked(id)
 			if lease.OwnerID == "vision-bot" {
@@ -204,6 +213,9 @@ func (l *leaseStore) releaseOwner(userID string) {
 func (l *leaseStore) snapshot() map[string]controlLease {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if len(l.cleanupLocked(time.Now())) > 0 {
+		_ = l.saveLocked()
+	}
 	out := make(map[string]controlLease, len(l.leases))
 	for id, lease := range l.leases {
 		out[id] = lease

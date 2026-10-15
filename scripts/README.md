@@ -1,6 +1,6 @@
 # 脚本目录
 
-`start.bat` 启动前选择 `1` 局域网或 `2` 公网。自动化可使用 `start.bat lan` 或 `start.bat public` 跳过菜单。局域网模式不启动 Cloudflare Tunnel，视频使用 WebRTC host 候选直连，不访问 STUN/TURN，可无互联网播放；需要网络互通和服务器 UDP 防火墙放行。公网模式按现有配置启动隧道，双端强制 TURN relay，不使用直连备用路径。鱼的控制与录像 HTTP 回放不改变。模式选择不写回隧道配置。切换到局域网启动会停止本项目原有隧道进程。
+`start.bat` 启动前选择 `1` 局域网或 `2` 公网。自动化可使用 `start.bat lan` 或 `start.bat public` 跳过菜单。局域网模式不启动 Cloudflare Tunnel，视频使用 WebRTC host 候选直连，不访问 STUN/TURN。公网模式通过 Cloudflare Tunnel 提供网页和信令，WebRTC 使用 `all`：优先局域网/公网直连，失败后由 TURN relay 兜底。页面诊断会显示实际候选对和 TURN 协议。录像播放和下载使用当前页面来源的 HTTPS/HTTP Range 接口；从局域网网址打开时走局域网，从公网网址打开时走 Cloudflare Tunnel，浏览器不会从 HTTPS 页面自动切换到 HTTP 内网地址。模式选择不写回隧道配置。切换到局域网启动会停止本项目原有隧道进程。
 
 根目录只保留日常入口：`setup.bat` / `setup.ps1` 安装依赖，手动运行 `start.bat` / `start.sh` 启动服务，`upload.bat` 先归档已结束的诊断日志，再提交并推送。启动脚本不创建开机或登录计划任务。录像与下载的依赖不进入 Git。
 

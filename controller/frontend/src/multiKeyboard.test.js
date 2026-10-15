@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createMultiKeyboard, DEFAULT_KEYS} from './multiKeyboard.js';
+import {createMultiKeyboard, DEFAULT_KEYS, mappedCommand} from './multiKeyboard.js';
 test('independent devices release and stop independently', async () => {
  const commands=[];
  const a={deviceId:'a'}, b={deviceId:'b'};
@@ -26,4 +26,14 @@ test('explicit single fish stop cannot resume from a held key',async()=>{
  assert.deepEqual(driver.active().map(d=>d.deviceId),['b']);
  await driver.stop();
  assert.deepEqual(calls.filter(c=>c[0]==='a'),[['a','forward'],['a','stop']]);
+});
+test('forward plus left sends forward with a left steering bias', async () => {
+ const commands=[];
+ const driver=createMultiKeyboard({targets:()=>[{device:{deviceId:'a'},keys:DEFAULT_KEYS}],send:async(d,m,s,override)=>commands.push([m,override])});
+ driver.key('KeyW',true); driver.key('KeyA',true); await driver.stop();
+ assert.deepEqual(commands, [['forward', undefined], ['forward', {bias:-20}], ['stop', undefined]]);
+});
+test('combined steering bias follows the device key profile', () => {
+ const pressed = new Map([['KeyW', 1], ['KeyA', 2]]);
+ assert.deepEqual(mappedCommand(pressed, {...DEFAULT_KEYS, combinedBias: 25}), {mode:'forward', bias:-25});
 });

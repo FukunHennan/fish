@@ -5701,8 +5701,8 @@ p {
     if (event.key === 'Escape') dismissFinishedNotice();
   });
   const DEFAULT_KEY_BINDINGS = {
-    b1: { forward: 'w', left: 'a', right: 'd', frequencyUp: 'q', frequencyDown: 'e' },
-    b2: { forward: 'ArrowUp', left: 'ArrowLeft', right: 'ArrowRight', frequencyUp: 't', frequencyDown: 'y' },
+    b1: { forward: 'w', left: 'a', right: 'd', frequencyUp: 'q', frequencyDown: 'e', combinedBiasUp: 'r', combinedBiasDown: 'f' },
+    b2: { forward: 'ArrowUp', left: 'ArrowLeft', right: 'ArrowRight', frequencyUp: 't', frequencyDown: 'y', combinedBiasUp: 'u', combinedBiasDown: 'j' },
   };
   const PLAYER_LABELS = { b1: '账号 A · B1', b2: '账号 B · B2' };
   let keyBindings = loadKeyBindings();
@@ -5762,13 +5762,15 @@ p {
   }
 
   function loadPlayerMotionSettings() {
-    const defaults = { b1: { frequency: 2.5 }, b2: { frequency: 2.5 } };
+    const defaults = { b1: { frequency: 2.5, combinedBias: 20 }, b2: { frequency: 2.5, combinedBias: 20 } };
     try {
       const saved = JSON.parse(localStorage.getItem('fish-player-motion-settings') || '{}');
       ['b1','b2'].forEach((player) => {
         const value = saved[player] || {};
         const frequency = Number(value.frequency);
         if (Number.isFinite(frequency)) defaults[player].frequency = Math.max(.3, Math.min(5, frequency));
+        const combinedBias = Number(value.combinedBias);
+        if (Number.isFinite(combinedBias)) defaults[player].combinedBias = Math.max(0, Math.min(45, combinedBias));
       });
     } catch (_) {}
     return defaults;
@@ -5787,18 +5789,21 @@ p {
       const profiles = await response.json();
       const profile = profiles[deviceId.toUpperCase()];
       if (!profile || !profile.playerControl || deviceAvailability[player].deviceId !== deviceId) return;
+      const savedBias = Number(playerMotionSettings[player].combinedBias);
+      const profileBias = Number(profile.playerControl.combinedBias);
       playerMotionSettings[player] = {
         frequency: profile.playerControl.frequency,
+        combinedBias: Number.isFinite(profileBias) ? profileBias : savedBias,
       };
       savePlayerMotionSettings();
       dispatchMotionTuning(player);
       if (pageFromHash() !== 'control') render();
-      else ['frequency'].forEach((setting) => {
+      else ['frequency', 'combinedBias'].forEach((setting) => {
         const input = root.querySelector('[data-motion-player="' + player + '"][data-motion-setting="' + setting + '"]');
         if (!input) return;
         input.value = playerMotionSettings[player][setting];
         const output = input.parentElement && input.parentElement.querySelector('[data-motion-output="' + setting + '"]');
-        if (output) output.textContent = Number(input.value).toFixed(1) + ' Hz';
+        if (output) output.textContent = setting === 'frequency' ? Number(input.value).toFixed(1) + ' Hz' : Number(input.value).toFixed(0) + '°';
       });
     } catch (error) {
       loadedMotionDevice[player] = '';
@@ -5826,15 +5831,20 @@ p {
   function adjustPlayerMotion(player, action) {
     const settings = playerMotionSettings[player];
     if (!settings) return;
-    if (action !== 'frequencyUp' && action !== 'frequencyDown') return;
-    const setting = 'frequency';
-    const next = Math.max(0.3, Math.min(5, Math.round((settings[setting] + (action === 'frequencyUp' ? 0.1 : -0.1)) * 10) / 10));
+    if (!['frequencyUp', 'frequencyDown', 'combinedBiasUp', 'combinedBiasDown'].includes(action)) return;
+    const frequencyAction = action === 'frequencyUp' || action === 'frequencyDown';
+    const setting = frequencyAction ? 'frequency' : 'combinedBias';
+    const step = frequencyAction ? 0.1 : 1;
+    const direction = /Up$/.test(action) ? 1 : -1;
+    const next = frequencyAction
+      ? Math.max(0.3, Math.min(5, Math.round((settings[setting] + direction * step) * 10) / 10))
+      : Math.max(0, Math.min(45, settings[setting] + direction * step));
     if (next === settings[setting]) return;
     settings[setting] = next;
     root.querySelectorAll('[data-motion-player="' + player + '"][data-motion-setting="' + setting + '"]').forEach((input) => {
       input.value = next;
       const output = input.parentElement && input.parentElement.querySelector('[data-motion-output="' + setting + '"]');
-      if (output) output.textContent = next.toFixed(1) + ' Hz';
+      if (output) output.textContent = frequencyAction ? next.toFixed(1) + ' Hz' : next.toFixed(0) + '°';
     });
     savePlayerMotionSettings();
     dispatchMotionTuning(player);
@@ -5877,6 +5887,8 @@ p {
       ['right', '↷', '右转', '向右调整航向'],
       ['frequencyUp', '+', '频率增加', '每次增加 0.1 Hz'],
       ['frequencyDown', '−', '频率减小', '每次减少 0.1 Hz'],
+      ['combinedBiasUp', '↗', '组合偏移增加', '每次增加 1°'],
+      ['combinedBiasDown', '↘', '组合偏移减小', '每次减少 1°'],
     ].map(([action, icon, title, desc]) => '<div class="bindingRow"><span class="bindingIcon">' + icon + '</span><span class="bindingText"><b>' + title + '</b><small>' + desc + '</small></span><button type="button" class="bindingKey" data-bind-player="' + player + '" data-bind-action="' + action + '">' + keyLabel(keyBindings[player][action]) + '</button></div>').join('');
   }
 
@@ -6083,6 +6095,7 @@ p {
     const settings = playerMotionSettings[player];
     return '<section class="playerMotionTuning" aria-label="运动参数">' +
       '<label><span>频率</span><input type="range" min="0.3" max="5" step="0.1" value="' + settings.frequency + '" data-motion-player="' + player + '" data-motion-setting="frequency"><output data-motion-output="frequency">' + Number(settings.frequency).toFixed(1) + ' Hz</output></label>' +
+      '<label><span>组合转向中心偏移</span><input type="range" min="0" max="45" step="1" value="' + settings.combinedBias + '" data-motion-player="' + player + '" data-motion-setting="combinedBias"><output data-motion-output="combinedBias">' + Number(settings.combinedBias).toFixed(0) + '°</output></label>' +
       '</section>';
   }
 
@@ -7058,11 +7071,11 @@ p {
       input.addEventListener('input', () => {
         const player = input.getAttribute('data-motion-player');
         const setting = input.getAttribute('data-motion-setting');
-        if (!playerMotionSettings[player] || setting !== 'frequency') return;
+        if (!playerMotionSettings[player] || (setting !== 'frequency' && setting !== 'combinedBias')) return;
         const value = Number(input.value);
         playerMotionSettings[player][setting] = value;
         const output = input.parentElement && input.parentElement.querySelector('[data-motion-output="' + setting + '"]');
-        if (output) output.textContent = value.toFixed(1) + ' Hz';
+        if (output) output.textContent = setting === 'frequency' ? value.toFixed(1) + ' Hz' : value.toFixed(0) + '°';
         savePlayerMotionSettings();
         dispatchMotionTuning(player);
       });

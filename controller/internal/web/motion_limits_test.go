@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-func TestMotionGeometryDoesNotClipExplicitSteeringToServoEnvelope(t *testing.T) {
+func TestMotionGeometryClipsExplicitSteeringToServoEnvelope(t *testing.T) {
 	profile := defaultMotionProfile()
 	profile.DeviceID = "fish"
 	profile.ServoMin, profile.ServoMax, profile.StraightCenter = 80, 160, 100
@@ -26,8 +26,8 @@ func TestMotionGeometryDoesNotClipExplicitSteeringToServoEnvelope(t *testing.T) 
 	}
 	s := &server{calibrationPath: path}
 	_, amplitude, bias, _ := s.applyMotionGeometry("fish", "forward", 2.5, 90, 90, true, nil)
-	if amplitude != 90 || bias != 90 {
-		t.Fatalf("explicit steering was clipped to servo envelope: amplitude=%v bias=%v", amplitude, bias)
+	if amplitude != 40 || bias != 20 {
+		t.Fatalf("explicit steering was not clipped to servo envelope: amplitude=%v bias=%v", amplitude, bias)
 	}
 }
 
@@ -36,9 +36,9 @@ func TestMotionEndpointsPreserveExplicitSteeringAndCalibrationPreset(t *testing.
 		name, path, body string
 		amplitude, bias  float64
 	}{
-		{"manual", "/api/command", `{"deviceId":"fish","mode":"forward","frequency":2.5,"amplitude":45,"bias":55}`, 45, 55},
-		{"keyboard", "/api/command/realtime", `{"deviceId":"fish","mode":"forward","frequency":2.5,"amplitudePercent":100,"bias":55,"sequence":1}`, 10, 55},
-		{"vision", "/api/vision/device-command", `{"operation":"motion","deviceId":"fish","sessionId":"s","mode":"forward","frequency":2.5,"amplitude":45,"bias":90}`, 45, 90},
+		{"manual", "/api/command", `{"deviceId":"fish","mode":"forward","frequency":2.5,"amplitude":45,"bias":55}`, 40, 20},
+		{"keyboard", "/api/command/realtime", `{"deviceId":"fish","mode":"forward","frequency":2.5,"amplitudePercent":100,"bias":55,"sequence":1}`, 10, 50},
+		{"vision", "/api/vision/device-command", `{"operation":"motion","deviceId":"fish","sessionId":"s","mode":"forward","frequency":2.5,"amplitude":45,"bias":90}`, 40, 20},
 		{"calibration", "/api/vision/device-command", `{"operation":"calibrate-forward","deviceId":"fish","sessionId":"s"}`, 22, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

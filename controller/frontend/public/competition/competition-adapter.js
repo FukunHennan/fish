@@ -40,10 +40,11 @@
     }
   } catch (_) {}
   var MOTION_ACTIONS = { forward: 1, left: 1, right: 1, stop: 1, idle: 1 };
-  var MOTION_TUNING_ACTIONS = { frequencyUp: 1, frequencyDown: 1 };
+  var COMBINED_STEERING_BIAS = 20;
+  var MOTION_TUNING_ACTIONS = { frequencyUp: 1, frequencyDown: 1, combinedBiasUp: 1, combinedBiasDown: 1 };
   var motionTuning = {
-    b1: { frequency: 2.5 },
-    b2: { frequency: 2.5 },
+    b1: { frequency: 2.5, combinedBias: 20 },
+    b2: { frequency: 2.5, combinedBias: 20 },
   };
   try {
     var savedMotionTuning = JSON.parse(window.localStorage.getItem("fish-player-motion-settings") || "{}");
@@ -51,6 +52,8 @@
       var saved = savedMotionTuning[player] || {};
       var frequency = Number(saved.frequency);
       if (Number.isFinite(frequency)) motionTuning[player].frequency = Math.max(0.3, Math.min(5, frequency));
+      var combinedBias = Number(saved.combinedBias);
+      if (Number.isFinite(combinedBias)) motionTuning[player].combinedBias = Math.max(0, Math.min(45, combinedBias));
     });
   } catch (_) {}
   var activeMotion = {};
@@ -903,7 +906,7 @@
     }, 300);
   }
 
-  function sendMotion(player, action) {
+  function sendMotion(player, action, bias) {
     if (!MOTION_ACTIONS[action]) return false;
     var stop = action === "stop";
     var page = String(window.location.hash || "").replace(/^#/, "");
@@ -927,6 +930,7 @@
       deadmanMs: stop ? 0 : 2000,
     };
     if (stop) body.bias = 0;
+    else if (bias !== undefined) body.bias = bias;
     var transport = motionTransport[player] || (motionTransport[player] = { active: false, pending: null });
     transport.pending = { deviceId: deviceId, body: body };
     if (transport.active) return true;
@@ -1014,11 +1018,12 @@
     }
   }
 
-  function beginMotion(player, action, token) {
+  function beginMotion(player, action, token, bias) {
     var previous = activeMotion[player];
     cancelPendingStop(previous);
     var entry = activeMotion[player] = {
       action: action,
+      bias: bias,
       token: token,
       repeatTimer: null,
     };
@@ -1026,13 +1031,13 @@
       return sendMotion(player, "stop");
     }
     setBadge(slotForPlayer(player) + " " + action + " 控制中", "ok");
-    if (!sendMotion(player, action)) {
+    if (!sendMotion(player, action, entry.bias)) {
       delete activeMotion[player];
       return false;
     }
     entry.repeatTimer = window.setInterval(function () {
       if (activeMotion[player] !== entry) return;
-      sendMotion(player, action);
+      sendMotion(player, action, entry.bias);
     }, 100);
     return true;
   }
@@ -1052,26 +1057,36 @@
       return heldInputs[player][token];
     });
     if (!inputs.length) return null;
-    inputs.sort(function (a, b) {
-      function priority(action) {
-        if (action === "stop") return 3;
-        if (action === "left" || action === "right") return 2;
-        return 1;
-      }
-      return priority(b.action) - priority(a.action) || b.order - a.order;
-    });
-    return inputs[0];
+    var stop = inputs.find(function (input) { return input.action === "stop"; });
+    if (stop) return stop;
+    var forward = inputs.find(function (input) { return input.action === "forward"; });
+    var turns = inputs.filter(function (input) { return input.action === "left" || input.action === "right"; });
+    turns.sort(function (a, b) { return b.order - a.order; });
+    if (forward && turns.length === 1) {
+      var turn = turns[0];
+      return {
+        player: player,
+        action: "forward",
+        bias: turn.action === "left"
+          ? -Math.max(0, Math.min(45, Number((motionTuning[player] || motionTuning.b1).combinedBias ?? COMBINED_STEERING_BIAS)))
+          : Math.max(0, Math.min(45, Number((motionTuning[player] || motionTuning.b1).combinedBias ?? COMBINED_STEERING_BIAS))),
+        token: "combo:" + forward.token + ":" + turn.token,
+        order: Math.max(forward.order, turn.order),
+      };
+    }
+    if (turns.length) return turns[0];
+    return forward || null;
   }
 
   function reconcileInputs(player) {
     var desired = desiredInput(player);
     var current = activeMotion[player];
-    if (desired && current && desired.token === current.token && desired.action === current.action) return;
+    if (desired && current && desired.token === current.token && desired.action === current.action && desired.bias === current.bias) return;
     if (!desired) {
       endMotion(player);
       return;
     }
-    beginMotion(player, desired.action, desired.token);
+    beginMotion(player, desired.action, desired.token, desired.bias);
   }
 
   function pressInput(player, action, token) {
@@ -1539,7 +1554,7 @@
     return new Promise(function (resolve, reject) {
       if (peer.iceGatheringState === "complete") return resolve();
       var settled = false;
-      var timer = setTimeout(function () { finish(new Error("ICE 候选收集超时")); }, 10000);
+       var timer = setTimeout(function () { finish(new Error("ICE 候选收集超时")); }, 3000);
       function changed() {
         if (peer.iceGatheringState === "complete") finish();
       }
@@ -1580,6 +1595,7 @@
     if (!targets.length) return;
     var d = video.diagnostics || {};
     var values = [];
+    values.push(video.icePolicy === "all" ? "路径 LAN优先/TURN兜底" : "路径 TURN relay");
     if (d.candidateType && d.candidateType !== "—") values.push(d.candidateType);
     if (d.relayProtocol) values.push("TURN/" + d.relayProtocol);
     if (finiteNumber(d.receiveFps) !== null && finiteNumber(d.fps) !== null) {
@@ -1775,6 +1791,7 @@
         var peer = new window.RTCPeerConnection({
           iceServers: (config && Array.isArray(config.iceServers)) ? config.iceServers : [],
           iceTransportPolicy: config.iceTransportPolicy === "relay" ? "relay" : "all",
+           iceCandidatePoolSize: 1,
         });
         if (!current()) {
           try { peer.close(); } catch (_) {}
@@ -1949,6 +1966,16 @@
       element.addEventListener("resize", renderCropEditor);
       element.addEventListener("loadedmetadata", renderPlayerDetectionOverlay);
       element.addEventListener("resize", renderPlayerDetectionOverlay);
+      element.addEventListener("loadedmetadata", function () {
+        if (typeof renderRefereeMatchDetectionOverlay === "function") {
+          renderRefereeMatchDetectionOverlay();
+        }
+      });
+      element.addEventListener("resize", function () {
+        if (typeof renderRefereeMatchDetectionOverlay === "function") {
+          renderRefereeMatchDetectionOverlay();
+        }
+      });
       if (!stage.classList.contains("videoStage")) {
         // 选手端的水池是装饰层，视频作为底层铺满
         element.style.cssText = [
@@ -1972,6 +1999,19 @@
         ].join(";");
         stage.appendChild(detectionCanvas);
       }
+    if (isRefereePage() && stage.id === "refereeMatchStage") {
+      var refereeDetectionCanvas = stage.querySelector("canvas[data-referee-match-detection-overlay]");
+      if (!refereeDetectionCanvas) {
+        refereeDetectionCanvas = document.createElement("canvas");
+        refereeDetectionCanvas.setAttribute("data-referee-match-detection-overlay", "1");
+        refereeDetectionCanvas.setAttribute("aria-hidden", "true");
+        refereeDetectionCanvas.style.cssText = [
+          "position:absolute", "inset:0", "width:100%", "height:100%",
+          "z-index:3", "pointer-events:none",
+        ].join(";");
+        stage.appendChild(refereeDetectionCanvas);
+      }
+    }
       if (video.playerOverlayStage !== stage) {
         if (video.playerOverlayResizeObserver) video.playerOverlayResizeObserver.disconnect();
         video.playerOverlayStage = stage;
@@ -2003,6 +2043,9 @@
     element.hidden = video.fallback;
     renderCropEditor();
     renderPlayerDetectionOverlay();
+    if (typeof renderRefereeMatchDetectionOverlay === "function") {
+      renderRefereeMatchDetectionOverlay();
+    }
   }
 
   function cameraText(camera, index) {
@@ -2833,6 +2876,82 @@
     });
   }
 
+  function renderRefereeMatchDetectionOverlay() {
+    if (!isRefereePage()) return;
+    var stage = document.getElementById("refereeMatchStage");
+    if (!stage) return;
+    var element = stage.querySelector(video.fallback ? "img[data-fish-fallback-frame]" : "video[data-fish-video]");
+    var canvas = stage.querySelector("canvas[data-referee-match-detection-overlay]");
+    if (!element || !canvas) return;
+
+    var width = stage.clientWidth;
+    var height = stage.clientHeight;
+    if (!width || !height) return;
+    var pixelRatio = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+    var canvasWidth = Math.round(width * pixelRatio);
+    var canvasHeight = Math.round(height * pixelRatio);
+    if (canvas.width !== canvasWidth || canvas.height !== canvasHeight) {
+      canvas.width = canvasWidth;
+      canvas.height = canvasHeight;
+    }
+    var context = canvas.getContext("2d");
+    context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+    context.clearRect(0, 0, width, height);
+    if (!video.sessionId || element.hidden || !video.overlays.detections) return;
+
+    var metrics = video.metrics || {};
+    var frame = metrics.frame || {};
+    var sourceWidth = finiteNumber(element.videoWidth || element.naturalWidth) || finiteNumber(frame.width);
+    var sourceHeight = finiteNumber(element.videoHeight || element.naturalHeight) || finiteNumber(frame.height);
+    var coordinateWidth = finiteNumber(frame.width) || sourceWidth;
+    var coordinateHeight = finiteNumber(frame.height) || sourceHeight;
+    if (!sourceWidth || !sourceHeight || !coordinateWidth || !coordinateHeight) return;
+
+    var scale = Math.min(width / sourceWidth, height / sourceHeight);
+    var displayWidth = sourceWidth * scale;
+    var displayHeight = sourceHeight * scale;
+    var offsetX = (width - displayWidth) / 2;
+    var offsetY = (height - displayHeight) / 2;
+    var scaleX = displayWidth / coordinateWidth;
+    var scaleY = displayHeight / coordinateHeight;
+    var detections = metrics.yolo && Array.isArray(metrics.yolo.detections)
+      ? metrics.yolo.detections : [];
+
+    detections.forEach(function (detection) {
+      var box = detection && detection.bbox;
+      if (!Array.isArray(box) || box.length < 4) return;
+      var x1 = finiteNumber(box[0]);
+      var y1 = finiteNumber(box[1]);
+      var x2 = finiteNumber(box[2]);
+      var y2 = finiteNumber(box[3]);
+      if (x1 === null || y1 === null || x2 === null || y2 === null) return;
+      x1 = offsetX + Math.max(0, Math.min(coordinateWidth, x1)) * scaleX;
+      y1 = offsetY + Math.max(0, Math.min(coordinateHeight, y1)) * scaleY;
+      x2 = offsetX + Math.max(0, Math.min(coordinateWidth, x2)) * scaleX;
+      y2 = offsetY + Math.max(0, Math.min(coordinateHeight, y2)) * scaleY;
+      var colour = /^#[0-9a-f]{6}$/i.test(String(detection.colorHex || ""))
+        ? detection.colorHex : "#48edff";
+      var confidence = finiteNumber(detection.confidence);
+      var label = "#" + (detection.trackId == null ? "-" : detection.trackId) +
+        (confidence === null ? "" : "  " + Math.round(confidence * 100) + "%");
+      context.save();
+      context.strokeStyle = colour;
+      context.lineWidth = 2;
+      context.shadowColor = colour;
+      context.shadowBlur = 8;
+      context.strokeRect(x1, y1, Math.max(1, x2 - x1), Math.max(1, y2 - y1));
+      context.shadowBlur = 0;
+      context.font = "700 11px system-ui, 'Microsoft YaHei', sans-serif";
+      var labelWidth = context.measureText(label).width + 10;
+      var labelY = Math.max(offsetY + 2, y1 - 19);
+      context.fillStyle = "rgba(2, 18, 33, .88)";
+      context.fillRect(x1, labelY, labelWidth, 18);
+      context.fillStyle = colour;
+      context.fillText(label, x1 + 5, labelY + 13);
+      context.restore();
+    });
+  }
+
   function setCropDraft(region) {
     var normalized = normalizeCropRegion(region);
     if (!normalized) return;
@@ -3217,6 +3336,9 @@
     });
     renderCameraTelemetry();
     drawVisionOverlay();
+    if (typeof renderRefereeMatchDetectionOverlay === "function") {
+      renderRefereeMatchDetectionOverlay();
+    }
     renderTrackingControls();
   }
 
@@ -4919,11 +5041,14 @@
         if (MOTION_TUNING_ACTIONS[detail.action]) {
           var tuning = motionTuning[detail.player] || motionTuning.b1;
           var frequencyAction = detail.action.indexOf("frequency") === 0;
-          if (!frequencyAction) return;
-          var setting = "frequency";
-          var step = 0.1;
+          var biasAction = detail.action.indexOf("combinedBias") === 0;
+          if (!frequencyAction && !biasAction) return;
+          var setting = frequencyAction ? "frequency" : "combinedBias";
+          var step = frequencyAction ? 0.1 : 1;
           var direction = /Up$/.test(detail.action) ? 1 : -1;
-          tuning[setting] = Math.max(0.3, Math.min(5, tuning[setting] + direction * step));
+          tuning[setting] = frequencyAction
+            ? Math.max(0.3, Math.min(5, tuning[setting] + direction * step))
+            : Math.max(0, Math.min(45, tuning[setting] + direction * step));
           sendMotion(detail.player, activeMotion[detail.player] ? activeMotion[detail.player].action : "stop");
           return;
         }
@@ -4938,9 +5063,11 @@
       var detail = event && event.detail;
       if (!detail || PLAYERS.indexOf(detail.player) < 0) return;
       var frequency = Number(detail.frequency);
-      if (!Number.isFinite(frequency)) return;
+      var combinedBias = Number(detail.combinedBias);
+      if (!Number.isFinite(frequency) || !Number.isFinite(combinedBias)) return;
       motionTuning[detail.player] = {
         frequency: Math.max(0.3, Math.min(5, frequency)),
+        combinedBias: Math.max(0, Math.min(45, combinedBias)),
       };
     }, true);
 

@@ -100,7 +100,8 @@ export default function ManualInspector({
                   onKeysChange({ ...keyProfile, keys: { ...keyProfile.keys, [mode]: e.code } });
                 }} /></label>
               ))}
-              {[['frequencyUp', '频率增加'], ['frequencyDown', '频率减小']].map(([mode, label]) => (
+              <label className="range-row"><span>组合转向中心偏移</span><input aria-label="组合转向中心偏移" type="range" min="0" max="45" step="1" value={keyProfile.combinedBias ?? 20} onChange={e => onKeysChange({ ...keyProfile, combinedBias: Number(e.target.value) })} /><output>{keyProfile.combinedBias ?? 20}°</output></label>
+              {[['frequencyUp', '频率增加'], ['frequencyDown', '频率减小'], ['combinedBiasUp', '组合偏移增加'], ['combinedBiasDown', '组合偏移减小']].map(([mode, label]) => (
                 <label className="range-row" key={mode}><span>{label}</span><input aria-label={`${label}按键`} readOnly value={(keyProfile.keys[mode] || "").replace("Key", "")} onKeyDown={e => {
                   e.preventDefault(); e.stopPropagation();
                   if (!/^(Key[A-Z]|Digit[0-9]|Arrow(Up|Down|Left|Right))$/.test(e.code)) return;

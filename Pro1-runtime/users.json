@@ -1,0 +1,46 @@
+{
+  "1": {
+    "id": "19b532eccea1974cd09f9b28",
+    "name": "蓝队",
+    "email": "1",
+    "role": "User",
+    "status": "active",
+    "passwordSalt": "607be1e9431b4dca2bf435b95bc70a1e",
+    "passwordHash": "fb4e151c6f493550571a1bf919530fd7f772a520eb55b8b159d2dbc4ba7b11b9",
+    "createdAt": "2026-10-09T10:39:58.385Z",
+    "lastLoginAt": "2026-10-14T17:14:28.109882+08:00"
+  },
+  "2": {
+    "id": "4c501f78c958097ee02ad9b4",
+    "name": "红队",
+    "email": "2",
+    "role": "User",
+    "status": "active",
+    "passwordSalt": "773ff32efdbcc8071e9d1b4c3e8e700a",
+    "passwordHash": "62f4db6487b45d3b89db58a29050b268f9943f34d5dbf8dd9b8756539e7f08a2",
+    "createdAt": "2026-10-09T10:39:58.385Z",
+    "lastLoginAt": "2026-10-15T10:23:38.1468733+08:00"
+  },
+  "3": {
+    "id": "1e79af1f7050abd7bcc6df74",
+    "name": "裁判",
+    "email": "3",
+    "role": "Admin",
+    "status": "active",
+    "passwordSalt": "e5810a3c425936a62dc30f50f9104757",
+    "passwordHash": "4c03591574b085183844d54b383cc215290e20e67ee9c6185aadf3f9d3b3a494",
+    "createdAt": "2026-10-09T10:39:58.385Z",
+    "lastLoginAt": "2026-10-15T12:56:27.0168813+08:00"
+  },
+  "4": {
+    "id": "d4501ee686efb0cc108cc5b1",
+    "name": "管理员",
+    "email": "4",
+    "role": "Admin",
+    "status": "active",
+    "passwordSalt": "67417e6460e84be94b7647ee7f6d2c4e",
+    "passwordHash": "8fe6856c8ecc3d556fe89b9906f1cf0ad7275901ba266648ec6e5aa57ddc26ab",
+    "createdAt": "2026-10-11T16:04:57.642Z",
+    "lastLoginAt": "2026-10-15T10:27:25.8662323+08:00"
+  }
+}

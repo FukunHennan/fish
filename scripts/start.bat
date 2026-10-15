@@ -7,6 +7,7 @@ for %%I in ("%ROOT%") do set "ROOT=%%~fI"
 set "CONTROLLER=%ROOT%\controller"
 set "FRONTEND=%CONTROLLER%\frontend"
 set "VISION=%ROOT%\vision"
+set "FISH_START_VISION=%VISION%"
 set "RUNTIME=%CONTROLLER%\.runtime"
 set "EXE=%RUNTIME%\fish-controller.exe"
 set "BUILD_EXE=%RUNTIME%\fish-controller-next.exe"
@@ -19,7 +20,7 @@ set "CONTROLLER_ERR=%RUNTIME%\controller-live.err.log"
 set "TUNNEL_OUT=%RUNTIME%\cloudflared-live.out.log"
 set "TUNNEL_ERR=%RUNTIME%\cloudflared-live.err.log"
 set "BUILD_LOG=%RUNTIME%\build-last.log"
-set "AUTH_DATA=%ROOT%\..\Pro1-runtime"
+set "AUTH_DATA=%ROOT%\Pro1-runtime"
 set "FISH_START_ROOT=%ROOT%"
 set "FISH_START_CONTROLLER=%CONTROLLER%"
 set "FISH_START_EXE=%EXE%"
@@ -89,10 +90,9 @@ call npm run build >"%BUILD_LOG%" 2>&1
 set "BUILD_RESULT=!errorlevel!"
 popd
 if not "!BUILD_RESULT!"=="0" goto :frontend_failed
-if defined FISH_PYTHON (
-  "%FISH_PYTHON%" -c "import cv2, numpy, av, aiortc, flask" >>"%BUILD_LOG%" 2>&1
-  if errorlevel 1 goto :python_failed
-)
+if not defined FISH_PYTHON goto :python_failed
+"%FISH_PYTHON%" -c "import cv2, numpy, av, aiortc, flask, torch; from pathlib import Path; from ultralytics import YOLO; import sys; model=Path(r'%FISH_START_VISION%\\assets\\best.pt'); YOLO(str(model)) if model.is_file() else sys.exit(2); sys.exit(0 if torch.cuda.is_available() else 3)" >>"%BUILD_LOG%" 2>&1
+if errorlevel 1 goto :python_failed
 
 echo [2/5] Building controller...
 pushd "%CONTROLLER%"
@@ -188,7 +188,7 @@ goto :failure_pause
 echo [ERROR] Go or npm is not available in PATH.
 goto :failure_pause
 :python_failed
-echo [ERROR] Python video dependencies are unavailable. Existing services have not been stopped. See "%BUILD_LOG%".
+echo [ERROR] Python video dependencies, CUDA, or YOLO model are unavailable. Existing services have not been stopped. See "%BUILD_LOG%".
 goto :failure_pause
 :old_process_failed
 echo [ERROR] An old Pro1 process or port is still active.

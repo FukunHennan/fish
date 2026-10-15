@@ -1,6 +1,6 @@
 {
   "settings_version": "0.0.7",
-  "datasets_dir": "C:\\Users\\chen1\\Desktop\\fish\\vision\\datasets",
+  "datasets_dir": "datasets",
   "weights_dir": "weights",
   "runs_dir": "runs",
   "uuid": "ebd0a602bb1e542b471d0111457024361578353288898575d426bf4b6017e94f",

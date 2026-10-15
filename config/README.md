@@ -15,11 +15,11 @@ Windows 新电脑若只有 Node.js/npm，可从项目根目录运行 `scripts\se
 
 `tunnel.json` 当前为 `enabled: true`；Windows 启动需要 `controller/.runtime/cloudflared.exe`、有效的隧道 UUID 和该隧道的 JSON 凭据。`scripts/start.bat` 会生成运行时 YAML 并启动隧道。首次授权、创建隧道、DNS 路由、安全初始化、验证与排障步骤见[公网访问配置](../docs/程序/公网访问配置.md)。凭据由 `cloudflared tunnel create` 在本机用户目录生成，不要放入仓库。
 
-`program.json` 的 `environment` 键直接使用现有 `FISH_*` 环境变量名，便于核对代码。当前 `FISH_AUTH_DISABLED=false`，本地和公网都要求登录；`FISH_AUTH_USERS` 指向 Pro1 同级的 `Pro1-runtime/users.json`，相对路径以 Pro1 根目录为基准。账号 `1`、`2` 登录后分别进入蓝队和红队选手端，账号 `3` 进入裁判端。同账号的新登录会撤销旧会话。进程环境变量优先于 JSON，不能仅凭文件内容判断实际认证状态。`FISH_CAPTURE_WIDTH=640`、`FISH_CAPTURE_HEIGHT=480`、`FISH_CAPTURE_FOURCC=YUY2` 是当前 USB 2.0 相机已采用的默认采集模式。
+`program.json` 的 `environment` 键直接使用现有 `FISH_*` 环境变量名，便于核对代码。当前 `FISH_AUTH_DISABLED=false`，本地和公网都要求登录；`FISH_AUTH_USERS` 指向项目内 `Pro1-runtime/users.json`，相对路径以 Pro1 根目录为基准。账号 `1`、`2` 登录后分别进入蓝队和红队选手端，账号 `3` 进入裁判端。同账号的新登录会撤销旧会话。进程环境变量优先于 JSON，不能仅凭文件内容判断实际认证状态。`FISH_CAPTURE_WIDTH=640`、`FISH_CAPTURE_HEIGHT=480`、`FISH_CAPTURE_FOURCC=YUY2` 是当前 USB 2.0 相机已采用的默认采集模式。
 
 `camera.rotationAngle`（-180°～180°）和 `camera.exposure`（相机驱动的曝光值）也在同一文件中。裁判端应用旋转或成功调整曝光时会分别更新对应字段，并保留另一个字段；视觉服务每次打开或重连相机时从这里恢复两项设置。手工修改后重新打开相机预览生效；驱动不接受曝光值时仍以实际回读结果为准。
 
-实时视频采用双端 TURN：`FISH_WEBRTC_ICE_TRANSPORT_POLICY=relay` 与 `FISH_WEBRTC_BROWSER_ICE_TRANSPORT_POLICY=relay`。浏览器强制 relay；连接失败只重试 WebRTC，不使用 JPEG 轮询或 WebSocket 备用画面。修改后需重启服务。
+实时视频在公网模式采用 WebRTC `all`：局域网 host 候选优先，公网可达候选次之，Cloudflare TURN relay 作为兜底；局域网模式只使用 host 候选。页面诊断中的 `candidateType` 和 `TURN/<protocol>` 是实际选中的媒体路径，不要仅根据访问的网址判断路径。回放和下载是 HTTP/HTTPS MP4 Range 请求，不使用 TURN；局域网用户应从局域网网址打开页面以获得局域网回放速度，公网 HTTPS 页面继续通过 Cloudflare Tunnel。
 
 `firmware/include/AppConfig.h` 和 `vision/config.py` 仍保留编译默认值、类型及读取逻辑，不再作为日常修改入口。`firmware/platformio.ini`、`go.mod`、`package.json`、`requirements.txt` 等是构建依赖清单。视觉标定产生的 `vision/assets/*.local.json`、Go 用户数据、诊断日志、模型和录像是运行数据或资源，不计入三个手动部署配置文件。
 
